@@ -1,0 +1,36 @@
+{
+  "name": "actual-sync-hub",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,magenta \"npm run dev -w apps/server\" \"npm run dev -w apps/web\"",
+    "dev:live-sandbox": "tsx scripts/dev-live-sandbox.ts",
+    "build": "npm run build -w packages/shared && npm run build -w apps/web && npm run build -w apps/server",
+    "lint": "npm run build -w packages/shared && npm run lint -w apps/server && npm run lint -w apps/web",
+    "test": "ACTUAL_TEST_RUN_LIVE=0 PLAID_TEST_RUN_LIVE=0 FULL_SYNC_TEST_RUN_LIVE=0 vitest run",
+    "test:actual-live": "vitest run apps/server/src/services/actual-service.live.test.ts",
+    "test:full-live": "FULL_SYNC_TEST_RUN_LIVE=1 PLAID_SANDBOX_TOOLS_ENABLED=1 LIVE_SANDBOX_MODE=1 vitest run apps/server/src/integration/full-sync.live.test.ts",
+    "test:plaid-live": "vitest run apps/server/src/services/plaid-service.live.test.ts",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "postinstall": "prisma generate && npm run build -w packages/shared"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.8.0",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@vitejs/plugin-react": "^4.4.1",
+    "@vitest/coverage-v8": "^4.1.5",
+    "concurrently": "^9.2.1",
+    "jsdom": "^26.1.0",
+    "prisma": "^6.8.2",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.5"
+  }
+}

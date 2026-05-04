@@ -1,0 +1,157 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Provider {
+  PLAID
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  ERROR
+  DISCONNECTED
+}
+
+enum SyncFrequency {
+  MANUAL
+  HOURLY
+  DAILY
+  WEEKLY
+}
+
+enum SyncRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+enum AssetType {
+  BANK
+}
+
+enum AccountLinkStatus {
+  ACTIVE
+  MIGRATING
+  INACTIVE
+  ARCHIVED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Connection {
+  id                    String              @id @default(cuid())
+  provider              Provider
+  label                 String
+  status                ConnectionStatus    @default(ACTIVE)
+  institutionName       String?
+  institutionId         String?
+  accessTokenCiphertext String
+  itemId                String              @unique
+  metadataJson          String?
+  lastRefreshedAt       DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  accounts              ConnectionAccount[]
+  accountLinks          AccountLink[]
+  syncRuns              SyncRun[]
+}
+
+model ConnectionAccount {
+  id               String        @id @default(cuid())
+  connectionId     String
+  externalAccountId String
+  name             String
+  officialName     String?
+  mask             String?
+  type             String
+  subtype          String?
+  currentBalance   Float?
+  availableBalance Float?
+  rawJson          String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  connection       Connection    @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  accountLinks     AccountLink[]
+
+  @@unique([connectionId, externalAccountId])
+}
+
+model AccountLink {
+  id                String            @id @default(cuid())
+  status            AccountLinkStatus @default(ACTIVE)
+  actualAccountId   String
+  actualAccountName String
+  assetType         AssetType         @default(BANK)
+  provider          Provider?
+  connectionId      String?
+  connectionAccountId String?
+  syncFrequency     SyncFrequency     @default(MANUAL)
+  syncHour          Int?
+  syncDayOfWeek     Int?
+  isEnabled         Boolean           @default(false)
+  lastSyncedAt      DateTime?
+  migrationStartedAt DateTime?
+  migrationCompletedAt DateTime?
+  supersededAt      DateTime?
+  replacedByLinkId  String?
+  configJson        String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  connection        Connection?       @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  connectionAccount ConnectionAccount? @relation(fields: [connectionAccountId], references: [id], onDelete: SetNull)
+  syncRuns          SyncRun[]
+  importedTransactions ImportedTransaction[]
+
+  @@index([actualAccountId, status])
+  @@index([replacedByLinkId])
+}
+
+model SyncRun {
+  id            String        @id @default(cuid())
+  accountLinkId String?
+  connectionId  String?
+  status        SyncRunStatus
+  startedAt     DateTime      @default(now())
+  finishedAt    DateTime?
+  summary       String?
+  error         String?
+  accountLink   AccountLink?  @relation(fields: [accountLinkId], references: [id], onDelete: SetNull)
+  connection    Connection?   @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+}
+
+model ImportedTransaction {
+  id                    String      @id @default(cuid())
+  accountLinkId         String
+  importedId            String
+  providerImportedId    String
+  actualAccountId       String
+  actualTransactionId   String?
+  transactionDate       String
+  amount                Float
+  payeeName             String
+  importedPayee         String?
+  primarySourceCategory String?
+  sourceCategoryNamesJson String?
+  appliedCategoryId     String?
+  observedCategoryId    String?
+  lastSeenAt            DateTime    @default(now())
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  accountLink           AccountLink @relation(fields: [accountLinkId], references: [id], onDelete: Cascade)
+
+  @@unique([accountLinkId, providerImportedId])
+  @@index([accountLinkId, lastSeenAt])
+  @@index([actualAccountId, importedId])
+}

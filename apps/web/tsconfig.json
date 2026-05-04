@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "rootDir": ".",
+    "outDir": "dist/types",
+    "types": [
+      "vitest/globals",
+      "@testing-library/jest-dom"
+    ]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "vite.config.ts"
+  ]
+}
