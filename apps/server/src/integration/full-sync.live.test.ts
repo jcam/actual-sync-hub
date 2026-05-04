@@ -24,7 +24,9 @@ const plaidTestConfig = {
   secret: process.env.PLAID_TEST_SECRET || "",
   environment: (process.env.PLAID_TEST_ENV || "sandbox") as "sandbox" | "production",
   countryCodes: ["US"],
-  products: ["transactions"]
+  products: ["transactions"],
+  transactionsDaysRequested: 365,
+  personalFinanceCategoryVersion: "v2" as const
 };
 
 describe.skipIf(!liveEnabled)("full live sync integration", () => {

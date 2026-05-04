@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "./generated/prisma/client.js";
 import { prisma } from "./db.js";
 import { actualService, type ActualService } from "./services/actual-service.js";
 import { createAppService, type AppService } from "./services/app-service.js";

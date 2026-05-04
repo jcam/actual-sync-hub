@@ -1,4 +1,11 @@
-import { CountryCode, PlaidApi, PlaidEnvironments, Products, Configuration } from "plaid";
+import {
+  Configuration,
+  CountryCode,
+  PlaidApi,
+  PlaidEnvironments,
+  Products
+} from "plaid";
+import type { PersonalFinanceCategoryVersion } from "plaid";
 import { prisma } from "../db.js";
 import { env } from "../env.js";
 import { decryptString, encryptString } from "../lib/crypto.js";
@@ -11,6 +18,8 @@ export interface PlaidConfig {
   environment: "sandbox" | "production";
   countryCodes: string[];
   products: string[];
+  transactionsDaysRequested: number;
+  personalFinanceCategoryVersion: "v1" | "v2";
 }
 
 function getPlaidClient(config: PlaidConfig) {
@@ -117,6 +126,12 @@ async function createSandboxTransactions({
   }
 }
 
+function getPlaidTransactionsConfig(config: PlaidConfig) {
+  return {
+    days_requested: config.transactionsDaysRequested
+  };
+}
+
 export function createPlaidService({
   prisma: database = prisma,
   config = {
@@ -124,7 +139,9 @@ export function createPlaidService({
     secret: env.PLAID_SECRET,
     environment: env.PLAID_ENV,
     countryCodes: env.PLAID_COUNTRY_CODES.split(",").map(code => code.trim()).filter(Boolean),
-    products: env.PLAID_PRODUCTS.split(",").map(product => product.trim()).filter(Boolean)
+    products: env.PLAID_PRODUCTS.split(",").map(product => product.trim()).filter(Boolean),
+    transactionsDaysRequested: env.PLAID_TRANSACTIONS_DAYS_REQUESTED,
+    personalFinanceCategoryVersion: env.PLAID_PERSONAL_FINANCE_CATEGORY_VERSION
   } satisfies PlaidConfig
 }: {
   prisma?: DatabaseClient;
@@ -138,6 +155,7 @@ export function createPlaidService({
       country_codes: config.countryCodes as CountryCode[],
       language: "en",
       products: config.products as Products[],
+      transactions: getPlaidTransactionsConfig(config),
       user: {
         client_user_id: userId
       }
@@ -300,7 +318,12 @@ export function createPlaidService({
         try {
           const response = await client.transactionsSync({
           access_token: accessToken,
-          cursor
+          cursor,
+          options: {
+            days_requested: config.transactionsDaysRequested,
+            personal_finance_category_version:
+              config.personalFinanceCategoryVersion as PersonalFinanceCategoryVersion
+          }
         });
 
           const page = response.data;
@@ -370,6 +393,7 @@ export function createPlaidService({
         institution_id: "ins_109508",
         initial_products: [Products.Transactions],
         options: {
+          transactions: getPlaidTransactionsConfig(config),
           webhook: "https://example.com/webhooks/plaid",
           override_username: "user_transactions_dynamic",
           override_password: "test-password"

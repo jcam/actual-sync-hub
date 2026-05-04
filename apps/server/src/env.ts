@@ -24,6 +24,8 @@ const envSchema = z.object({
   PLAID_ENV: z.enum(["sandbox", "production"]).default("sandbox"),
   PLAID_COUNTRY_CODES: z.string().default("US"),
   PLAID_PRODUCTS: z.string().default("transactions"),
+  PLAID_TRANSACTIONS_DAYS_REQUESTED: z.coerce.number().int().min(1).max(730).default(365),
+  PLAID_PERSONAL_FINANCE_CATEGORY_VERSION: z.enum(["v1", "v2"]).default("v2"),
   PLAID_SANDBOX_TOOLS_ENABLED: z.enum(["0", "1"]).default("0"),
   LIVE_SANDBOX_MODE: z.enum(["0", "1"]).default("0"),
   DISABLE_SCHEDULER: z.enum(["0", "1"]).default("0")

@@ -25,3 +25,4 @@ packages/shared/node_modules/
 
 apps/server/temp/
 apps/server/public/
+apps/server/src/generated/prisma/

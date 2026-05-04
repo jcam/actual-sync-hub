@@ -41,8 +41,10 @@ The launcher prefers `PLAID_CLIENT_ID` and `PLAID_SECRET`, but will fall back to
 
 - Plaid connections are created through Plaid Link.
 - Linked accounts are stored as provider account options for Actual accounts.
+- Link token creation explicitly requests a configurable transaction-history window, defaulting to 365 days.
+- Transactions sync explicitly requests Plaid Personal Finance Categories v2 by default.
 - Sync imports posted transactions into Actual through `importTransactions`.
-- Pending transaction handling and deleted-transaction reconciliation are intentionally conservative in this MVP. Removed Plaid transactions are not deleted from Actual.
+- Pending transaction handling follows Plaid's `pending_transaction_id` model, and removed Plaid transactions are reconciled back out of Actual by `imported_id`.
 - In sandbox-enabled development mode, Plaid connections can also be created directly through `/sandbox/public_token/create`, and custom test transactions can be added through `/sandbox/transactions/create`.
 
 ## Getting started

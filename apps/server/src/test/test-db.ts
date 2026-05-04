@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../generated/prisma/client.js";
+import { createPrismaClient } from "../db.js";
 
 async function initializeSchema(prisma: PrismaClient) {
   const statements = [
@@ -115,13 +116,7 @@ async function initializeSchema(prisma: PrismaClient) {
 }
 
 export async function createSqliteDatabase(url: string) {
-  const prisma = new PrismaClient({
-    datasources: {
-      db: {
-        url
-      }
-    }
-  });
+  const prisma = createPrismaClient(url);
 
   await prisma.$connect();
   await initializeSchema(prisma);
