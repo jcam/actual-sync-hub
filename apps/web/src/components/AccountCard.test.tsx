@@ -68,8 +68,7 @@ const account: ActualAccountDto = {
   actualCategories: [
     { id: "cat-groceries", name: "Groceries" },
     { id: "cat-eating-out", name: "Eating Out" }
-  ],
-  recentTransactions: []
+  ]
 };
 
 describe("AccountCard", () => {

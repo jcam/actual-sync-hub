@@ -59,7 +59,6 @@ describe.sequential("app service", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listRecentTransactions: vi.fn(),
         listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn()
@@ -163,7 +162,6 @@ describe.sequential("app service", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listRecentTransactions: vi.fn(),
         listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn()
@@ -270,7 +268,6 @@ describe.sequential("app service", () => {
         listCategories: vi.fn().mockResolvedValue([
           { id: "cat-food", name: "Food" }
         ]),
-        listRecentTransactions: vi.fn(),
         listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions
@@ -380,7 +377,6 @@ describe.sequential("app service", () => {
         listCategories: vi.fn().mockResolvedValue([
           { id: "cat-food", name: "Food" }
         ]),
-        listRecentTransactions: vi.fn(),
         listTransactionsByImportedIds: vi.fn().mockResolvedValue([
           {
             id: "txn-existing",
@@ -521,7 +517,6 @@ describe.sequential("app service", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listRecentTransactions: vi.fn(),
         listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions
@@ -645,7 +640,6 @@ describe.sequential("app service", () => {
         listCategories: vi.fn().mockResolvedValue([
           { id: "cat-groceries", name: "Groceries" }
         ]),
-        listRecentTransactions: vi.fn(),
         listTransactionsByImportedIds: vi.fn().mockResolvedValue([
           {
             id: "txn-1",
@@ -770,7 +764,6 @@ describe.sequential("app service", () => {
         listCategories: vi.fn().mockResolvedValue([
           { id: "cat-groceries", name: "Groceries" }
         ]),
-        listRecentTransactions: vi.fn(),
         listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn().mockResolvedValue({
@@ -878,7 +871,6 @@ describe.sequential("app service", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listRecentTransactions: vi.fn(),
         listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions

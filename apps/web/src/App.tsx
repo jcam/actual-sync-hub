@@ -6,7 +6,7 @@ import { AccountsPage } from "./routes/AccountsPage";
 import { CategoryMappingsPage } from "./routes/CategoryMappingsPage";
 import { ConnectionsPage } from "./routes/ConnectionsPage";
 import { LoginPage } from "./routes/LoginPage";
-import { MigrationReviewPage } from "./routes/MigrationReviewPage";
+import { ReviewPage } from "./routes/ReviewPage";
 
 function Layout({
   session,
@@ -47,8 +47,8 @@ function Layout({
         <Routes>
           <Route path="/accounts" element={<AccountsPage />} />
           <Route path="/accounts/:actualAccountId/mappings" element={<CategoryMappingsPage />} />
-          <Route path="/accounts/:actualAccountId/migration" element={<MigrationReviewPage />} />
-          <Route path="/accounts/:actualAccountId/sync-review" element={<MigrationReviewPage />} />
+          <Route path="/accounts/:actualAccountId/migration" element={<ReviewPage />} />
+          <Route path="/accounts/:actualAccountId/sync-review" element={<ReviewPage />} />
           <Route path="/connections" element={<ConnectionsPage />} />
           <Route path="*" element={<Navigate to="/accounts" replace />} />
         </Routes>

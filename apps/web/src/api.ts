@@ -30,6 +30,19 @@ async function request<T>(input: RequestInfo, init?: RequestInit) {
   return response.json() as Promise<T>;
 }
 
+type ReviewKind = "migration" | "sync-review";
+
+function previewReview(kind: ReviewKind, actualAccountId: string) {
+  return request<MigrationPreviewDto>(`/api/account-links/${actualAccountId}/${kind}/preview`);
+}
+
+function commitReview(kind: ReviewKind, actualAccountId: string, payload: CommitMigrationPayload) {
+  return request<{ ok: boolean }>(`/api/account-links/${actualAccountId}/${kind}/commit`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 export const api = {
   getSession() {
     return request<SessionDto>("/api/auth/session");
@@ -48,8 +61,8 @@ export const api = {
       method: "POST"
     });
   },
-  listAccounts(includeTransactions = true) {
-    return request<ActualAccountDto[]>(`/api/actual/accounts?includeTransactions=${includeTransactions ? "true" : "false"}`);
+  listAccounts() {
+    return request<ActualAccountDto[]>("/api/actual/accounts");
   },
   listConnections() {
     return request<ConnectionDto[]>("/api/connections");
@@ -99,22 +112,16 @@ export const api = {
     });
   },
   previewMigration(actualAccountId: string) {
-    return request<MigrationPreviewDto>(`/api/account-links/${actualAccountId}/migration/preview`);
+    return previewReview("migration", actualAccountId);
   },
   commitMigration(actualAccountId: string, payload: CommitMigrationPayload) {
-    return request<{ ok: boolean }>(`/api/account-links/${actualAccountId}/migration/commit`, {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
+    return commitReview("migration", actualAccountId, payload);
   },
   previewSyncReview(actualAccountId: string) {
-    return request<MigrationPreviewDto>(`/api/account-links/${actualAccountId}/sync-review/preview`);
+    return previewReview("sync-review", actualAccountId);
   },
   commitSyncReview(actualAccountId: string, payload: CommitMigrationPayload) {
-    return request<{ ok: boolean }>(`/api/account-links/${actualAccountId}/sync-review/commit`, {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
+    return commitReview("sync-review", actualAccountId, payload);
   },
   listSyncRuns() {
     return request<SyncRunDto[]>("/api/sync-runs");

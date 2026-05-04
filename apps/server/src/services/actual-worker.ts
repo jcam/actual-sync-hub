@@ -59,12 +59,6 @@ type WorkerCommand =
     }
   | {
       id: string;
-      operation: "listRecentTransactions";
-      accountId: string;
-      days: number;
-    }
-  | {
-      id: string;
       operation: "listTransactionsByImportedIds";
       accountId: string;
       importedIds: string[];
@@ -110,10 +104,6 @@ function integerToAmount(value: number | null | undefined) {
   }
 
   return value / 100;
-}
-
-function toActualDate(date: Date) {
-  return date.toISOString().slice(0, 10);
 }
 
 function amountToInteger(value: number) {
@@ -340,30 +330,6 @@ async function main() {
                 name: category.name
               }))
               .sort((left, right) => left.name.localeCompare(right.name))
-          };
-        }
-
-        case "listRecentTransactions": {
-          await syncIfNeeded();
-          const end = new Date();
-          const start = new Date();
-          start.setDate(end.getDate() - command.days);
-          const transactions = await actual.getTransactions(command.accountId, toActualDate(start), toActualDate(end));
-
-          return {
-            id: command.id,
-            ok: true,
-            result: transactions.slice(0, 20).map(transaction => ({
-              id: transaction.id,
-              date: transaction.date,
-              amount: integerToAmount(transaction.amount),
-              imported_id: transaction.imported_id ?? null,
-              category: transaction.category ?? null,
-              payee_name: null,
-              imported_payee: transaction.imported_payee,
-              notes: transaction.notes,
-              cleared: transaction.cleared
-            }))
           };
         }
 

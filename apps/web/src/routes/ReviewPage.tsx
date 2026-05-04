@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import type { MigrationPreviewDto } from "@actual-sync/shared";
 import { api } from "../api";
 
@@ -10,14 +10,17 @@ function formatCurrency(amount: number) {
   });
 }
 
-export function MigrationReviewPage() {
+export function ReviewPage() {
   const { actualAccountId } = useParams<{ actualAccountId: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
   const [preview, setPreview] = useState<MigrationPreviewDto | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const reviewMode = location.pathname.endsWith("/migration") ? "migration" : "sync-review";
+  const pageLabel = reviewMode === "migration" ? "Migration review" : "Sync review";
 
   const load = async () => {
     if (!actualAccountId) {
@@ -28,20 +31,23 @@ export function MigrationReviewPage() {
 
     setError(null);
     try {
-      const nextPreview = await api.previewSyncReview(actualAccountId);
+      const nextPreview =
+        reviewMode === "migration"
+          ? await api.previewMigration(actualAccountId)
+          : await api.previewSyncReview(actualAccountId);
       setPreview(nextPreview);
       setSelectedIds(
         new Set(nextPreview.items.filter(item => item.action !== "ignore").map(item => item.importedId))
       );
     } catch (loadError) {
       setPreview(null);
-      setError(loadError instanceof Error ? loadError.message : "Failed to load sync review");
+      setError(loadError instanceof Error ? loadError.message : `Failed to load ${pageLabel.toLowerCase()}`);
     }
   };
 
   useEffect(() => {
     void load().finally(() => setLoading(false));
-  }, [actualAccountId]);
+  }, [actualAccountId, reviewMode]);
 
   const groupedCounts = useMemo(() => {
     if (!preview) {
@@ -62,14 +68,14 @@ export function MigrationReviewPage() {
   }, [preview]);
 
   if (loading) {
-    return <div className="panel">Loading sync review…</div>;
+    return <div className="panel">Loading {pageLabel.toLowerCase()}…</div>;
   }
 
   if (error) {
     return (
       <section className="panel">
-        <p className="eyebrow">Sync review</p>
-        <h2>Could not load sync preview</h2>
+        <p className="eyebrow">{pageLabel}</p>
+        <h2>Could not load preview</h2>
         <p className="error-text">{error}</p>
         <div className="button-row">
           <button className="ghost-button" onClick={() => void load()}>
@@ -86,7 +92,7 @@ export function MigrationReviewPage() {
   if (!preview) {
     return (
       <section className="panel">
-        <p className="eyebrow">Sync review</p>
+        <p className="eyebrow">{pageLabel}</p>
         <h2>Review not available</h2>
         <p className="muted">The selected account could not be loaded for review.</p>
         <div className="button-row">
@@ -101,7 +107,7 @@ export function MigrationReviewPage() {
   return (
     <div className="page-stack">
       <section className="hero-panel">
-        <p className="eyebrow">{preview.status === "MIGRATING" ? "Migration review" : "Sync review"}</p>
+        <p className="eyebrow">{pageLabel}</p>
         <h2>{preview.actualAccountName}</h2>
         <p className="muted">
           {preview.status === "MIGRATING"
@@ -131,9 +137,14 @@ export function MigrationReviewPage() {
 
               setSaving(true);
               try {
-                await api.commitSyncReview(actualAccountId, {
+                const payload = {
                   importedIds: [...selectedIds]
-                });
+                };
+                if (reviewMode === "migration") {
+                  await api.commitMigration(actualAccountId, payload);
+                } else {
+                  await api.commitSyncReview(actualAccountId, payload);
+                }
                 navigate("/accounts");
               } finally {
                 setSaving(false);

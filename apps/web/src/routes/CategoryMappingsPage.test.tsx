@@ -51,8 +51,7 @@ describe("CategoryMappingsPage", () => {
         actualCategories: [
           { id: "cat-groceries", name: "Groceries" },
           { id: "cat-eating-out", name: "Eating Out" }
-        ],
-        recentTransactions: []
+        ]
       }
     ]);
     updateAccountLink.mockResolvedValue({ ok: true });

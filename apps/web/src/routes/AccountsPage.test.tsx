@@ -47,8 +47,7 @@ describe("AccountsPage", () => {
           seenCategoryNames: []
         },
         options: [],
-        actualCategories: [],
-        recentTransactions: []
+        actualCategories: []
       }
     ]);
     listSyncRuns.mockResolvedValue([
@@ -79,7 +78,7 @@ describe("AccountsPage", () => {
     renderWithRouter(<AccountsPage />);
 
     await waitFor(() => {
-      expect(listAccounts).toHaveBeenCalledWith(false);
+      expect(listAccounts).toHaveBeenCalledOnce();
       expect(listSyncRuns).toHaveBeenCalledOnce();
       expect(getRuntimeInfo).toHaveBeenCalledOnce();
     });

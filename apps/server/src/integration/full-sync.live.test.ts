@@ -156,7 +156,7 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
 
     const actualAccountsResponse = await app.inject({
       method: "GET",
-      url: "/api/actual/accounts?includeTransactions=false",
+      url: "/api/actual/accounts",
       cookies
     });
     expect(actualAccountsResponse.statusCode).toBe(200);

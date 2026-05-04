@@ -93,16 +93,6 @@ export interface ConnectionAccountOptionDto {
   subtype?: string | null;
 }
 
-export interface ActualTransactionDto {
-  id: string;
-  date: string;
-  amount: number;
-  payeeName?: string | null;
-  importedPayee?: string | null;
-  notes?: string | null;
-  cleared?: boolean | null;
-}
-
 export interface MigrationPreviewExistingTransactionDto {
   id: string;
   date: string;
@@ -144,7 +134,6 @@ export interface ActualAccountDto {
   link: LinkConfigDto;
   options: ConnectionAccountOptionDto[];
   actualCategories: ActualCategoryDto[];
-  recentTransactions?: ActualTransactionDto[];
 }
 
 export interface SyncRunDto {

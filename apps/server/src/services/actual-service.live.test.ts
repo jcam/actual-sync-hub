@@ -171,7 +171,7 @@ describe.skipIf(!liveEnabled)("actual service live docker", () => {
       }
     ]);
 
-    const transactions = await service.listRecentTransactions(seed.accountId, 60);
+    const transactions = await service.listTransactionsByImportedIds(seed.accountId, ["live-test-1"]);
     expect(transactions.some(transaction => transaction.imported_payee === "LIVE TEST GROCERIES")).toBe(true);
   }, 120_000);
 

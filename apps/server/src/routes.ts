@@ -2,6 +2,18 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "./app-context.js";
 
+const actualAccountIdParamsSchema = z.object({
+  actualAccountId: z.string().min(1)
+});
+
+const reviewCommitBodySchema = z.object({
+  importedIds: z.array(z.string().min(1)).default([])
+});
+
+const connectionIdParamsSchema = z.object({
+  id: z.string().min(1)
+});
+
 function assertAuthenticated(request: FastifyRequest, reply: FastifyReply) {
   if (!request.session.user) {
     reply.status(401).send({
@@ -14,6 +26,32 @@ function assertAuthenticated(request: FastifyRequest, reply: FastifyReply) {
 }
 
 export async function registerRoutes(app: FastifyInstance, context: Pick<AppContext, "authService" | "appService" | "plaidService">) {
+  const registerReviewRoutes = (prefix: "migration" | "sync-review") => {
+    app.get(`/api/account-links/:actualAccountId/${prefix}/preview`, async (request, reply) => {
+      if (!assertAuthenticated(request, reply)) {
+        return;
+      }
+
+      const params = actualAccountIdParamsSchema.parse(request.params);
+
+      return context.appService.previewAccountSyncReview(params.actualAccountId);
+    });
+
+    app.post(`/api/account-links/:actualAccountId/${prefix}/commit`, async (request, reply) => {
+      if (!assertAuthenticated(request, reply)) {
+        return;
+      }
+
+      const params = actualAccountIdParamsSchema.parse(request.params);
+      const body = reviewCommitBodySchema.parse(request.body ?? {});
+
+      await context.appService.commitAccountSyncReview(params.actualAccountId, body);
+      return {
+        ok: true
+      };
+    });
+  };
+
   app.get("/api/health", async () => ({
     ok: true
   }));
@@ -128,11 +166,7 @@ export async function registerRoutes(app: FastifyInstance, context: Pick<AppCont
       return;
     }
 
-    const params = z
-      .object({
-        id: z.string().min(1)
-      })
-      .parse(request.params);
+    const params = connectionIdParamsSchema.parse(request.params);
 
     await context.plaidService.refreshConnection(params.id);
     return {
@@ -145,11 +179,7 @@ export async function registerRoutes(app: FastifyInstance, context: Pick<AppCont
       return;
     }
 
-    const params = z
-      .object({
-        id: z.string().min(1)
-      })
-      .parse(request.params);
+    const params = connectionIdParamsSchema.parse(request.params);
 
     const body = z
       .object({
@@ -165,13 +195,7 @@ export async function registerRoutes(app: FastifyInstance, context: Pick<AppCont
       return;
     }
 
-    const query = z
-      .object({
-        includeTransactions: z.enum(["true", "false"]).optional()
-      })
-      .parse(request.query);
-
-    return context.appService.listActualAccounts(query.includeTransactions === "true");
+    return context.appService.listActualAccounts();
   });
 
   app.put("/api/account-links/:actualAccountId", async (request, reply) => {
@@ -179,11 +203,7 @@ export async function registerRoutes(app: FastifyInstance, context: Pick<AppCont
       return;
     }
 
-    const params = z
-      .object({
-        actualAccountId: z.string().min(1)
-      })
-      .parse(request.params);
+    const params = actualAccountIdParamsSchema.parse(request.params);
 
     const body = z
       .object({
@@ -216,11 +236,7 @@ export async function registerRoutes(app: FastifyInstance, context: Pick<AppCont
       return;
     }
 
-    const params = z
-      .object({
-        actualAccountId: z.string().min(1)
-      })
-      .parse(request.params);
+    const params = actualAccountIdParamsSchema.parse(request.params);
 
     await context.appService.runAccountSync(params.actualAccountId);
     return {
@@ -228,77 +244,8 @@ export async function registerRoutes(app: FastifyInstance, context: Pick<AppCont
     };
   });
 
-  app.get("/api/account-links/:actualAccountId/migration/preview", async (request, reply) => {
-    if (!assertAuthenticated(request, reply)) {
-      return;
-    }
-
-    const params = z
-      .object({
-        actualAccountId: z.string().min(1)
-      })
-      .parse(request.params);
-
-    return context.appService.previewAccountSyncReview(params.actualAccountId);
-  });
-
-  app.post("/api/account-links/:actualAccountId/migration/commit", async (request, reply) => {
-    if (!assertAuthenticated(request, reply)) {
-      return;
-    }
-
-    const params = z
-      .object({
-        actualAccountId: z.string().min(1)
-      })
-      .parse(request.params);
-    const body = z
-      .object({
-        importedIds: z.array(z.string().min(1)).default([])
-      })
-      .parse(request.body ?? {});
-
-    await context.appService.commitAccountSyncReview(params.actualAccountId, body);
-    return {
-      ok: true
-    };
-  });
-
-  app.get("/api/account-links/:actualAccountId/sync-review/preview", async (request, reply) => {
-    if (!assertAuthenticated(request, reply)) {
-      return;
-    }
-
-    const params = z
-      .object({
-        actualAccountId: z.string().min(1)
-      })
-      .parse(request.params);
-
-    return context.appService.previewAccountSyncReview(params.actualAccountId);
-  });
-
-  app.post("/api/account-links/:actualAccountId/sync-review/commit", async (request, reply) => {
-    if (!assertAuthenticated(request, reply)) {
-      return;
-    }
-
-    const params = z
-      .object({
-        actualAccountId: z.string().min(1)
-      })
-      .parse(request.params);
-    const body = z
-      .object({
-        importedIds: z.array(z.string().min(1)).default([])
-      })
-      .parse(request.body ?? {});
-
-    await context.appService.commitAccountSyncReview(params.actualAccountId, body);
-    return {
-      ok: true
-    };
-  });
+  registerReviewRoutes("migration");
+  registerReviewRoutes("sync-review");
 
   app.get("/api/sync-runs", async (request, reply) => {
     if (!assertAuthenticated(request, reply)) {

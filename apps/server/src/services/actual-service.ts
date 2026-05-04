@@ -96,11 +96,6 @@ type WorkerCommandPayload =
       operation: "listCategories";
     }
   | {
-      operation: "listRecentTransactions";
-      accountId: string;
-      days: number;
-    }
-  | {
       operation: "listTransactionsByImportedIds";
       accountId: string;
       importedIds: string[];
@@ -189,7 +184,6 @@ export interface ActualService {
   shutdown?(): Promise<void>;
   listAccounts(): Promise<ActualAccountRecord[]>;
   listCategories(): Promise<ActualCategoryRecord[]>;
-  listRecentTransactions(accountId: string, days?: number): Promise<ActualTransactionRecord[]>;
   listTransactionsByImportedIds(accountId: string, importedIds: string[]): Promise<ActualTransactionRecord[]>;
   importTransactions(accountId: string, transactions: ImportTransactionInput[]): Promise<{
     added: string[];
@@ -227,12 +221,10 @@ export function createActualService({
   let workerChild: ChildProcess | null = null;
   let accountsCache: { expiresAt: number; value: ActualAccountRecord[] } | null = null;
   let categoriesCache: { expiresAt: number; value: ActualCategoryRecord[] } | null = null;
-  const transactionsCache = new Map<string, { expiresAt: number; value: ActualTransactionRecord[] }>();
 
   function clearReadCaches() {
     accountsCache = null;
     categoriesCache = null;
-    transactionsCache.clear();
   }
 
   async function resolveWorkerCommand(): Promise<{ command: string; args: string[] }> {
@@ -443,25 +435,6 @@ export function createActualService({
         value: result,
         expiresAt: Date.now() + READ_CACHE_TTL_MS
       };
-      return result;
-    },
-
-    async listRecentTransactions(accountId: string, days = 30): Promise<ActualTransactionRecord[]> {
-      const cacheKey = `${accountId}:${days}`;
-      const cached = transactionsCache.get(cacheKey);
-      if (cached && cached.expiresAt > Date.now()) {
-        return cached.value;
-      }
-
-      const result = await runWorker<ActualTransactionRecord[]>({
-        operation: "listRecentTransactions",
-        accountId,
-        days
-      });
-      transactionsCache.set(cacheKey, {
-        value: result,
-        expiresAt: Date.now() + READ_CACHE_TTL_MS
-      });
       return result;
     },
 

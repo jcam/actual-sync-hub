@@ -14,7 +14,7 @@ export function CategoryMappingsPage() {
     let cancelled = false;
 
     void api
-      .listAccounts(false)
+      .listAccounts()
       .then(accounts => {
         if (cancelled) {
           return;

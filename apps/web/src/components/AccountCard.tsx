@@ -12,22 +12,34 @@ export function AccountCard({
   account: ActualAccountDto;
   onRefresh: () => Promise<void>;
 }) {
-  const [form, setForm] = useState<UpdateAccountLinkPayload>({
-    actualAccountName: account.name,
-    assetType: "BANK",
+  const [form, setForm] = useState<Pick<
+    UpdateAccountLinkPayload,
+    "provider" | "connectionId" | "connectionAccountId" | "syncFrequency" | "syncHour" | "syncDayOfWeek" | "isEnabled"
+  >>({
     provider: account.link.provider ?? null,
     connectionId: account.link.connectionId ?? null,
     connectionAccountId: account.link.connectionAccountId ?? null,
     syncFrequency: account.link.syncFrequency,
     syncHour: account.link.syncHour ?? 6,
     syncDayOfWeek: account.link.syncDayOfWeek ?? 1,
-    isEnabled: account.link.isEnabled,
-    categoryMappings: account.link.categoryMappings
+    isEnabled: account.link.isEnabled
   });
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
   const filteredOptions = account.options.filter(option => option.connectionId === form.connectionId);
+  const buildPayload = (): UpdateAccountLinkPayload => ({
+    actualAccountName: account.link.actualAccountName,
+    assetType: account.link.assetType,
+    provider: form.provider ?? null,
+    connectionId: form.connectionId ?? null,
+    connectionAccountId: form.connectionAccountId ?? null,
+    syncFrequency: form.syncFrequency,
+    syncHour: form.syncHour ?? null,
+    syncDayOfWeek: form.syncDayOfWeek ?? null,
+    isEnabled: form.isEnabled,
+    categoryMappings: account.link.categoryMappings
+  });
 
   return (
     <article className="account-card">
@@ -189,7 +201,7 @@ export function AccountCard({
           onClick={async () => {
             setSaving(true);
             try {
-              await api.updateAccountLink(account.id, form);
+              await api.updateAccountLink(account.id, buildPayload());
               await onRefresh();
             } finally {
               setSaving(false);

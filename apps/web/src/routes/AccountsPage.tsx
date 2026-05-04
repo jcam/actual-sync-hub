@@ -11,7 +11,7 @@ export function AccountsPage() {
 
   const load = async () => {
     const [nextAccounts, nextRuns, nextRuntime] = await Promise.all([
-      api.listAccounts(false),
+      api.listAccounts(),
       api.listSyncRuns(),
       api.getRuntimeInfo()
     ]);
@@ -34,7 +34,7 @@ export function AccountsPage() {
         <p className="eyebrow">Main view</p>
         <h2>Actual accounts stay central.</h2>
         <p className="muted">
-          Each card reflects a live Actual account, its latest transactions, and the provider mapping that controls imports. This is the seam where non-bank providers can plug in later without changing the overall UX.
+          Each card reflects a live Actual account and the provider mapping that controls imports. This is the seam where non-bank providers can plug in later without changing the overall UX.
         </p>
         {runtime ? (
           <p className="muted">

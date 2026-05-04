@@ -7,7 +7,13 @@ export default defineConfig({
     globals: true,
     coverage: {
       provider: "v8",
-      reporter: ["text", "html"]
+      reporter: ["text", "html"],
+      exclude: [
+        "apps/server/src/generated/prisma/**",
+        "apps/**/dist/**",
+        "coverage/**",
+        "scripts/**"
+      ]
     },
     projects: [
       {

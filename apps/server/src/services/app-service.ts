@@ -1,8 +1,6 @@
 import type {
-  AccountLinkStatus,
   ActualAccountDto,
   ActualCategoryDto,
-  ActualTransactionDto,
   CommitMigrationPayload,
   CategoryMappingDto,
   ConnectionAccountOptionDto,
@@ -15,246 +13,33 @@ import type {
 } from "@actual-sync/shared";
 import { prisma } from "../db.js";
 import { env } from "../env.js";
-import { actualService, type ImportTransactionInput, type PreviewImportMatchRecord, type ReconcileTransactionInput } from "./actual-service.js";
-import { resolveActualCategoryId } from "./category-matching.js";
-import { plaidService, type PlaidService, type PlaidSyncTransaction } from "./plaid-service.js";
+import { actualService, type ReconcileTransactionInput } from "./actual-service.js";
+import {
+  CURRENT_LINK_STATUSES,
+  type LinkConfigData,
+  linkIdentityChanged,
+  parseLinkConfig,
+  selectCurrentLink,
+  serializeLinkConfig,
+  toLinkDto
+} from "./link-config.js";
+import { plaidService, type PlaidService } from "./plaid-service.js";
+import {
+  getPrimarySourceCategory,
+  mapPreviewItemByImportedId,
+  resolveTransactionCategoryId,
+  resolveTransferActualAccountId,
+  toImportTransactionInput
+} from "./plaid-sync-helpers.js";
 
 type DatabaseClient = typeof prisma;
 type ActualService = typeof actualService;
-
-function normalizeMatchText(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-interface LinkConfigData {
-  plaidCursor?: string;
-  categoryMappings?: CategoryMappingDto[];
-  seenCategoryNames?: string[];
-}
 
 const CATEGORY_LEARNING_WINDOW_DAYS = 45;
 const CATEGORY_LEARNING_MIN_MATCHES = 2;
 const IMPORTED_TRANSACTION_RETENTION_DAYS = 180;
 const IMPORTED_TRANSACTION_MAX_ROWS_PER_LINK = 2_000;
 const MIGRATION_LOOKBACK_DAYS = 90;
-const CURRENT_LINK_STATUSES = ["ACTIVE", "MIGRATING"] as const satisfies AccountLinkStatus[];
-
-type CurrentLinkStatus = (typeof CURRENT_LINK_STATUSES)[number];
-
-function parseLinkConfig(configJson: string | null | undefined): LinkConfigData {
-  if (!configJson) {
-    return {};
-  }
-
-  try {
-    const parsed = JSON.parse(configJson) as LinkConfigData;
-    return {
-      plaidCursor: parsed.plaidCursor,
-      categoryMappings: (parsed.categoryMappings || []).filter(mapping =>
-        Boolean(mapping?.sourceCategory) && Boolean(mapping?.actualCategoryId)
-      ),
-      seenCategoryNames: (parsed.seenCategoryNames || []).filter(Boolean)
-    };
-  } catch {
-    return {};
-  }
-}
-
-function serializeLinkConfig(config: LinkConfigData) {
-  const nextConfig: LinkConfigData = {
-    plaidCursor: config.plaidCursor || undefined,
-    categoryMappings: (config.categoryMappings || []).filter(mapping =>
-      Boolean(mapping.sourceCategory) && Boolean(mapping.actualCategoryId)
-    ),
-    seenCategoryNames: [...new Set((config.seenCategoryNames || []).filter(Boolean))].sort((left, right) =>
-      left.localeCompare(right)
-    )
-  };
-
-  return JSON.stringify(nextConfig);
-}
-
-function getPrimarySourceCategory(transaction: PlaidSyncTransaction) {
-  return transaction.categoryNames?.find(name => !name.toUpperCase().startsWith("TRANSFER")) || transaction.categoryNames?.[0];
-}
-
-function resolveTransactionCategoryId({
-  transaction,
-  actualCategories,
-  categoryMappings
-}: {
-  transaction: PlaidSyncTransaction;
-  actualCategories: ActualCategoryDto[];
-  categoryMappings: CategoryMappingDto[];
-}) {
-  const explicitMapping = categoryMappings.find(mapping => transaction.categoryNames?.includes(mapping.sourceCategory));
-  if (explicitMapping?.actualCategoryId) {
-    return explicitMapping.actualCategoryId;
-  }
-
-  return resolveActualCategoryId({
-    categoryNames: transaction.categoryNames,
-    actualCategories
-  });
-}
-
-function resolveTransferActualAccountId({
-  transaction,
-  siblings,
-  currentActualAccountId
-}: {
-  transaction: PlaidSyncTransaction;
-  siblings: Array<{
-    actualAccountId: string;
-    actualAccountName: string;
-    connectionAccount?: {
-      name: string;
-      officialName: string | null;
-      mask: string | null;
-    } | null;
-  }>;
-  currentActualAccountId: string;
-}) {
-  const categoryNames = transaction.categoryNames || [];
-  const isTransfer = categoryNames.some(name => name.toUpperCase().startsWith("TRANSFER"));
-  if (!isTransfer) {
-    return undefined;
-  }
-
-  const haystack = [
-    transaction.payeeName,
-    transaction.importedPayee,
-    ...(transaction.searchText || [])
-  ]
-    .filter((value): value is string => Boolean(value))
-    .map(normalizeMatchText)
-    .join(" ");
-
-  if (!haystack) {
-    return undefined;
-  }
-
-  for (const sibling of siblings) {
-    if (sibling.actualAccountId === currentActualAccountId) {
-      continue;
-    }
-
-    const candidates = [
-      sibling.actualAccountName,
-      sibling.connectionAccount?.name || undefined,
-      sibling.connectionAccount?.officialName || undefined,
-      sibling.connectionAccount?.mask ? ` ${sibling.connectionAccount.mask} ` : undefined
-    ]
-      .filter((value): value is string => Boolean(value))
-      .map(value => normalizeMatchText(value));
-
-    if (candidates.some(candidate => candidate && haystack.includes(candidate))) {
-      return sibling.actualAccountId;
-    }
-  }
-
-  return undefined;
-}
-
-function toMigrationImportTransactionInput(transaction: ReconcileTransactionInput): ImportTransactionInput {
-  return {
-    date: transaction.date,
-    amount: transaction.amount,
-    payee_name: transaction.payee_name,
-    imported_payee: transaction.imported_payee,
-    notes: transaction.notes,
-    imported_id: transaction.imported_id,
-    cleared: transaction.cleared,
-    category: transaction.resolved_category_id,
-    transfer_actual_account_id: transaction.transfer_actual_account_id
-  };
-}
-
-function mapPreviewItemByImportedId(updatedPreview: PreviewImportMatchRecord[]) {
-  return new Map(
-    updatedPreview
-      .filter(entry => entry.transaction.imported_id)
-      .map(entry => [entry.transaction.imported_id as string, entry])
-  );
-}
-
-function toLinkDto(link: {
-  id: string;
-  status: AccountLinkStatus;
-  actualAccountId: string;
-  actualAccountName: string;
-  assetType: "BANK";
-  provider: "PLAID" | null;
-  connectionId: string | null;
-  connectionAccountId: string | null;
-  syncFrequency: "MANUAL" | "HOURLY" | "DAILY" | "WEEKLY";
-  syncHour: number | null;
-  syncDayOfWeek: number | null;
-  isEnabled: boolean;
-  lastSyncedAt: Date | null;
-  migrationStartedAt: Date | null;
-  migrationCompletedAt: Date | null;
-  supersededAt: Date | null;
-  replacedByLinkId: string | null;
-  configJson?: string | null;
-} | null, fallback: { actualAccountId: string; actualAccountName: string }): LinkConfigDto {
-  const config = parseLinkConfig(link?.configJson);
-  return {
-    linkId: link?.id ?? null,
-    status: link?.status ?? "ACTIVE",
-    actualAccountId: fallback.actualAccountId,
-    actualAccountName: link?.actualAccountName ?? fallback.actualAccountName,
-    assetType: link?.assetType ?? "BANK",
-    provider: link?.provider ?? null,
-    connectionId: link?.connectionId ?? null,
-    connectionAccountId: link?.connectionAccountId ?? null,
-    syncFrequency: link?.syncFrequency ?? "MANUAL",
-    syncHour: link?.syncHour ?? null,
-    syncDayOfWeek: link?.syncDayOfWeek ?? null,
-    isEnabled: link?.isEnabled ?? false,
-    lastSyncedAt: link?.lastSyncedAt?.toISOString() ?? null,
-    migrationStartedAt: link?.migrationStartedAt?.toISOString() ?? null,
-    migrationCompletedAt: link?.migrationCompletedAt?.toISOString() ?? null,
-    supersededAt: link?.supersededAt?.toISOString() ?? null,
-    replacedByLinkId: link?.replacedByLinkId ?? null,
-    categoryMappings: config.categoryMappings || [],
-    seenCategoryNames: config.seenCategoryNames || []
-  };
-}
-
-function isCurrentLinkStatus(status: AccountLinkStatus): status is CurrentLinkStatus {
-  return CURRENT_LINK_STATUSES.includes(status as CurrentLinkStatus);
-}
-
-function selectCurrentLink<T extends { status: AccountLinkStatus; updatedAt: Date; createdAt: Date }>(links: T[]) {
-  const current = links.filter(link => isCurrentLinkStatus(link.status));
-  if (current.length === 0) {
-    return null;
-  }
-
-  return current.sort((left, right) => {
-    if (left.status !== right.status) {
-      return left.status === "ACTIVE" ? -1 : 1;
-    }
-
-    return right.updatedAt.getTime() - left.updatedAt.getTime() || right.createdAt.getTime() - left.createdAt.getTime();
-  })[0] ?? null;
-}
-
-function linkIdentityChanged(
-  existing: {
-    provider: "PLAID" | null;
-    connectionId: string | null;
-    connectionAccountId: string | null;
-  } | null,
-  payload: UpdateAccountLinkPayload
-) {
-  return (
-    existing?.provider !== (payload.provider ?? null) ||
-    existing?.connectionId !== (payload.connectionId ?? null) ||
-    existing?.connectionAccountId !== (payload.connectionAccountId ?? null)
-  );
-}
 
 async function learnCategoryMappingsFromHistory({
   database,
@@ -423,7 +208,7 @@ async function pruneImportedTransactionLedger({
 export interface AppService {
   getRuntimeInfo(): Promise<RuntimeInfoDto>;
   listConnections(): Promise<ConnectionDto[]>;
-  listActualAccounts(includeTransactions?: boolean): Promise<ActualAccountDto[]>;
+  listActualAccounts(): Promise<ActualAccountDto[]>;
   refreshAllConnections(): Promise<void>;
   upsertAccountLink(actualAccountId: string, payload: UpdateAccountLinkPayload): Promise<unknown>;
   runAccountSync(actualAccountId: string): Promise<void>;
@@ -510,7 +295,7 @@ export function createAppService({
       }));
     },
 
-    async listActualAccounts(includeTransactions = false): Promise<ActualAccountDto[]> {
+    async listActualAccounts(): Promise<ActualAccountDto[]> {
       const [actualAccounts, actualCategories, links, connections] = await Promise.all([
       actual.listAccounts(),
       actual.listCategories(),
@@ -565,17 +350,6 @@ export function createAppService({
     const results: ActualAccountDto[] = [];
     for (const account of actualAccounts) {
       const link = selectCurrentLink(linksByActualId.get(account.id) || []) ?? null;
-      const recentTransactions = includeTransactions
-        ? (await actual.listRecentTransactions(account.id)).map<ActualTransactionDto>(transaction => ({
-            id: transaction.id,
-            date: transaction.date,
-            amount: transaction.amount,
-            payeeName: transaction.payee_name,
-            importedPayee: transaction.imported_payee,
-            notes: transaction.notes,
-            cleared: transaction.cleared
-          }))
-        : undefined;
 
       results.push({
         id: account.id,
@@ -588,8 +362,7 @@ export function createAppService({
           actualAccountName: account.name
         }),
         options,
-        actualCategories: categoryOptions,
-        recentTransactions
+        actualCategories: categoryOptions
       });
     }
 
@@ -1079,7 +852,7 @@ export function createAppService({
 
       const previewResult = await actual.previewImportTransactions(
         actualAccountId,
-        reconcileTransactions.map(toMigrationImportTransactionInput)
+        reconcileTransactions.map(toImportTransactionInput)
       );
       if (previewResult.errors.length > 0) {
         throw new Error(previewResult.errors[0]?.message || "Actual migration preview failed");
@@ -1226,7 +999,7 @@ export function createAppService({
           importedId => !reconcileTransactions.some(transaction => transaction.imported_id === importedId)
         );
         const migrationResult = migrating
-          ? await actual.importTransactions(actualAccountId, reconcileTransactions.map(toMigrationImportTransactionInput))
+          ? await actual.importTransactions(actualAccountId, reconcileTransactions.map(toImportTransactionInput))
           : null;
         if (migrationResult?.errors.length) {
           throw new Error(migrationResult.errors[0]?.message || "Actual sync review import failed");
