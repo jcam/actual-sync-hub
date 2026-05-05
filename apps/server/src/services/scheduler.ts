@@ -2,6 +2,7 @@ import { prisma } from "../db.js";
 import { appService } from "./app-service.js";
 
 type SchedulableLink = {
+  id: string;
   syncFrequency: "MANUAL" | "HOURLY" | "DAILY" | "WEEKLY";
   syncHour: number | null;
   syncDayOfWeek: number | null;
@@ -86,13 +87,18 @@ export class SyncScheduler {
         }
       });
       const currentTime = now();
+      const dueLinkIds: string[] = [];
 
       for (const link of links) {
         if (!isAccountLinkDue(currentTime, link)) {
           continue;
         }
 
-        await service.runAccountSync(link.actualAccountId);
+        dueLinkIds.push(link.id);
+      }
+
+      if (dueLinkIds.length > 0) {
+        await service.runScheduledLinkSyncs(dueLinkIds);
       }
     } finally {
       this.running = false;

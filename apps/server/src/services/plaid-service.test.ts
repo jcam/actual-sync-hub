@@ -4,6 +4,7 @@ import { createTestDatabase } from "../test/test-db.js";
 
 const mockPlaidClient = vi.hoisted(() => ({
   linkTokenCreate: vi.fn(),
+  accountsGet: vi.fn(),
   transactionsSync: vi.fn()
 }));
 
@@ -40,6 +41,7 @@ describe("plaid service request options", () => {
 
   afterEach(async () => {
     mockPlaidClient.linkTokenCreate.mockReset();
+    mockPlaidClient.accountsGet.mockReset();
     mockPlaidClient.transactionsSync.mockReset();
     await Promise.all(cleanups.splice(0).map(cleanup => cleanup()));
   });
@@ -80,7 +82,7 @@ describe("plaid service request options", () => {
       data: {
         provider: "PLAID",
         label: "Primary Plaid",
-        itemId: "item-123",
+        providerItemId: "item-123",
         accessTokenCiphertext: encryptString("access-token-123")
       }
     });
@@ -105,7 +107,9 @@ describe("plaid service request options", () => {
         syncFrequency: "MANUAL",
         isEnabled: true,
         configJson: JSON.stringify({
-          plaidCursor: "cursor-123"
+          providerSyncState: {
+            cursor: "cursor-123"
+          }
         })
       }
     });
@@ -127,7 +131,13 @@ describe("plaid service request options", () => {
 
     const result = await service.syncAccountLink(link.id);
 
-    expect(result.nextCursor).toBe("cursor-456");
+    expect(result.configPatch).toEqual({
+      providerSyncState: {
+        cursor: "cursor-456",
+        windowStartDate: null,
+        windowEndDate: null
+      }
+    });
     expect(mockPlaidClient.transactionsSync).toHaveBeenCalledWith({
       access_token: "access-token-123",
       cursor: "cursor-123",
@@ -135,6 +145,154 @@ describe("plaid service request options", () => {
         days_requested: 365,
         personal_finance_category_version: "v2"
       }
+    });
+  });
+
+  it("classifies invalid Plaid access tokens as provider connection reauth failures", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-123",
+        accessTokenCiphertext: encryptString("access-token-123"),
+        metadataJson: JSON.stringify({})
+      }
+    });
+
+    mockPlaidClient.accountsGet.mockRejectedValue({
+      message: "Plaid token expired",
+      response: {
+        data: {
+          error_code: "INVALID_ACCESS_TOKEN"
+        }
+      }
+    });
+
+    const service = createPlaidService({
+      prisma,
+      config: testConfig
+    });
+
+    await expect(service.refreshConnection(connection.id)).rejects.toMatchObject({
+      name: "ProviderOperationError",
+      code: "INVALID_ACCESS_TOKEN",
+      healthState: "REAUTH_REQUIRED",
+      healthScope: "CONNECTION_AUTH",
+      healthAction: "REAUTH_CONNECTION"
+    });
+
+    const refreshed = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(refreshed.metadataJson || "{}");
+
+    expect(refreshed.status).toBe("ERROR");
+    expect(metadata.health).toMatchObject({
+      state: "REAUTH_REQUIRED",
+      scope: "CONNECTION_AUTH",
+      action: "REAUTH_CONNECTION",
+      code: "INVALID_ACCESS_TOKEN"
+    });
+  });
+
+  it("classifies Plaid item login required as a bank reauth failure", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-123",
+        accessTokenCiphertext: encryptString("access-token-123")
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "account-ext-1",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    const link = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Sandbox Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "MANUAL",
+        isEnabled: true
+      }
+    });
+
+    mockPlaidClient.transactionsSync.mockRejectedValue({
+      message: "Plaid item needs login",
+      response: {
+        data: {
+          error_code: "ITEM_LOGIN_REQUIRED"
+        }
+      }
+    });
+
+    const service = createPlaidService({
+      prisma,
+      config: testConfig
+    });
+
+    await expect(service.syncAccountLink(link.id)).rejects.toMatchObject({
+      name: "ProviderOperationError",
+      code: "ITEM_LOGIN_REQUIRED",
+      healthState: "REAUTH_REQUIRED",
+      healthScope: "BANK_AUTH",
+      healthAction: "REAUTH_BANK"
+    });
+  });
+
+  it("classifies Plaid rate limits as retryable sync pipeline failures", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-123",
+        accessTokenCiphertext: encryptString("access-token-123"),
+        metadataJson: JSON.stringify({})
+      }
+    });
+
+    mockPlaidClient.accountsGet.mockRejectedValue({
+      message: "Too many requests",
+      response: {
+        status: 429,
+        data: {
+          error_code: "RATE_LIMIT_EXCEEDED"
+        }
+      }
+    });
+
+    const service = createPlaidService({
+      prisma,
+      config: testConfig
+    });
+
+    await expect(service.refreshConnection(connection.id)).rejects.toMatchObject({
+      name: "ProviderOperationError",
+      code: "RATE_LIMIT_EXCEEDED",
+      healthState: "ERROR",
+      healthScope: "SYNC_PIPELINE",
+      healthAction: "RETRY"
     });
   });
 });

@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import type { ActualBankSyncSource } from "@actual-sync/shared";
 import type { APIAccountEntity, APICategoryEntity, APICategoryGroupEntity, APIPayeeEntity } from "@actual-app/api/models";
 import { resolveActualCategoryId } from "./category-matching.js";
 
@@ -59,6 +60,10 @@ type WorkerCommand =
     }
   | {
       id: string;
+      operation: "listBankSyncLinks";
+    }
+  | {
+      id: string;
       operation: "listTransactionsByImportedIds";
       accountId: string;
       importedIds: string[];
@@ -112,6 +117,14 @@ function amountToInteger(value: number) {
 
 function isActualCategory(entity: APICategoryEntity | APICategoryGroupEntity): entity is APICategoryEntity {
   return "group_id" in entity;
+}
+
+function isActualBankSyncSource(value: string | null | undefined): value is ActualBankSyncSource {
+  return value === "simpleFin" || value === "goCardless" || value === "pluggyai";
+}
+
+function isMissingBanksTableError(error: unknown) {
+  return error instanceof Error && error.message.includes('Table "banks" does not exist in the schema');
 }
 
 async function fetchActualServerVersion(serverURL: string) {
@@ -330,6 +343,89 @@ async function main() {
                 name: category.name
               }))
               .sort((left, right) => left.name.localeCompare(right.name))
+          };
+        }
+
+        case "listBankSyncLinks": {
+          await syncIfNeeded();
+          const accounts = (await actual.getAccounts()) as Array<{
+            id: string;
+            name: string;
+            official_name?: string | null;
+            account_id?: string | null;
+            account_sync_source?: string | null;
+            last_sync?: string | null;
+            closed?: boolean;
+            offbudget?: boolean;
+            tombstone?: boolean;
+            bank?: string | null;
+            bankName?: string | null;
+            bankId?: string | null;
+            mask?: string | null;
+            balance_current?: number | null;
+            balance_available?: number | null;
+            balance_limit?: number | null;
+          }>;
+          const bankRows = (await (async () => {
+            try {
+              return (await actual.aqlQuery(
+                actual.q("banks").select(["id", "bank_id", "name"]).withDead() as unknown as Parameters<
+                  ActualModule["aqlQuery"]
+                >[0]
+              )) as {
+                data: Array<{
+                  id: string;
+                  bank_id?: string | null;
+                  name?: string | null;
+                  tombstone?: boolean;
+                }>;
+              };
+            } catch (error) {
+              if (isMissingBanksTableError(error)) {
+                return {
+                  data: []
+                };
+              }
+
+              throw error;
+            }
+          })()) as {
+            data: Array<{
+              id: string;
+              bank_id?: string | null;
+              name?: string | null;
+              tombstone?: boolean;
+            }>;
+          };
+          const bankById = new Map(
+            bankRows.data.filter(bank => !bank.tombstone).map(bank => [bank.id, bank])
+          );
+
+          return {
+            id: command.id,
+            ok: true,
+            result: accounts
+              .filter(account => !account.tombstone)
+              .filter(account => Boolean(account.account_id) && isActualBankSyncSource(account.account_sync_source))
+              .map(account => ({
+                actualAccountId: account.id,
+                actualAccountName: account.name,
+                actualOfficialName: account.official_name ?? null,
+                accountSyncSource: account.account_sync_source as ActualBankSyncSource,
+                externalAccountId: account.account_id as string,
+                actualBankId: account.bank ?? null,
+                actualBankName: account.bankName ?? bankById.get(account.bank ?? "")?.name ?? null,
+                actualBankExternalId: bankById.get(account.bank ?? "")?.bank_id ?? null,
+                mask: account.mask ?? null,
+                balanceCurrent: integerToAmount(account.balance_current),
+                balanceAvailable:
+                  typeof account.balance_available === "number" ? integerToAmount(account.balance_available) : null,
+                balanceLimit:
+                  typeof account.balance_limit === "number" ? integerToAmount(account.balance_limit) : null,
+                closed: Boolean(account.closed),
+                offbudget: Boolean(account.offbudget),
+                lastSyncedAt: account.last_sync ?? null
+              }))
           };
         }
 

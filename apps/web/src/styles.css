@@ -32,7 +32,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -93,13 +94,18 @@ button {
 
 .login-form input,
 .grid input,
-.grid select {
+.grid select,
+.grid textarea {
   border-radius: 14px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.75);
   padding: 12px 14px;
   min-width: 0;
   width: 100%;
+}
+
+.grid textarea {
+  resize: vertical;
 }
 
 .primary-button,
@@ -210,6 +216,35 @@ button {
   gap: 18px;
 }
 
+.stack-list {
+  display: grid;
+  gap: 14px;
+}
+
+.list-card {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.list-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.list-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
 .account-grid {
   grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
 }
@@ -235,6 +270,10 @@ button {
   margin: 18px 0;
 }
 
+.wide-field {
+  grid-column: 1 / -1;
+}
+
 .button-row {
   margin-bottom: 18px;
 }
@@ -252,8 +291,22 @@ button {
   background: rgba(30, 123, 103, 0.12);
 }
 
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  background: rgba(217, 109, 44, 0.14);
+  color: var(--ink);
+}
+
 .muted-pill {
   background: rgba(24, 33, 38, 0.08);
+}
+
+.success-text {
+  color: var(--accent);
 }
 
 .recent-transactions ul,
@@ -288,7 +341,8 @@ button {
 }
 
 .migration-summary-panel,
-.migration-table-panel {
+.migration-table-panel,
+.automatic-sync-pause-panel {
   display: grid;
   gap: 14px;
   padding: 18px;
@@ -301,6 +355,11 @@ button {
 .migration-summary-panel {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+}
+
+.automatic-sync-pause-panel {
+  background: rgba(24, 33, 38, 0.05);
+  border-color: rgba(24, 33, 38, 0.12);
 }
 
 .migration-stat-row {
@@ -461,8 +520,16 @@ button {
 }
 
 .balance-stack {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
   text-align: right;
   font-family: "IBM Plex Mono", monospace;
+}
+
+.balance-label,
+.balance-value {
+  display: block;
 }
 
 .sync-run {
@@ -472,6 +539,53 @@ button {
 
 .error-text {
   color: var(--danger);
+}
+
+.sync-health-panel {
+  margin: 0 0 18px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(165, 68, 48, 0.2);
+  background: rgba(165, 68, 48, 0.08);
+  display: grid;
+  gap: 12px;
+}
+
+.sync-health-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.sync-health-badge-compact {
+  margin-bottom: 0;
+}
+
+.sync-health-badge-danger {
+  background: rgba(165, 68, 48, 0.16);
+  color: #7f2d1d;
+}
+
+.sync-health-badge-warning {
+  background: rgba(217, 109, 44, 0.16);
+  color: #8b4a18;
+}
+
+.sync-health-badge-neutral {
+  background: rgba(24, 33, 38, 0.08);
+  color: var(--ink);
+}
+
+.sync-health-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 @media (max-width: 960px) {

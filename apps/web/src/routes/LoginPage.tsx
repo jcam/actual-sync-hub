@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getDisplayErrorMessage } from "../lib/errors";
 
 export function LoginPage({
   onLogin
@@ -26,7 +27,11 @@ export function LoginPage({
             try {
               await onLogin(username, password);
             } catch (nextError) {
-              setError(nextError instanceof Error ? nextError.message : "Login failed");
+              setError(
+                getDisplayErrorMessage(nextError, "Login failed.", {
+                  serverUnavailableMessage: "Could not reach the API server to sign in."
+                })
+              );
             }
           }}
         >

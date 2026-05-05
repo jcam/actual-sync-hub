@@ -23,13 +23,13 @@ async function initializeSchema(prisma: PrismaClient) {
       "institutionName" TEXT,
       "institutionId" TEXT,
       "accessTokenCiphertext" TEXT NOT NULL,
-      "itemId" TEXT NOT NULL,
+      "providerItemId" TEXT,
       "metadataJson" TEXT,
       "lastRefreshedAt" DATETIME,
       "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" DATETIME NOT NULL
     );`,
-    `CREATE UNIQUE INDEX "Connection_itemId_key" ON "Connection"("itemId");`,
+    `CREATE UNIQUE INDEX "Connection_provider_providerItemId_key" ON "Connection"("provider", "providerItemId");`,
     `CREATE TABLE "ConnectionAccount" (
       "id" TEXT NOT NULL PRIMARY KEY,
       "connectionId" TEXT NOT NULL,

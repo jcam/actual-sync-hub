@@ -3,12 +3,14 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import type { ActualAccountDto } from "@actual-sync/shared";
 import { api } from "../api";
 import { CategoryMappingEditor } from "../components/CategoryMappingEditor";
+import { getDisplayErrorMessage } from "../lib/errors";
 
 export function CategoryMappingsPage() {
   const { actualAccountId } = useParams<{ actualAccountId: string }>();
   const navigate = useNavigate();
   const [account, setAccount] = useState<ActualAccountDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -20,6 +22,18 @@ export function CategoryMappingsPage() {
           return;
         }
         setAccount(accounts.find(candidate => candidate.id === actualAccountId) || null);
+        setError(null);
+      })
+      .catch(loadError => {
+        if (cancelled) {
+          return;
+        }
+        setAccount(null);
+        setError(
+          getDisplayErrorMessage(loadError, "Failed to load category mappings.", {
+            serverUnavailableMessage: "Could not reach the API server while loading category mappings."
+          })
+        );
       })
       .finally(() => {
         if (!cancelled) {
@@ -40,8 +54,10 @@ export function CategoryMappingsPage() {
     return (
       <section className="panel">
         <p className="eyebrow">Category mapping</p>
-        <h2>Account not found</h2>
-        <p className="muted">The selected Actual account could not be loaded for mapping.</p>
+        <h2>{error ? "Could not load mappings" : "Account not found"}</h2>
+        <p className={error ? "error-text" : "muted"}>
+          {error || "The selected Actual account could not be loaded for mapping."}
+        </p>
         <div className="button-row">
           <Link className="ghost-button inline-link-button" to="/accounts">
             Back to accounts
@@ -57,7 +73,7 @@ export function CategoryMappingsPage() {
         <p className="eyebrow">Mapping workspace</p>
         <h2>{account.name}</h2>
         <p className="muted">
-          This editor is account-specific. Use it when automatic Plaid-to-Actual category matching needs manual correction for one Actual account.
+          This editor is account-specific. Use it when automatic provider-to-Actual category matching needs manual correction for one Actual account.
         </p>
         <div className="button-row">
           <Link className="ghost-button inline-link-button" to="/accounts">

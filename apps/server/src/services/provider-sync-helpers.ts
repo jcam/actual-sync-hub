@@ -1,13 +1,13 @@
 import type { ActualCategoryDto, CategoryMappingDto } from "@actual-sync/shared";
 import type { ImportTransactionInput, PreviewImportMatchRecord, ReconcileTransactionInput } from "./actual-service.js";
+import type { ProviderSyncTransaction } from "./provider-adapter.js";
 import { resolveActualCategoryId } from "./category-matching.js";
-import type { PlaidSyncTransaction } from "./plaid-service.js";
 
 function normalizeMatchText(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-export function getPrimarySourceCategory(transaction: PlaidSyncTransaction) {
+export function getPrimarySourceCategory(transaction: ProviderSyncTransaction) {
   return transaction.categoryNames?.find(name => !name.toUpperCase().startsWith("TRANSFER")) || transaction.categoryNames?.[0];
 }
 
@@ -16,7 +16,7 @@ export function resolveTransactionCategoryId({
   actualCategories,
   categoryMappings
 }: {
-  transaction: PlaidSyncTransaction;
+  transaction: ProviderSyncTransaction;
   actualCategories: ActualCategoryDto[];
   categoryMappings: CategoryMappingDto[];
 }) {
@@ -36,7 +36,7 @@ export function resolveTransferActualAccountId({
   siblings,
   currentActualAccountId
 }: {
-  transaction: PlaidSyncTransaction;
+  transaction: ProviderSyncTransaction;
   siblings: Array<{
     actualAccountId: string;
     actualAccountName: string;

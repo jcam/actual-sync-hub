@@ -161,7 +161,7 @@ describe("AccountCard", () => {
           link: {
             ...account.link,
             status: "ACTIVE",
-            provider: "PLAID",
+            provider: "TELLER",
             connectionId: "conn-1",
             connectionAccountId: "conn-account-1",
             isEnabled: true
@@ -176,5 +176,106 @@ describe("AccountCard", () => {
       "/accounts/actual-1/sync-review"
     );
     expect(screen.getByRole("button", { name: "Sync immediately" })).toBeInTheDocument();
+  });
+
+  it("shows distinct health badges for provider auth and Actual sync failures", async () => {
+    renderWithRouter(
+      <AccountCard
+        account={{
+          ...account,
+          link: {
+            ...account.link,
+            provider: "PLAID",
+            connectionId: "conn-1",
+            connectionAccountId: "conn-account-1",
+            health: {
+              state: "ERROR",
+              scope: "ACTUAL_BACKEND",
+              action: "RETRY",
+              message: "Actual import failed."
+            },
+            isEnabled: true
+          },
+          options: [
+            {
+              ...account.options[0],
+              connectionHealth: {
+                state: "REAUTH_REQUIRED",
+                scope: "CONNECTION_AUTH",
+                action: "REAUTH_CONNECTION",
+                message: "Stored provider token is invalid."
+              }
+            }
+          ]
+        }}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.getByText("Actual sync failed")).toBeInTheDocument();
+    expect(screen.getByText("Provider connection broken")).toBeInTheDocument();
+  });
+
+  it("shows when automatic sync is paused after repeated failures", async () => {
+    renderWithRouter(
+      <AccountCard
+        account={{
+          ...account,
+          link: {
+            ...account.link,
+            provider: "PLAID",
+            connectionId: "conn-1",
+            connectionAccountId: "conn-account-1",
+            syncFrequency: "DAILY",
+            isEnabled: true,
+            automaticSyncBackoffUntil: "2099-05-06T12:00:00.000Z",
+            automaticSyncFailureCount: 3,
+            health: {
+              state: "ERROR",
+              scope: "SYNC_PIPELINE",
+              action: "RETRY",
+              code: "SYNC_FAILED",
+              message: "Temporary sync failure."
+            }
+          }
+        }}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.getByText("Automatic sync paused")).toBeInTheDocument();
+    expect(screen.getByText(/Automatic sync is paused until .* after 3 automatic failures\./)).toBeInTheDocument();
+  });
+
+  it("shows a rate-limit specific automatic sync pause message", async () => {
+    renderWithRouter(
+      <AccountCard
+        account={{
+          ...account,
+          link: {
+            ...account.link,
+            provider: "TELLER",
+            connectionId: "conn-1",
+            connectionAccountId: "conn-account-1",
+            syncFrequency: "HOURLY",
+            isEnabled: true,
+            automaticSyncBackoffUntil: "2099-05-06T12:00:00.000Z",
+            automaticSyncFailureCount: 2,
+            health: {
+              state: "ERROR",
+              scope: "SYNC_PIPELINE",
+              action: "RETRY",
+              code: "RATE_LIMIT_EXCEEDED",
+              message: "Provider rate limit exceeded."
+            }
+          }
+        }}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(
+      screen.getByText(/Automatic sync is paused until .* because the provider rate-limited recent sync attempts after 2 automatic failures\./)
+    ).toBeInTheDocument();
   });
 });

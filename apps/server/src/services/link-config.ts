@@ -1,10 +1,20 @@
-import type { AccountLinkStatus, CategoryMappingDto, LinkConfigDto } from "@actual-sync/shared";
+import type {
+  AccountLinkStatus,
+  CategoryMappingDto,
+  LinkConfigDto,
+  Provider,
+  ProviderSyncStateDto,
+  SyncHealthDto
+} from "@actual-sync/shared";
 import type { UpdateAccountLinkPayload } from "@actual-sync/shared";
 
 export interface LinkConfigData {
-  plaidCursor?: string;
+  providerSyncState?: ProviderSyncStateDto;
+  health?: SyncHealthDto | null;
   categoryMappings?: CategoryMappingDto[];
   seenCategoryNames?: string[];
+  automaticSyncBackoffUntil?: string | null;
+  automaticSyncFailureCount?: number;
 }
 
 export const CURRENT_LINK_STATUSES = ["ACTIVE", "MIGRATING"] as const satisfies AccountLinkStatus[];
@@ -17,13 +27,41 @@ export function parseLinkConfig(configJson: string | null | undefined): LinkConf
   }
 
   try {
-    const parsed = JSON.parse(configJson) as LinkConfigData;
+    const parsed = JSON.parse(configJson) as LinkConfigData & {
+      plaidCursor?: string;
+      tellerLastSyncEndDate?: string;
+      simplefinLastSyncEndDate?: string;
+    };
+    const providerSyncState: ProviderSyncStateDto | null =
+      parsed.providerSyncState ||
+      parsed.plaidCursor ||
+      parsed.tellerLastSyncEndDate ||
+      parsed.simplefinLastSyncEndDate
+        ? {
+            cursor: parsed.providerSyncState?.cursor ?? parsed.plaidCursor ?? null,
+            windowStartDate: parsed.providerSyncState?.windowStartDate ?? null,
+            windowEndDate:
+              parsed.providerSyncState?.windowEndDate ??
+              parsed.tellerLastSyncEndDate ??
+              parsed.simplefinLastSyncEndDate ??
+              null
+          }
+        : null;
     return {
-      plaidCursor: parsed.plaidCursor,
+      providerSyncState: providerSyncState ?? undefined,
+      health: parsed.health ?? null,
       categoryMappings: (parsed.categoryMappings || []).filter(
         mapping => Boolean(mapping?.sourceCategory) && Boolean(mapping?.actualCategoryId)
       ),
-      seenCategoryNames: (parsed.seenCategoryNames || []).filter(Boolean)
+      seenCategoryNames: (parsed.seenCategoryNames || []).filter(Boolean),
+      automaticSyncBackoffUntil:
+        typeof parsed.automaticSyncBackoffUntil === "string" && parsed.automaticSyncBackoffUntil.length > 0
+          ? parsed.automaticSyncBackoffUntil
+          : null,
+      automaticSyncFailureCount:
+        typeof parsed.automaticSyncFailureCount === "number" && Number.isFinite(parsed.automaticSyncFailureCount)
+          ? parsed.automaticSyncFailureCount
+          : 0
     };
   } catch {
     return {};
@@ -32,13 +70,28 @@ export function parseLinkConfig(configJson: string | null | undefined): LinkConf
 
 export function serializeLinkConfig(config: LinkConfigData) {
   const nextConfig: LinkConfigData = {
-    plaidCursor: config.plaidCursor || undefined,
+    providerSyncState:
+      config.providerSyncState?.cursor ||
+      config.providerSyncState?.windowStartDate ||
+      config.providerSyncState?.windowEndDate
+        ? {
+            cursor: config.providerSyncState?.cursor || undefined,
+            windowStartDate: config.providerSyncState?.windowStartDate || undefined,
+            windowEndDate: config.providerSyncState?.windowEndDate || undefined
+          }
+        : undefined,
+    health: config.health ?? null,
     categoryMappings: (config.categoryMappings || []).filter(
       mapping => Boolean(mapping.sourceCategory) && Boolean(mapping.actualCategoryId)
     ),
     seenCategoryNames: [...new Set((config.seenCategoryNames || []).filter(Boolean))].sort((left, right) =>
       left.localeCompare(right)
-    )
+    ),
+    automaticSyncBackoffUntil: config.automaticSyncBackoffUntil || undefined,
+    automaticSyncFailureCount:
+      typeof config.automaticSyncFailureCount === "number" && config.automaticSyncFailureCount > 0
+        ? config.automaticSyncFailureCount
+        : undefined
   };
 
   return JSON.stringify(nextConfig);
@@ -65,7 +118,7 @@ export function selectCurrentLink<T extends { status: AccountLinkStatus; updated
 
 export function linkIdentityChanged(
   existing: {
-    provider: "PLAID" | null;
+    provider: Provider | null;
     connectionId: string | null;
     connectionAccountId: string | null;
   } | null,
@@ -85,7 +138,7 @@ export function toLinkDto(
     actualAccountId: string;
     actualAccountName: string;
     assetType: "BANK";
-    provider: "PLAID" | null;
+    provider: Provider | null;
     connectionId: string | null;
     connectionAccountId: string | null;
     syncFrequency: "MANUAL" | "HOURLY" | "DAILY" | "WEEKLY";
@@ -120,6 +173,10 @@ export function toLinkDto(
     migrationCompletedAt: link?.migrationCompletedAt?.toISOString() ?? null,
     supersededAt: link?.supersededAt?.toISOString() ?? null,
     replacedByLinkId: link?.replacedByLinkId ?? null,
+    health: config.health ?? null,
+    providerSyncState: config.providerSyncState ?? null,
+    automaticSyncBackoffUntil: config.automaticSyncBackoffUntil ?? null,
+    automaticSyncFailureCount: config.automaticSyncFailureCount ?? 0,
     categoryMappings: config.categoryMappings || [],
     seenCategoryNames: config.seenCategoryNames || []
   };

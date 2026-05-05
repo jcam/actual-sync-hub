@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ActualAccountDto, CategoryMappingDto } from "@actual-sync/shared";
+import { getDisplayErrorMessage } from "../lib/errors";
 
 function normalizeSourceCategory(value: string) {
   return value.trim().replace(/\s+/g, " ");
@@ -34,6 +35,7 @@ export function CategoryMappingEditor({
   const [showAllMapped, setShowAllMapped] = useState(false);
   const [filter, setFilter] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const sourceCategories = useMemo(
     () =>
@@ -255,8 +257,15 @@ export function CategoryMappingEditor({
           disabled={saving}
           onClick={async () => {
             setSaving(true);
+            setError(null);
             try {
               await onSave(categoryMappings);
+            } catch (saveError) {
+              setError(
+                getDisplayErrorMessage(saveError, "Failed to save category mappings.", {
+                  serverUnavailableMessage: "Could not reach the API server to save category mappings."
+                })
+              );
             } finally {
               setSaving(false);
             }
@@ -265,6 +274,7 @@ export function CategoryMappingEditor({
           {saving ? "Saving..." : "Save category mappings"}
         </button>
       </div>
+      {error ? <p className="error-text">{error}</p> : null}
     </section>
   );
 }

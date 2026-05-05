@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ActualBankSyncSource } from "@actual-sync/shared";
 import type { APIAccountEntity, APICategoryEntity } from "@actual-app/api/models";
 import { env } from "../env.js";
 
@@ -27,6 +28,24 @@ export type ActualAccountRecord = Pick<APIAccountEntity, "id" | "name" | "offbud
 };
 
 export type ActualCategoryRecord = Pick<APICategoryEntity, "id" | "name">;
+
+export interface ActualBankSyncLinkRecord {
+  actualAccountId: string;
+  actualAccountName: string;
+  actualOfficialName?: string | null;
+  accountSyncSource: ActualBankSyncSource;
+  externalAccountId: string;
+  actualBankId?: string | null;
+  actualBankName?: string | null;
+  actualBankExternalId?: string | null;
+  mask?: string | null;
+  balanceCurrent?: number | null;
+  balanceAvailable?: number | null;
+  balanceLimit?: number | null;
+  closed?: boolean;
+  offbudget?: boolean;
+  lastSyncedAt?: string | null;
+}
 
 export type ActualTransactionRecord = Pick<
   ActualTransaction,
@@ -94,6 +113,9 @@ type WorkerCommandPayload =
     }
   | {
       operation: "listCategories";
+    }
+  | {
+      operation: "listBankSyncLinks";
     }
   | {
       operation: "listTransactionsByImportedIds";
@@ -184,6 +206,7 @@ export interface ActualService {
   shutdown?(): Promise<void>;
   listAccounts(): Promise<ActualAccountRecord[]>;
   listCategories(): Promise<ActualCategoryRecord[]>;
+  listBankSyncLinks(): Promise<ActualBankSyncLinkRecord[]>;
   listTransactionsByImportedIds(accountId: string, importedIds: string[]): Promise<ActualTransactionRecord[]>;
   importTransactions(accountId: string, transactions: ImportTransactionInput[]): Promise<{
     added: string[];
@@ -436,6 +459,12 @@ export function createActualService({
         expiresAt: Date.now() + READ_CACHE_TTL_MS
       };
       return result;
+    },
+
+    async listBankSyncLinks(): Promise<ActualBankSyncLinkRecord[]> {
+      return runWorker<ActualBankSyncLinkRecord[]>({
+        operation: "listBankSyncLinks"
+      });
     },
 
     async listTransactionsByImportedIds(accountId: string, importedIds: string[]): Promise<ActualTransactionRecord[]> {

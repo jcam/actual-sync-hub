@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import type { SessionDto } from "@actual-sync/shared";
 import { api } from "./api";
+import { getDisplayErrorMessage } from "./lib/errors";
 import { AccountsPage } from "./routes/AccountsPage";
 import { CategoryMappingsPage } from "./routes/CategoryMappingsPage";
-import { ConnectionsPage } from "./routes/ConnectionsPage";
 import { LoginPage } from "./routes/LoginPage";
+import { PlaidConnectionsPage } from "./routes/PlaidConnectionsPage";
 import { ReviewPage } from "./routes/ReviewPage";
+import { SimpleFinConnectionsPage } from "./routes/SimpleFinConnectionsPage";
+import { TellerConnectionsPage } from "./routes/TellerConnectionsPage";
 
 function Layout({
   session,
@@ -29,8 +32,14 @@ function Layout({
           <NavLink to="/accounts" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             Accounts
           </NavLink>
-          <NavLink to="/connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+          <NavLink to="/plaid-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             Plaid Connections
+          </NavLink>
+          <NavLink to="/teller-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            Teller.io Connections
+          </NavLink>
+          <NavLink to="/simplefin-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            SimpleFIN Connections
           </NavLink>
         </nav>
         <div className="session-card">
@@ -49,7 +58,9 @@ function Layout({
           <Route path="/accounts/:actualAccountId/mappings" element={<CategoryMappingsPage />} />
           <Route path="/accounts/:actualAccountId/migration" element={<ReviewPage />} />
           <Route path="/accounts/:actualAccountId/sync-review" element={<ReviewPage />} />
-          <Route path="/connections" element={<ConnectionsPage />} />
+          <Route path="/plaid-connections" element={<PlaidConnectionsPage />} />
+          <Route path="/teller-connections" element={<TellerConnectionsPage />} />
+          <Route path="/simplefin-connections" element={<SimpleFinConnectionsPage />} />
           <Route path="*" element={<Navigate to="/accounts" replace />} />
         </Routes>
       </main>
@@ -60,17 +71,53 @@ function Layout({
 export function App() {
   const [session, setSession] = useState<SessionDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  const loadSession = async () => {
+    try {
+      const nextSession = await api.getSession();
+      setSession(nextSession);
+      setLoadError(null);
+    } catch (sessionError) {
+      setSession(null);
+      setLoadError(
+        getDisplayErrorMessage(sessionError, "Failed to load the current session.", {
+          serverUnavailableMessage: "Could not reach the API server while loading the current session."
+        })
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    void api
-      .getSession()
-      .then(setSession)
-      .finally(() => setLoading(false));
+    void loadSession();
   }, []);
 
   if (loading) {
     return <div className="loading-screen">Loading…</div>;
+  }
+
+  if (loadError) {
+    return (
+      <section className="panel">
+        <p className="eyebrow">Session</p>
+        <h2>Could not start the app</h2>
+        <p className="error-text">{loadError}</p>
+        <div className="button-row">
+          <button
+            className="ghost-button"
+            onClick={() => {
+              setLoading(true);
+              void loadSession();
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      </section>
+    );
   }
 
   if (!session?.authenticated) {

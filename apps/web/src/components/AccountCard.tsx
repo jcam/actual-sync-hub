@@ -2,6 +2,9 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { ActualAccountDto, SyncFrequency, UpdateAccountLinkPayload } from "@actual-sync/shared";
 import { api } from "../api";
+import { getDisplayErrorMessage } from "../lib/errors";
+import { getAutomaticSyncPauseSummary } from "../lib/provider-ui";
+import { SyncHealthPanel } from "./SyncHealthPanel";
 
 const scheduleOptions: SyncFrequency[] = ["MANUAL", "HOURLY", "DAILY", "WEEKLY"];
 
@@ -26,12 +29,32 @@ export function AccountCard({
   });
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const filteredOptions = account.options.filter(option => option.connectionId === form.connectionId);
+  const selectedConnection = account.options.find(option => option.connectionId === form.connectionId);
+  const activeConnectionOption = account.options.find(option => option.connectionId === account.link.connectionId);
+  const automaticSyncPauseSummary =
+    form.isEnabled && form.syncFrequency !== "MANUAL" ? getAutomaticSyncPauseSummary(account.link) : null;
+  const blockingConnectionState =
+    activeConnectionOption?.connectionStatus !== "ACTIVE" ||
+    activeConnectionOption?.connectionHealth?.state === "REAUTH_REQUIRED" ||
+    activeConnectionOption?.connectionHealth?.state === "ATTENTION_REQUIRED";
+  const savedLinkReadyForSyncReview =
+    account.link.status !== "MIGRATING" &&
+    Boolean(account.link.connectionId) &&
+    Boolean(account.link.connectionAccountId) &&
+    Boolean(account.link.provider) &&
+    !blockingConnectionState;
+  const savedLinkReadyForImmediateSync =
+    account.link.status !== "MIGRATING" &&
+    Boolean(account.link.connectionId) &&
+    Boolean(account.link.connectionAccountId) &&
+    !blockingConnectionState;
   const buildPayload = (): UpdateAccountLinkPayload => ({
     actualAccountName: account.link.actualAccountName,
     assetType: account.link.assetType,
-    provider: form.provider ?? null,
+    provider: form.connectionId ? selectedConnection?.provider ?? form.provider ?? null : null,
     connectionId: form.connectionId ?? null,
     connectionAccountId: form.connectionAccountId ?? null,
     syncFrequency: form.syncFrequency,
@@ -63,9 +86,11 @@ export function AccountCard({
             value={form.connectionId ?? ""}
             onChange={event => {
               const connectionId = event.target.value || null;
+              const provider =
+                account.options.find(option => option.connectionId === connectionId)?.provider ?? null;
               setForm(current => ({
                 ...current,
-                provider: connectionId ? "PLAID" : null,
+                provider,
                 connectionId,
                 connectionAccountId: null
               }));
@@ -166,6 +191,37 @@ export function AccountCard({
         </Link>
       </section>
 
+      {account.link.health ? (
+        <SyncHealthPanel
+          eyebrow="Account sync status"
+          health={account.link.health}
+          provider={account.link.provider}
+          scope="account"
+          connectionId={account.link.connectionId}
+          onReauthenticated={onRefresh}
+        />
+      ) : null}
+
+      {activeConnectionOption?.connectionHealth ? (
+        <SyncHealthPanel
+          eyebrow="Connection status"
+          health={activeConnectionOption.connectionHealth}
+          provider={activeConnectionOption.provider}
+          scope="connection"
+          connectionId={activeConnectionOption.connectionId}
+          onReauthenticated={onRefresh}
+        />
+      ) : null}
+
+      {automaticSyncPauseSummary ? (
+        <section className="automatic-sync-pause-panel">
+          <div>
+            <p className="eyebrow">Automatic sync paused</p>
+            <p className="muted">{automaticSyncPauseSummary}</p>
+          </div>
+        </section>
+      ) : null}
+
       {account.link.status === "MIGRATING" ? (
         <section className="migration-summary-panel">
           <div>
@@ -179,13 +235,13 @@ export function AccountCard({
             Review migration
           </Link>
         </section>
-      ) : form.connectionId && form.connectionAccountId ? (
+      ) : savedLinkReadyForSyncReview ? (
         <section className="migration-summary-panel">
           <div>
             <p className="eyebrow">Manual sync review</p>
             <p className="muted">
-              Review what Actual would add or merge before committing a manual sync. Direct sync is still available if
-              you want to bypass review.
+              Review what Actual would add or merge before committing a manual sync. You can also run the sync
+              directly from this card.
             </p>
           </div>
           <Link className="ghost-button inline-link-button" to={`/accounts/${account.id}/sync-review`}>
@@ -200,9 +256,16 @@ export function AccountCard({
           disabled={saving}
           onClick={async () => {
             setSaving(true);
+            setError(null);
             try {
               await api.updateAccountLink(account.id, buildPayload());
               await onRefresh();
+            } catch (saveError) {
+              setError(
+                getDisplayErrorMessage(saveError, "Failed to save this account link.", {
+                  serverUnavailableMessage: "Could not reach the API server to save this account link."
+                })
+              );
             } finally {
               setSaving(false);
             }
@@ -213,12 +276,19 @@ export function AccountCard({
         {account.link.status === "MIGRATING" ? null : (
           <button
             className="ghost-button"
-            disabled={syncing || !form.connectionId || !form.connectionAccountId}
+            disabled={syncing || !savedLinkReadyForImmediateSync}
             onClick={async () => {
               setSyncing(true);
+              setError(null);
               try {
                 await api.runSync(account.id);
                 await onRefresh();
+              } catch (syncError) {
+                setError(
+                  getDisplayErrorMessage(syncError, "Failed to run this sync.", {
+                    serverUnavailableMessage: "Could not reach the API server to run this sync."
+                  })
+                );
               } finally {
                 setSyncing(false);
               }
@@ -228,6 +298,7 @@ export function AccountCard({
           </button>
         )}
       </div>
+      {error ? <p className="error-text">{error}</p> : null}
     </article>
   );
 }

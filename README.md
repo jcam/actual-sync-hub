@@ -1,6 +1,6 @@
 # Actual Sync Hub
 
-`Actual Sync Hub` is a TypeScript service and web app for syncing Actual Budget accounts against external providers. This first version focuses on Plaid-backed bank accounts, but the core model is built around providers, connections, and account links so future connectors can add investment accounts, property values, payment processors, or direct bank APIs without rewriting the app.
+`Actual Sync Hub` is a TypeScript service and web app for syncing Actual Budget accounts against external providers. It manages provider connections, account links, review-first imports, scheduled sync, and connection health for Plaid, Teller.io, and SimpleFIN.
 
 ## Stack
 
@@ -12,11 +12,11 @@
 ## Architecture
 
 - `apps/server`: API server, auth, scheduler, Actual client, provider adapters
-- `apps/web`: protected frontend for account mapping and provider connections
+- `apps/web`: protected frontend for account mapping plus separate Plaid, Teller.io, and SimpleFIN connection surfaces
 - `packages/shared`: shared DTOs and enums used by both apps
 - `prisma/schema.prisma`: persistence model for users, provider connections, linked accounts, and sync runs
 
-The scheduler is intentionally simple: a single Node process polls for due links and executes sync jobs. This keeps deployment to one container while still allowing account-level schedules.
+The scheduler runs inside a single Node process that polls for due links and executes sync jobs. This keeps deployment to one container while still allowing account-level schedules.
 
 ## Live sandbox mode
 
@@ -26,18 +26,19 @@ For interactive exploration against a real Actual server and real Plaid Sandbox 
 npm run dev:live-sandbox
 ```
 
-This bootstraps a temporary Dockerized Actual server, seeds an Actual budget with multiple bank accounts, points the app at that budget, and enables sandbox-only Plaid controls in the web UI.
+This boots a temporary Dockerized Actual server, seeds an Actual budget with multiple bank accounts, points the app at that budget, and enables sandbox-only Plaid controls in the web UI.
 
 What you get in this mode:
 
 - Accounts page backed by a real Actual Docker container
-- Connections page backed by real Plaid Sandbox APIs
+- Plaid Connections page backed by real Plaid Sandbox APIs
 - Extra Plaid sandbox buttons to seed additional test bank connections
 - Extra Plaid sandbox buttons to seed additional test transactions on a connection
+- Separate Teller.io Connections page for enrollment, account discovery, and connection management
 
 The launcher prefers `PLAID_CLIENT_ID` and `PLAID_SECRET`, but will fall back to `PLAID_TEST_CLIENT_ID` and `PLAID_TEST_SECRET` if needed.
 
-## Current Plaid behavior
+## Plaid
 
 - Plaid connections are created through Plaid Link.
 - Linked accounts are stored as provider account options for Actual accounts.
@@ -46,6 +47,46 @@ The launcher prefers `PLAID_CLIENT_ID` and `PLAID_SECRET`, but will fall back to
 - Sync imports posted transactions into Actual through `importTransactions`.
 - Pending transaction handling follows Plaid's `pending_transaction_id` model, and removed Plaid transactions are reconciled back out of Actual by `imported_id`.
 - In sandbox-enabled development mode, Plaid connections can also be created directly through `/sandbox/public_token/create`, and custom test transactions can be added through `/sandbox/transactions/create`.
+
+## Teller.io
+
+- Teller has a separate top-level `Teller.io Connections` page.
+- Teller Connect enrollment is wired end to end through the app.
+- Successful Teller enrollments are persisted as reusable provider connections and hydrated from Teller `/accounts` plus per-account `/balances`.
+- Teller transaction sync uses a date-window model with a configurable initial lookback plus overlap on later syncs.
+- Runtime config supports `TELLER_APP_ID`, `TELLER_ENV`, `TELLER_CERT_FILE`, `TELLER_KEY_FILE`, `TELLER_TRANSACTIONS_INITIAL_DAYS`, and `TELLER_TRANSACTIONS_OVERLAP_DAYS`.
+- Development and production Teller API access use mTLS credentials; sandbox does not require them.
+- Teller webhook consumption is supported at `POST /api/webhooks/teller` when `TELLER_WEBHOOK_SIGNING_SECRETS` is configured.
+- `transactions.processed` webhooks refresh Teller connections and auto-sync only enabled non-manual Teller links.
+- `enrollment.disconnected` webhooks mark the connection as disconnected and disable current links tied to that enrollment.
+- Optional local provider-fixture caching can persist the last successful Teller enrollment and SimpleFIN credentials for reuse in manual dev/live workflows.
+
+## SimpleFIN
+
+- SimpleFIN connections are created from one-time setup tokens.
+- Imported existing Actual `simpleFin` links can be matched against app-managed SimpleFIN connections.
+- SimpleFIN account refresh and transaction sync use a provider-managed date window.
+- Connection health distinguishes reconnect problems, upstream bank issues, and downstream sync failures.
+
+## Cached dev fixtures
+
+For manual live validation, Teller and SimpleFIN can optionally reuse the most recently successful sandbox/dev credentials from a local flat file instead of forcing a fresh Connect/setup-token flow every run.
+
+Enable it with:
+
+```bash
+PROVIDER_FIXTURE_CACHE_ENABLED=1
+PROVIDER_FIXTURE_CACHE_FILE=./.local/provider-fixtures.json
+```
+
+When enabled:
+
+- successful Teller enrollments update the cached Teller fixture
+- successful Teller sandbox seeding updates the cached Teller fixture
+- successful SimpleFIN setup-token connects update the cached SimpleFIN fixture
+- the Teller and SimpleFIN pages expose `Reuse cached ... fixture` actions
+
+This cache is intended for manual dev/live workflows, not deterministic automated tests. By default it is disabled, and the cache file path is git-ignored.
 
 ## Getting started
 
@@ -85,7 +126,7 @@ npm run test:watch
 npm run test:coverage
 ```
 
-Current coverage includes:
+Coverage includes:
 
 - Backend route integration tests using Fastify `inject()`
 - Backend service tests with isolated temporary SQLite databases

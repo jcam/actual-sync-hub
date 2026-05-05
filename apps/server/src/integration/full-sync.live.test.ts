@@ -6,6 +6,8 @@ import { createAppService } from "../services/app-service.js";
 import { createAuthService } from "../services/auth.js";
 import { createActualService } from "../services/actual-service.js";
 import { createPlaidService } from "../services/plaid-service.js";
+import { simplefinService } from "../services/simplefin-service.js";
+import { createTellerService } from "../services/teller-service.js";
 import { seedActualSandboxBudget } from "../dev/actual-fixture.js";
 import { hashPassword } from "../lib/password.js";
 import { createServer } from "../server.js";
@@ -74,10 +76,24 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
       prisma,
       config: plaidTestConfig
     });
+    const tellerService = createTellerService({
+      config: {
+        appId: "",
+        environment: "sandbox",
+        certificateFile: "",
+        keyFile: "",
+        sandboxAccessToken: "",
+        transactionsInitialDays: 90,
+        transactionsOverlapDays: 10,
+        webhookSigningSecrets: [],
+        webhookToleranceSeconds: 180
+      }
+    });
     const appService = createAppService({
       prisma,
       actualService,
       plaidService,
+      tellerService,
       runtime: {
         instanceLabel: "Live integration test",
         liveSandboxMode: true,
@@ -85,7 +101,16 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
         actualBudgetSyncIdConfigured: true,
         plaidEnabled: true,
         plaidEnvironment: "sandbox",
-        plaidSandboxToolsEnabled: true
+        plaidSandboxToolsEnabled: true,
+        plaidAutomaticSyncConcurrency: 2,
+        tellerEnabled: false,
+        tellerEnvironment: "sandbox",
+        tellerMtlsConfigured: false,
+        tellerWebhookSyncDebounceSeconds: 30,
+        tellerAutomaticSyncConcurrency: 1,
+        simplefinAutomaticSyncConcurrency: 2,
+        automaticSyncBackoffBaseMinutes: 5,
+        automaticSyncBackoffMaxMinutes: 60
       }
     });
     const authService = createAuthService({
@@ -100,6 +125,8 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
         prisma,
         actualService,
         plaidService,
+        simplefinService,
+        tellerService,
         appService,
         authService
       }

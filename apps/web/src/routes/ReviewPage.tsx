@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import type { MigrationPreviewDto } from "@actual-sync/shared";
 import { api } from "../api";
+import { getDisplayErrorMessage } from "../lib/errors";
 
 function formatCurrency(amount: number) {
   return amount.toLocaleString(undefined, {
@@ -41,7 +42,11 @@ export function ReviewPage() {
       );
     } catch (loadError) {
       setPreview(null);
-      setError(loadError instanceof Error ? loadError.message : `Failed to load ${pageLabel.toLowerCase()}`);
+      setError(
+        getDisplayErrorMessage(loadError, `Failed to load ${pageLabel.toLowerCase()}.`, {
+          serverUnavailableMessage: `Could not reach the API server to load ${pageLabel.toLowerCase()}.`
+        })
+      );
     }
   };
 
@@ -120,7 +125,7 @@ export function ReviewPage() {
           <span className="pill muted-pill">{groupedCounts.ignore} ignored</span>
         </div>
         <p className="muted">
-          Deselected rows will be skipped when this review is committed, and the provider cursor will advance past
+          Deselected rows will be skipped when this review is committed, and the provider sync state will advance past
           them.
         </p>
         <div className="button-row">

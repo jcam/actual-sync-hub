@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildPlaidCategoryNames, resolveActualCategoryId } from "./category-matching.js";
 
 describe("category matching", () => {
-  it("derives useful Plaid category variants", () => {
+  it("derives useful provider category variants", () => {
     expect(
       buildPlaidCategoryNames({
         primary: "FOOD_AND_DRINK",
@@ -11,7 +11,7 @@ describe("category matching", () => {
     ).toEqual(["Food And Drink Groceries", "Groceries", "Food And Drink"]);
   });
 
-  it("matches a leaf Plaid category to an Actual category", () => {
+  it("matches a leaf provider category to an Actual category", () => {
     expect(
       resolveActualCategoryId({
         categoryNames: ["Food And Drink Groceries", "Groceries", "Food And Drink"],
@@ -23,10 +23,22 @@ describe("category matching", () => {
     ).toBe("groceries");
   });
 
-  it("uses aliases for common Plaid-to-Actual category names", () => {
+  it("uses aliases for common provider-to-Actual category names", () => {
     expect(
       resolveActualCategoryId({
         categoryNames: ["Food And Drink Restaurants", "Restaurants", "Food And Drink"],
+        actualCategories: [
+          { id: "groceries", name: "Groceries" },
+          { id: "eating-out", name: "Eating Out" }
+        ]
+      })
+    ).toBe("eating-out");
+  });
+
+  it("maps Teller-style category names to common Actual categories", () => {
+    expect(
+      resolveActualCategoryId({
+        categoryNames: ["Dining"],
         actualCategories: [
           { id: "groceries", name: "Groceries" },
           { id: "eating-out", name: "Eating Out" }

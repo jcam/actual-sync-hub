@@ -2,22 +2,36 @@ import { useEffect, useState } from "react";
 import type { ActualAccountDto, RuntimeInfoDto, SyncRunDto } from "@actual-sync/shared";
 import { api } from "../api";
 import { AccountCard } from "../components/AccountCard";
+import { getDisplayErrorMessage } from "../lib/errors";
 
 export function AccountsPage() {
   const [accounts, setAccounts] = useState<ActualAccountDto[]>([]);
   const [runs, setRuns] = useState<SyncRunDto[]>([]);
   const [runtime, setRuntime] = useState<RuntimeInfoDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
-    const [nextAccounts, nextRuns, nextRuntime] = await Promise.all([
-      api.listAccounts(),
-      api.listSyncRuns(),
-      api.getRuntimeInfo()
-    ]);
-    setAccounts(nextAccounts);
-    setRuns(nextRuns);
-    setRuntime(nextRuntime);
+    try {
+      const [nextAccounts, nextRuns, nextRuntime] = await Promise.all([
+        api.listAccounts(),
+        api.listSyncRuns(),
+        api.getRuntimeInfo()
+      ]);
+      setAccounts(nextAccounts);
+      setRuns(nextRuns);
+      setRuntime(nextRuntime);
+      setError(null);
+    } catch (loadError) {
+      setAccounts([]);
+      setRuns([]);
+      setRuntime(null);
+      setError(
+        getDisplayErrorMessage(loadError, "Failed to load Actual accounts.", {
+          serverUnavailableMessage: "Could not reach the API server while loading Actual accounts."
+        })
+      );
+    }
   };
 
   useEffect(() => {
@@ -31,10 +45,10 @@ export function AccountsPage() {
   return (
     <div className="page-stack">
       <section className="hero-panel">
-        <p className="eyebrow">Main view</p>
-        <h2>Actual accounts stay central.</h2>
+        <p className="eyebrow">Accounts</p>
+        <h2>Map provider accounts onto your Actual budget.</h2>
         <p className="muted">
-          Each card reflects a live Actual account and the provider mapping that controls imports. This is the seam where non-bank providers can plug in later without changing the overall UX.
+          Each card shows one Actual account, its active provider link, and the sync settings that control imports.
         </p>
         {runtime ? (
           <p className="muted">
@@ -47,6 +61,7 @@ export function AccountsPage() {
             Refresh Actual accounts
           </button>
         </div>
+        {error ? <p className="error-text">{error}</p> : null}
       </section>
 
       <section className="account-grid">

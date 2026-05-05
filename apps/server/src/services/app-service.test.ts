@@ -17,7 +17,7 @@ describe.sequential("app service", () => {
       data: {
         provider: "PLAID",
         label: "Primary",
-        itemId: "item-1",
+        providerItemId: "item-1",
         accessTokenCiphertext: "cipher"
       }
     });
@@ -89,9 +89,600 @@ describe.sequential("app service", () => {
     });
 
     expect(JSON.parse(link.configJson || "{}")).toEqual({
+      health: null,
       categoryMappings: [],
       seenCategoryNames: []
     });
+  });
+
+  it("surfaces existing Actual bank-sync links alongside current local link state", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "TELLER",
+        label: "Primary Teller",
+        providerItemId: "enr-current",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "acct-current",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    const currentLink = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Checking",
+        assetType: "BANK",
+        provider: "TELLER",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "MANUAL",
+        isEnabled: true
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        listBankSyncLinks: vi.fn().mockResolvedValue([
+          {
+            actualAccountId: "actual-1",
+            actualAccountName: "Checking",
+            actualOfficialName: "Main Checking",
+            accountSyncSource: "simpleFin",
+            externalAccountId: "sf-account-1",
+            actualBankId: "bank-row-1",
+            actualBankName: "SimpleFIN Credit Union",
+            actualBankExternalId: "credit-union.example",
+            mask: "1111",
+            balanceCurrent: 321.45,
+            balanceAvailable: 300.12,
+            balanceLimit: null,
+            closed: false,
+            offbudget: false,
+            lastSyncedAt: "2026-05-05"
+          },
+          {
+            actualAccountId: "actual-2",
+            actualAccountName: "Savings",
+            actualOfficialName: null,
+            accountSyncSource: "goCardless",
+            externalAccountId: "gc-account-2",
+            actualBankId: null,
+            actualBankName: null,
+            actualBankExternalId: null,
+            mask: null,
+            balanceCurrent: null,
+            balanceAvailable: null,
+            balanceLimit: null,
+            closed: false,
+            offbudget: false,
+            lastSyncedAt: null
+          }
+        ]),
+        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions: vi.fn(),
+        previewImportTransactions: vi.fn()
+      } as never
+    });
+
+    const links = await service.listActualBankSyncLinks();
+
+    expect(links).toEqual([
+      {
+        actualAccountId: "actual-1",
+        actualAccountName: "Checking",
+        actualOfficialName: "Main Checking",
+        accountSyncSource: "simpleFin",
+        externalAccountId: "sf-account-1",
+        actualBankId: "bank-row-1",
+        actualBankName: "SimpleFIN Credit Union",
+        actualBankExternalId: "credit-union.example",
+        mask: "1111",
+        balanceCurrent: 321.45,
+        balanceAvailable: 300.12,
+        balanceLimit: null,
+        closed: false,
+        offbudget: false,
+        lastSyncedAt: "2026-05-05",
+        currentLinkId: currentLink.id,
+        currentLinkProvider: "TELLER",
+        currentLinkStatus: "ACTIVE"
+      },
+      {
+        actualAccountId: "actual-2",
+        actualAccountName: "Savings",
+        actualOfficialName: null,
+        accountSyncSource: "goCardless",
+        externalAccountId: "gc-account-2",
+        actualBankId: null,
+        actualBankName: null,
+        actualBankExternalId: null,
+        mask: null,
+        balanceCurrent: null,
+        balanceAvailable: null,
+        balanceLimit: null,
+        closed: false,
+        offbudget: false,
+        lastSyncedAt: null,
+        currentLinkId: null,
+        currentLinkProvider: null,
+        currentLinkStatus: null
+      }
+    ]);
+  });
+
+  it("imports matching existing Actual SimpleFIN links into local account links", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "SIMPLEFIN",
+        label: "Household SimpleFIN",
+        providerItemId: "https://bridge.simplefin.org|user",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const checking = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "sf-checking",
+        name: "Checking",
+        type: "bank"
+      }
+    });
+
+    await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "sf-savings",
+        name: "Savings",
+        type: "bank"
+      }
+    });
+
+    const otherConnection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Other provider",
+        providerItemId: "item-other",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-existing",
+        actualAccountName: "Already linked elsewhere",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: otherConnection.id,
+        connectionAccountId: null,
+        syncFrequency: "MANUAL",
+        isEnabled: false
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        listBankSyncLinks: vi.fn().mockResolvedValue([
+          {
+            actualAccountId: "actual-checking",
+            actualAccountName: "Household Checking",
+            actualOfficialName: "Household Checking",
+            accountSyncSource: "simpleFin",
+            externalAccountId: "sf-checking",
+            actualBankId: "bank-row-1",
+            actualBankName: "SimpleFIN CU",
+            actualBankExternalId: "simplefin.example",
+            mask: null,
+            balanceCurrent: 123.45,
+            balanceAvailable: null,
+            balanceLimit: null,
+            closed: false,
+            offbudget: false,
+            lastSyncedAt: "2026-05-05"
+          },
+          {
+            actualAccountId: "actual-missing",
+            actualAccountName: "No matching provider account",
+            actualOfficialName: null,
+            accountSyncSource: "simpleFin",
+            externalAccountId: "sf-missing",
+            actualBankId: "bank-row-2",
+            actualBankName: "SimpleFIN CU",
+            actualBankExternalId: "simplefin.example",
+            mask: null,
+            balanceCurrent: 0,
+            balanceAvailable: null,
+            balanceLimit: null,
+            closed: false,
+            offbudget: false,
+            lastSyncedAt: null
+          },
+          {
+            actualAccountId: "actual-existing",
+            actualAccountName: "Already linked elsewhere",
+            actualOfficialName: null,
+            accountSyncSource: "simpleFin",
+            externalAccountId: "sf-checking",
+            actualBankId: "bank-row-3",
+            actualBankName: "SimpleFIN CU",
+            actualBankExternalId: "simplefin.example",
+            mask: null,
+            balanceCurrent: 0,
+            balanceAvailable: null,
+            balanceLimit: null,
+            closed: false,
+            offbudget: false,
+            lastSyncedAt: null
+          }
+        ]),
+        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions: vi.fn(),
+        previewImportTransactions: vi.fn()
+      } as never
+    });
+
+    const summary = await service.importExistingSimpleFinLinks(connection.id);
+
+    expect(summary).toEqual({
+      imported: 1,
+      updated: 0,
+      skipped: 1,
+      unmatched: 1
+    });
+
+    const importedLink = await prisma.accountLink.findFirstOrThrow({
+      where: {
+        actualAccountId: "actual-checking",
+        provider: "SIMPLEFIN"
+      }
+    });
+    expect(importedLink.connectionId).toBe(connection.id);
+    expect(importedLink.connectionAccountId).toBe(checking.id);
+    expect(importedLink.syncFrequency).toBe("MANUAL");
+    expect(importedLink.isEnabled).toBe(false);
+  });
+
+  it("clears the saved Teller sync window when the provider mapping changes", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "TELLER",
+        label: "Primary Teller",
+        providerItemId: "enr-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const firstAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "acct-1",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    const secondAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "acct-2",
+        name: "Savings",
+        type: "depository"
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "TELLER",
+        connectionId: connection.id,
+        connectionAccountId: firstAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true,
+        configJson: JSON.stringify({ tellerLastSyncEndDate: "2026-05-01" })
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions: vi.fn()
+      } as never,
+      tellerService: {
+        syncAccountLink: vi.fn()
+      } as never
+    });
+
+    await service.upsertAccountLink("actual-1", {
+      actualAccountName: "Household Checking",
+      assetType: "BANK",
+      provider: "TELLER",
+      connectionId: connection.id,
+      connectionAccountId: secondAccount.id,
+      syncFrequency: "DAILY",
+      isEnabled: true,
+      categoryMappings: []
+    });
+
+    const link = await prisma.accountLink.findFirstOrThrow({
+      where: {
+        actualAccountId: "actual-1",
+        status: {
+          in: ["ACTIVE", "MIGRATING"]
+        }
+      }
+    });
+
+    expect(JSON.parse(link.configJson || "{}")).toEqual({
+      health: null,
+      categoryMappings: [],
+      seenCategoryNames: []
+    });
+  });
+
+  it("disables Teller links when an enrollment is disconnected", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "TELLER",
+        label: "Primary Teller",
+        providerItemId: "enr-1",
+        accessTokenCiphertext: "cipher",
+        metadataJson: JSON.stringify({
+          teller: {
+            environment: "sandbox"
+          }
+        })
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "TELLER",
+        connectionId: connection.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    const service = createAppService({
+      prisma
+    });
+
+    await service.handleTellerWebhook({
+      id: "wh-1",
+      type: "enrollment.disconnected",
+      timestamp: "2026-05-05T00:00:00Z",
+      payload: {
+        enrollment_id: "enr-1",
+        reason: "disconnected.credentials_invalid"
+      }
+    });
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const updatedLink = await prisma.accountLink.findFirstOrThrow({
+      where: {
+        connectionId: connection.id
+      }
+    });
+
+    expect(updatedConnection.status).toBe("DISCONNECTED");
+    expect(updatedConnection.metadataJson).toContain("disconnected.credentials_invalid");
+    expect(updatedLink.isEnabled).toBe(false);
+  });
+
+  it("runs scheduled Teller links when a transactions webhook arrives", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "TELLER",
+        label: "Primary Teller",
+        providerItemId: "enr-2",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    await prisma.accountLink.createMany({
+      data: [
+        {
+          actualAccountId: "actual-1",
+          actualAccountName: "Scheduled Account",
+          assetType: "BANK",
+          provider: "TELLER",
+          connectionId: connection.id,
+          syncFrequency: "DAILY",
+          isEnabled: true
+        },
+        {
+          actualAccountId: "actual-2",
+          actualAccountName: "Manual Account",
+          assetType: "BANK",
+          provider: "TELLER",
+          connectionId: connection.id,
+          syncFrequency: "MANUAL",
+          isEnabled: true
+        }
+      ]
+    });
+
+    const service = createAppService({
+      prisma,
+      tellerService: {
+        provider: "TELLER",
+        isConfigured: vi.fn().mockReturnValue(true),
+        getConnectConfig: vi.fn(),
+        enrollConnection: vi.fn(),
+        seedSandboxConnection: vi.fn(),
+        webhooksConfigured: vi.fn().mockReturnValue(true),
+        verifyWebhookSignature: vi.fn().mockReturnValue(true),
+        syncAccountLink: vi.fn()
+      } as never,
+      runtime: {
+        instanceLabel: "Test",
+        liveSandboxMode: false,
+        actualServerUrl: "http://127.0.0.1:5006",
+        actualBudgetSyncIdConfigured: true,
+        plaidEnabled: true,
+        plaidEnvironment: "sandbox",
+        plaidSandboxToolsEnabled: true,
+        plaidAutomaticSyncConcurrency: 2,
+        tellerEnabled: true,
+        tellerEnvironment: "sandbox",
+        tellerMtlsConfigured: false,
+        tellerWebhookSyncDebounceSeconds: 30,
+        tellerAutomaticSyncConcurrency: 1,
+        simplefinAutomaticSyncConcurrency: 2,
+        automaticSyncBackoffBaseMinutes: 5,
+        automaticSyncBackoffMaxMinutes: 60
+      }
+    });
+    const runScheduledLinkSyncs = vi.spyOn(service, "runScheduledLinkSyncs").mockResolvedValue(undefined);
+
+    await service.handleTellerWebhook({
+      id: "wh-2",
+      type: "transactions.processed",
+      timestamp: "2026-05-05T00:00:00Z",
+      payload: {
+        enrollment_id: "enr-2",
+        transactions: []
+      }
+    });
+
+    expect(runScheduledLinkSyncs).toHaveBeenCalledTimes(1);
+    expect(runScheduledLinkSyncs).toHaveBeenCalledWith([expect.any(String)]);
+  });
+
+  it("debounces repeated Teller transactions webhooks for the same connection", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "TELLER",
+        label: "Primary Teller",
+        providerItemId: "enr-2",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Scheduled Account",
+        assetType: "BANK",
+        provider: "TELLER",
+        connectionId: connection.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      tellerService: {
+        provider: "TELLER",
+        isConfigured: vi.fn().mockReturnValue(true),
+        getConnectConfig: vi.fn(),
+        enrollConnection: vi.fn(),
+        seedSandboxConnection: vi.fn(),
+        webhooksConfigured: vi.fn().mockReturnValue(true),
+        verifyWebhookSignature: vi.fn().mockReturnValue(true),
+        syncAccountLink: vi.fn()
+      } as never,
+      runtime: {
+        instanceLabel: "Test",
+        liveSandboxMode: false,
+        actualServerUrl: "http://127.0.0.1:5006",
+        actualBudgetSyncIdConfigured: true,
+        plaidEnabled: true,
+        plaidEnvironment: "sandbox",
+        plaidSandboxToolsEnabled: true,
+        plaidAutomaticSyncConcurrency: 2,
+        tellerEnabled: true,
+        tellerEnvironment: "sandbox",
+        tellerMtlsConfigured: false,
+        tellerWebhookSyncDebounceSeconds: 30,
+        tellerAutomaticSyncConcurrency: 1,
+        simplefinAutomaticSyncConcurrency: 2,
+        automaticSyncBackoffBaseMinutes: 5,
+        automaticSyncBackoffMaxMinutes: 60
+      },
+      now: () => new Date("2026-05-05T00:00:10.000Z")
+    });
+    const runScheduledLinkSyncs = vi.spyOn(service, "runScheduledLinkSyncs").mockResolvedValue(undefined);
+
+    await prisma.connection.update({
+      where: {
+        id: connection.id
+      },
+      data: {
+        metadataJson: JSON.stringify({
+          teller: {
+            lastWebhookSyncStartedAt: "2026-05-05T00:00:00.000Z"
+          }
+        })
+      }
+    });
+
+    await service.handleTellerWebhook({
+      id: "wh-3",
+      type: "transactions.processed",
+      timestamp: "2026-05-05T00:00:10Z",
+      payload: {
+        enrollment_id: "enr-2",
+        transactions: []
+      }
+    });
+
+    expect(runScheduledLinkSyncs).not.toHaveBeenCalled();
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+    expect(metadata.teller.lastWebhookSkipReason).toBe("debounced");
   });
 
   it("creates a migrating replacement link when a synced provider link is switched", async () => {
@@ -102,7 +693,7 @@ describe.sequential("app service", () => {
       data: {
         provider: "PLAID",
         label: "Primary",
-        itemId: "item-1",
+        providerItemId: "item-1",
         accessTokenCiphertext: "cipher"
       }
     });
@@ -214,7 +805,7 @@ describe.sequential("app service", () => {
       data: {
         provider: "PLAID",
         label: "Primary",
-        itemId: "item-1",
+        providerItemId: "item-1",
         accessTokenCiphertext: "cipher"
       }
     });
@@ -277,7 +868,11 @@ describe.sequential("app service", () => {
           imported: 1,
           transactions: syncedTransactions,
           removedImportedIds: [],
-          nextCursor: "cursor-2"
+          configPatch: {
+            providerSyncState: {
+              cursor: "cursor-2"
+            }
+          }
         })
       } as never,
       now: () => now
@@ -311,7 +906,7 @@ describe.sequential("app service", () => {
       }
     ], []);
     expect(link.lastSyncedAt?.toISOString()).toBe(now.toISOString());
-    expect(link.configJson).toContain("cursor-2");
+    expect(link.configJson).toContain("\"cursor\":\"cursor-2\"");
     expect(runs).toHaveLength(1);
     expect(runs[0]?.status).toBe("SUCCESS");
     expect(runs[0]?.summary).toBe("Imported 1 transactions, updated 0, removed 0.");
@@ -333,7 +928,7 @@ describe.sequential("app service", () => {
       data: {
         provider: "PLAID",
         label: "Primary",
-        itemId: "item-1",
+        providerItemId: "item-1",
         accessTokenCiphertext: "cipher"
       }
     });
@@ -405,7 +1000,11 @@ describe.sequential("app service", () => {
             }
           ],
           removedImportedIds: ["plaid-1"],
-          nextCursor: "cursor-migrated"
+          configPatch: {
+            providerSyncState: {
+              cursor: "cursor-migrated"
+            }
+          }
         })
       } as never,
       now: () => syncTime
@@ -436,7 +1035,7 @@ describe.sequential("app service", () => {
 
     expect(currentLink.migrationCompletedAt?.toISOString()).toBe(syncTime.toISOString());
     expect(currentLink.lastSyncedAt?.toISOString()).toBe(syncTime.toISOString());
-    expect(currentLink.configJson).toContain("cursor-migrated");
+    expect(currentLink.configJson).toContain("\"cursor\":\"cursor-migrated\"");
     expect(syncRuns[0]?.summary).toBe("Migration sync imported 1 transactions, updated 1, removed 0.");
     expect(ledgerRows[0]).toMatchObject({
       importedId: "plaid-1",
@@ -453,7 +1052,7 @@ describe.sequential("app service", () => {
       data: {
         provider: "PLAID",
         label: "Primary",
-        itemId: "item-1",
+        providerItemId: "item-1",
         accessTokenCiphertext: "cipher"
       }
     });
@@ -537,7 +1136,11 @@ describe.sequential("app service", () => {
             }
           ],
           removedImportedIds: [],
-          nextCursor: "cursor-2"
+          configPatch: {
+            providerSyncState: {
+              cursor: "cursor-2"
+            }
+          }
         })
       } as never
     });
@@ -562,7 +1165,7 @@ describe.sequential("app service", () => {
       data: {
         provider: "PLAID",
         label: "Primary",
-        itemId: "item-1",
+        providerItemId: "item-1",
         accessTokenCiphertext: "cipher"
       }
     });
@@ -675,7 +1278,11 @@ describe.sequential("app service", () => {
             }
           ],
           removedImportedIds: [],
-          nextCursor: "cursor-3"
+          configPatch: {
+            providerSyncState: {
+              cursor: "cursor-3"
+            }
+          }
         })
       } as never,
       now: () => new Date("2026-05-04T12:00:00.000Z")
@@ -711,7 +1318,7 @@ describe.sequential("app service", () => {
       data: {
         provider: "PLAID",
         label: "Primary",
-        itemId: "item-1",
+        providerItemId: "item-1",
         accessTokenCiphertext: "cipher"
       }
     });
@@ -789,7 +1396,11 @@ describe.sequential("app service", () => {
             }
           ],
           removedImportedIds: [],
-          nextCursor: "cursor-4"
+          configPatch: {
+            providerSyncState: {
+              cursor: "cursor-4"
+            }
+          }
         })
       } as never,
       now: () => currentTime
@@ -815,7 +1426,7 @@ describe.sequential("app service", () => {
       data: {
         provider: "PLAID",
         label: "Primary",
-        itemId: "item-1",
+        providerItemId: "item-1",
         accessTokenCiphertext: "cipher"
       }
     });
@@ -880,7 +1491,11 @@ describe.sequential("app service", () => {
           imported: 0,
           transactions: [],
           removedImportedIds: ["gone-1"],
-          nextCursor: "cursor-5"
+          configPatch: {
+            providerSyncState: {
+              cursor: "cursor-5"
+            }
+          }
         })
       } as never
     });
@@ -890,4 +1505,96 @@ describe.sequential("app service", () => {
     expect(reconcileTransactions).toHaveBeenCalledWith("actual-1", [], ["gone-1"]);
     expect(await prisma.importedTransaction.count()).toBe(0);
   });
+
+  it("persists Actual backend failures on the account link instead of treating them as reauth problems", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary",
+        providerItemId: "item-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "ext-1",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    const link = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions: vi.fn().mockRejectedValue(new Error("Actual import failed"))
+      } as never,
+      plaidService: {
+        syncAccountLink: vi.fn().mockResolvedValue({
+          imported: 1,
+          transactions: [
+            {
+              date: "2026-05-04",
+              amount: -9.99,
+              payeeName: "Corner Market",
+              importedPayee: "CORNER MARKET",
+              importedId: "new-1",
+              cleared: true,
+              categoryNames: [],
+              searchText: ["Corner Market"]
+            }
+          ],
+          removedImportedIds: [],
+          configPatch: {
+            providerSyncState: {
+              cursor: "cursor-6"
+            }
+          }
+        })
+      } as never
+    });
+
+    await expect(service.runAccountSync("actual-1")).rejects.toThrow("Actual import failed");
+
+    const refreshedLink = await prisma.accountLink.findUniqueOrThrow({
+      where: {
+        id: link.id
+      }
+    });
+    const config = JSON.parse(refreshedLink.configJson || "{}");
+    const runs = await prisma.syncRun.findMany();
+
+    expect(config.health).toMatchObject({
+      state: "ERROR",
+      scope: "ACTUAL_BACKEND",
+      action: "RETRY",
+      message: "Actual import failed"
+    });
+    expect(runs[0]).toMatchObject({
+      status: "FAILED",
+      error: "Actual import failed"
+    });
+  });
+
 });

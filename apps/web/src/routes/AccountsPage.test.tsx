@@ -69,6 +69,11 @@ describe("AccountsPage", () => {
         environment: "sandbox",
         sandboxToolsEnabled: true
       },
+      teller: {
+        enabled: false,
+        environment: "sandbox",
+        mtlsConfigured: false
+      },
       actual: {
         serverUrl: "http://127.0.0.1:5006",
         budgetSyncIdConfigured: true

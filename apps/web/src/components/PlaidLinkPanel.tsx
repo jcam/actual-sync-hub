@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
 import { api } from "../api";
+import { getDisplayErrorMessage } from "../lib/errors";
 
 export function PlaidLinkPanel({
   onConnected,
@@ -15,20 +16,40 @@ export function PlaidLinkPanel({
   const [busy, setBusy] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void api.createPlaidLinkToken().then(result => setToken(result.linkToken));
+    void api
+      .createPlaidLinkToken()
+      .then(result => {
+        setToken(result.linkToken);
+        setError(null);
+      })
+      .catch(loadError => {
+        setError(
+          getDisplayErrorMessage(loadError, "Failed to prepare Plaid Link.", {
+            serverUnavailableMessage: "Could not reach the API server to prepare Plaid Link."
+          })
+        );
+      });
   }, []);
 
   const plaid = usePlaidLink({
     token,
     onSuccess: async publicToken => {
       setBusy(true);
+      setError(null);
       try {
         await api.exchangePlaidPublicToken(publicToken);
         await onConnected();
         const nextToken = await api.createPlaidLinkToken();
         setToken(nextToken.linkToken);
+      } catch (exchangeError) {
+        setError(
+          getDisplayErrorMessage(exchangeError, "Failed to finish the Plaid connection.", {
+            serverUnavailableMessage: "Could not reach the API server to finish the Plaid connection."
+          })
+        );
       } finally {
         setBusy(false);
       }
@@ -40,7 +61,7 @@ export function PlaidLinkPanel({
       <p className="eyebrow">Plaid setup</p>
       <h2>Connect institutions once, then reuse them from each Actual account.</h2>
       <p className="muted">
-        Connections populate the available provider accounts. Mapping and schedule choices stay at the Actual account level so future providers can share the same workflow.
+        Plaid connections supply reusable provider accounts. Link, schedule, and review settings stay with each Actual account.
       </p>
       <div className="button-row">
         <button className="primary-button" onClick={() => plaid.open()} disabled={!plaid.ready || busy || !token}>
@@ -50,25 +71,39 @@ export function PlaidLinkPanel({
           className="ghost-button"
           onClick={async () => {
             setRefreshing(true);
+            setError(null);
             try {
               await api.refreshAllConnections();
               await onRefreshAll();
+            } catch (refreshError) {
+              setError(
+                getDisplayErrorMessage(refreshError, "Failed to refresh Plaid connections.", {
+                  serverUnavailableMessage: "Could not reach the API server to refresh Plaid connections."
+                })
+              );
             } finally {
               setRefreshing(false);
             }
           }}
           disabled={refreshing}
         >
-          {refreshing ? "Polling Plaid..." : "Poll all connection accounts"}
+          {refreshing ? "Refreshing Plaid..." : "Refresh all Plaid accounts"}
         </button>
         {sandboxToolsEnabled ? (
           <button
             className="ghost-button"
             onClick={async () => {
               setSeeding(true);
+              setError(null);
               try {
                 await api.seedPlaidSandboxConnection();
                 await onConnected();
+              } catch (seedError) {
+                setError(
+                  getDisplayErrorMessage(seedError, "Failed to seed a Plaid sandbox connection.", {
+                    serverUnavailableMessage: "Could not reach the API server to seed a Plaid sandbox connection."
+                  })
+                );
               } finally {
                 setSeeding(false);
               }
@@ -80,8 +115,9 @@ export function PlaidLinkPanel({
         ) : null}
       </div>
       {sandboxToolsEnabled ? (
-        <p className="muted">Sandbox mode detected. Extra controls can create Plaid Sandbox Items and seed test transactions without using Link.</p>
+        <p className="muted">Sandbox tools can create Plaid test institutions and seed transactions without opening Link.</p>
       ) : null}
+      {error ? <p className="error-text">{error}</p> : null}
     </section>
   );
 }

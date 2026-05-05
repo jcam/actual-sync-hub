@@ -1,13 +1,17 @@
 import type {
   ActualAccountDto,
+  ActualBankSyncLinkDto,
   CommitMigrationPayload,
+  ConnectionReauthSessionDto,
   ConnectionDto,
   MigrationPreviewDto,
   RuntimeInfoDto,
   SessionDto,
   SyncRunDto,
+  TellerConnectConfigDto,
   UpdateAccountLinkPayload
 } from "@actual-sync/shared";
+import { ApiError } from "./lib/errors";
 
 async function request<T>(input: RequestInfo, init?: RequestInit) {
   const hasBody = init?.body !== undefined && init?.body !== null;
@@ -24,7 +28,7 @@ async function request<T>(input: RequestInfo, init?: RequestInit) {
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error || `Request failed with status ${response.status}`);
+    throw new ApiError(payload.error || `Request failed with status ${response.status}`, response.status);
   }
 
   return response.json() as Promise<T>;
@@ -64,6 +68,9 @@ export const api = {
   listAccounts() {
     return request<ActualAccountDto[]>("/api/actual/accounts");
   },
+  listActualBankSyncLinks() {
+    return request<ActualBankSyncLinkDto[]>("/api/actual/bank-sync-links");
+  },
   listConnections() {
     return request<ConnectionDto[]>("/api/connections");
   },
@@ -78,8 +85,69 @@ export const api = {
       body: JSON.stringify({ publicToken, label })
     });
   },
+  connectSimpleFin(setupToken: string, label?: string) {
+    return request<{ connectionId: string }>("/api/connections/simplefin/connect", {
+      method: "POST",
+      body: JSON.stringify({
+        setupToken,
+        ...(label ? { label } : {})
+      })
+    });
+  },
+  reuseCachedSimpleFinConnection(label?: string) {
+    return request<{ connectionId: string }>("/api/connections/simplefin/reuse-cached", {
+      method: "POST",
+      body: JSON.stringify(label ? { label } : {})
+    });
+  },
+  importExistingSimpleFinLinks(connectionId: string) {
+    return request<{ imported: number; updated: number; skipped: number; unmatched: number }>(
+      "/api/connections/simplefin/import-existing",
+      {
+        method: "POST",
+        body: JSON.stringify({ connectionId })
+      }
+    );
+  },
+  getTellerConnectConfig() {
+    return request<TellerConnectConfigDto>("/api/connections/teller/connect-config");
+  },
+  enrollTellerConnection(payload: {
+    accessToken: string;
+    enrollmentId: string;
+    userId?: string | null;
+    institutionName?: string | null;
+    label?: string | null;
+  }) {
+    return request<{ connectionId: string }>("/api/connections/teller/enroll", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  reuseCachedTellerConnection(label?: string) {
+    return request<{ connectionId: string }>("/api/connections/teller/reuse-cached", {
+      method: "POST",
+      body: JSON.stringify(label ? { label } : {})
+    });
+  },
+  seedTellerSandboxConnection(label?: string) {
+    return request<{ connectionId: string }>("/api/connections/teller/sandbox/seed-connection", {
+      method: "POST",
+      body: JSON.stringify(label ? { label } : {})
+    });
+  },
   refreshConnection(id: string) {
     return request<{ ok: boolean }>(`/api/connections/${id}/refresh`, {
+      method: "POST"
+    });
+  },
+  createConnectionReauthSession(id: string) {
+    return request<ConnectionReauthSessionDto>(`/api/connections/${id}/reauth-session`, {
+      method: "POST"
+    });
+  },
+  disconnectConnection(id: string) {
+    return request<{ ok: boolean }>(`/api/connections/${id}/disconnect`, {
       method: "POST"
     });
   },

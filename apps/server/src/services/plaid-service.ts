@@ -1,3 +1,4 @@
+import type { ConnectionReauthSessionDto } from "@actual-sync/shared";
 import {
   Configuration,
   CountryCode,
@@ -10,6 +11,9 @@ import { prisma } from "../db.js";
 import { env } from "../env.js";
 import { decryptString, encryptString } from "../lib/crypto.js";
 import { buildPlaidCategoryNames } from "./category-matching.js";
+import { parseLinkConfig } from "./link-config.js";
+import type { ProviderAdapter, ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
+import { clearSyncHealth, ProviderOperationError, toSyncHealth } from "./sync-health.js";
 type DatabaseClient = typeof prisma;
 
 export interface PlaidConfig {
@@ -40,42 +44,64 @@ function getPlaidClient(config: PlaidConfig) {
   );
 }
 
-function parseLinkConfig(configJson: string | null) {
-  if (!configJson) {
+function parseConnectionMetadata(json: string | null | undefined) {
+  if (!json) {
     return {};
   }
 
   try {
-    return JSON.parse(configJson) as { plaidCursor?: string };
+    return JSON.parse(json) as Record<string, unknown>;
   } catch {
     return {};
   }
 }
 
-export interface PlaidSyncTransaction {
-  date: string;
-  amount: number;
-  payeeName: string;
-  importedPayee?: string;
-  notes?: string;
-  importedId: string;
-  cleared: boolean;
-  categoryNames?: string[];
-  searchText?: string[];
+function classifyPlaidError(error: unknown) {
+  const message = error instanceof Error ? error.message : "Unknown Plaid error";
+  const errorCode =
+    typeof error === "object" && error && "response" in error
+      ? ((error as { response?: { data?: { error_code?: string; error_message?: string } } }).response?.data?.error_code ??
+        undefined)
+      : undefined;
+  const status =
+    typeof error === "object" && error && "response" in error
+      ? ((error as { response?: { status?: number } }).response?.status ?? undefined)
+      : undefined;
+
+  if (errorCode === "RATE_LIMIT_EXCEEDED" || status === 429) {
+    return new ProviderOperationError(message, {
+      code: "RATE_LIMIT_EXCEEDED",
+      healthState: "ERROR",
+      healthScope: "SYNC_PIPELINE",
+      healthAction: "RETRY"
+    });
+  }
+
+  if (errorCode === "ITEM_LOGIN_REQUIRED" || errorCode === "INVALID_ACCESS_TOKEN") {
+    return new ProviderOperationError(message, {
+      code: errorCode,
+      healthState: "REAUTH_REQUIRED",
+      healthScope: errorCode === "ITEM_LOGIN_REQUIRED" ? "BANK_AUTH" : "CONNECTION_AUTH",
+      healthAction: errorCode === "ITEM_LOGIN_REQUIRED" ? "REAUTH_BANK" : "REAUTH_CONNECTION"
+    });
+  }
+
+  return new ProviderOperationError(message, {
+    code: errorCode,
+    healthState: "ERROR",
+    healthScope: "CONNECTION_AUTH",
+    healthAction: "RETRY"
+  });
 }
 
-interface PlaidSyncResult {
-  imported: number;
-  transactions: PlaidSyncTransaction[];
-  removedImportedIds: string[];
-  nextCursor: string | null;
-}
+export interface PlaidSyncTransaction extends ProviderSyncTransaction {}
 
-export interface PlaidService {
+interface PlaidSyncResult extends ProviderSyncResult {}
+
+export interface PlaidService extends ProviderAdapter {
   createLinkToken(userId: string): Promise<string>;
+  createUpdateLinkToken(connectionId: string, userId: string): Promise<string>;
   exchangePublicToken(publicToken: string, label?: string): Promise<string>;
-  refreshConnection(connectionId: string): Promise<void>;
-  syncAccountLink(linkId: string): Promise<PlaidSyncResult>;
   seedSandboxConnection(label?: string): Promise<string>;
   seedSandboxTransactions(connectionId: string, count?: number): Promise<{ added: number }>;
 }
@@ -147,21 +173,82 @@ export function createPlaidService({
   prisma?: DatabaseClient;
   config?: PlaidConfig;
 } = {}): PlaidService {
+  const createLinkTokenPayload = ({
+    userId,
+    accessToken
+  }: {
+    userId: string;
+    accessToken?: string;
+  }) => ({
+    client_name: "Actual Sync Hub",
+    country_codes: config.countryCodes as CountryCode[],
+    language: "en",
+    ...(accessToken
+      ? {
+          access_token: accessToken
+        }
+      : {
+          products: config.products as Products[],
+          transactions: getPlaidTransactionsConfig(config)
+        }),
+    user: {
+      client_user_id: userId
+    }
+  });
+
   return {
+    provider: "PLAID",
+    isConfigured() {
+      return Boolean(config.clientId && config.secret);
+    },
+
     async createLinkToken(userId: string) {
       const client = getPlaidClient(config);
       const response = await client.linkTokenCreate({
-      client_name: "Actual Sync Hub",
-      country_codes: config.countryCodes as CountryCode[],
-      language: "en",
-      products: config.products as Products[],
-      transactions: getPlaidTransactionsConfig(config),
-      user: {
-        client_user_id: userId
-      }
-    });
+        ...createLinkTokenPayload({
+          userId
+        })
+      });
 
       return response.data.link_token;
+    },
+
+    async createUpdateLinkToken(connectionId: string, userId: string) {
+      const connection = await database.connection.findUniqueOrThrow({
+        where: {
+          id: connectionId
+        }
+      });
+
+      if (connection.provider !== "PLAID") {
+        throw new Error("Connection is not a Plaid item");
+      }
+
+      const client = getPlaidClient(config);
+      const accessToken = decryptString(connection.accessTokenCiphertext);
+      const response = await client.linkTokenCreate({
+        ...createLinkTokenPayload({
+          userId,
+          accessToken
+        })
+      });
+
+      return response.data.link_token;
+    },
+
+    async createReauthSession({
+      connectionId,
+      userId
+    }: {
+      connectionId: string;
+      userId: string;
+    }): Promise<ConnectionReauthSessionDto> {
+      return {
+        provider: "PLAID",
+        connectionId,
+        mode: "plaid_update",
+        linkToken: await this.createUpdateLinkToken(connectionId, userId)
+      };
     },
 
     async exchangePublicToken(publicToken: string, label?: string) {
@@ -188,7 +275,10 @@ export function createPlaidService({
 
       const connection = await database.connection.upsert({
       where: {
-        itemId
+        provider_providerItemId: {
+          provider: "PLAID",
+          providerItemId: itemId
+        }
       },
       update: {
         label: label || institutionName || "Plaid connection",
@@ -198,7 +288,8 @@ export function createPlaidService({
         accessTokenCiphertext: encryptString(accessToken),
         lastRefreshedAt: new Date(),
         metadataJson: JSON.stringify({
-          item: item.data.item
+          item: item.data.item,
+          health: clearSyncHealth()
         })
       },
       create: {
@@ -207,11 +298,12 @@ export function createPlaidService({
         status: "ACTIVE",
         institutionId: item.data.item.institution_id || null,
         institutionName,
-        itemId,
+        providerItemId: itemId,
         accessTokenCiphertext: encryptString(accessToken),
         lastRefreshedAt: new Date(),
         metadataJson: JSON.stringify({
-          item: item.data.item
+          item: item.data.item,
+          health: clearSyncHealth()
         })
       }
     });
@@ -247,42 +339,65 @@ export function createPlaidService({
       }
     });
 
-      const client = getPlaidClient(config);
-      const accessToken = decryptString(connection.accessTokenCiphertext);
-      const accounts = await client.accountsGet({
-      access_token: accessToken
-    });
+      try {
+        const client = getPlaidClient(config);
+        const accessToken = decryptString(connection.accessTokenCiphertext);
+        const accounts = await client.accountsGet({
+          access_token: accessToken
+        });
 
-      await database.connectionAccount.deleteMany({
-      where: {
-        connectionId: connection.id
+        await database.connectionAccount.deleteMany({
+          where: {
+            connectionId: connection.id
+          }
+        });
+
+        await database.connectionAccount.createMany({
+          data: accounts.data.accounts.map(account => ({
+            connectionId: connection.id,
+            externalAccountId: account.account_id,
+            name: account.name,
+            officialName: account.official_name,
+            mask: account.mask,
+            type: account.type,
+            subtype: account.subtype || null,
+            currentBalance: account.balances.current ?? null,
+            availableBalance: account.balances.available ?? null,
+            rawJson: JSON.stringify(account)
+          }))
+        });
+
+        const metadata = parseConnectionMetadata(connection.metadataJson);
+        await database.connection.update({
+          where: {
+            id: connection.id
+          },
+          data: {
+            status: "ACTIVE",
+            lastRefreshedAt: new Date(),
+            metadataJson: JSON.stringify({
+              ...metadata,
+              health: clearSyncHealth()
+            })
+          }
+        });
+      } catch (error) {
+        const metadata = parseConnectionMetadata(connection.metadataJson);
+        const health = toSyncHealth(classifyPlaidError(error));
+        await database.connection.update({
+          where: {
+            id: connection.id
+          },
+          data: {
+            status: "ERROR",
+            metadataJson: JSON.stringify({
+              ...metadata,
+              health
+            })
+          }
+        });
+        throw classifyPlaidError(error);
       }
-    });
-
-      await database.connectionAccount.createMany({
-      data: accounts.data.accounts.map(account => ({
-        connectionId: connection.id,
-        externalAccountId: account.account_id,
-        name: account.name,
-        officialName: account.official_name,
-        mask: account.mask,
-        type: account.type,
-        subtype: account.subtype || null,
-        currentBalance: account.balances.current ?? null,
-        availableBalance: account.balances.available ?? null,
-        rawJson: JSON.stringify(account)
-      }))
-    });
-
-      await database.connection.update({
-      where: {
-        id: connection.id
-      },
-      data: {
-        status: "ACTIVE",
-        lastRefreshedAt: new Date()
-      }
-    });
     },
 
     async syncAccountLink(linkId: string): Promise<PlaidSyncResult> {
@@ -301,14 +416,14 @@ export function createPlaidService({
         imported: 0,
         transactions: [],
         removedImportedIds: [],
-        nextCursor: null as string | null
+        configPatch: {}
       };
     }
 
       const client = getPlaidClient(config);
       const accessToken = decryptString(link.connection.accessTokenCiphertext);
       const existingConfig = parseLinkConfig(link.configJson);
-      const startingCursor = existingConfig.plaidCursor;
+      const startingCursor = existingConfig.providerSyncState?.cursor ?? undefined;
       let cursor = startingCursor;
       let hasMore = true;
       const relevant: PlaidSyncTransaction[] = [];
@@ -374,15 +489,36 @@ export function createPlaidService({
             continue;
           }
 
-          throw error;
+          throw classifyPlaidError(error);
         }
       }
+
+      const metadata = parseConnectionMetadata(link.connection.metadataJson);
+      await database.connection.update({
+        where: {
+          id: link.connection.id
+        },
+        data: {
+          status: "ACTIVE",
+          lastRefreshedAt: new Date(),
+          metadataJson: JSON.stringify({
+            ...metadata,
+            health: clearSyncHealth()
+          })
+        }
+      });
 
       return {
         imported: relevant.length,
         transactions: relevant,
         removedImportedIds: [...removedImportedIds],
-        nextCursor: cursor ?? null
+        configPatch: {
+          providerSyncState: {
+            cursor: cursor ?? null,
+            windowStartDate: null,
+            windowEndDate: null
+          }
+        }
       };
     },
 

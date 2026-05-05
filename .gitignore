@@ -5,6 +5,7 @@ data/
 .config/
 .npm-cache/
 .tmp/
+.local/
 
 .env
 .env.local
