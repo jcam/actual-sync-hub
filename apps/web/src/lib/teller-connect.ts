@@ -4,7 +4,7 @@ export type TellerConnectSetupConfig = TellerConnectConfigDto & {
   enrollmentId?: string;
 };
 
-export interface TellerEnrollmentResult {
+export type TellerEnrollmentResult = {
   accessToken: string;
   user?: {
     id?: string;
@@ -17,11 +17,11 @@ export interface TellerEnrollmentResult {
   };
 }
 
-export interface TellerConnectInstance {
+export type TellerConnectInstance = {
   open(): void;
 }
 
-export interface TellerConnectGlobal {
+export type TellerConnectGlobal = {
   setup(config: TellerConnectSetupConfig & {
     onSuccess: (enrollment: TellerEnrollmentResult) => void | Promise<void>;
     onExit?: () => void;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import type { MigrationPreviewDto } from "@actual-sync/shared";
 import { api } from "../api";
@@ -23,7 +23,7 @@ export function ReviewPage() {
   const reviewMode = location.pathname.endsWith("/migration") ? "migration" : "sync-review";
   const pageLabel = reviewMode === "migration" ? "Migration review" : "Sync review";
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!actualAccountId) {
       setPreview(null);
       setLoading(false);
@@ -48,11 +48,11 @@ export function ReviewPage() {
         })
       );
     }
-  };
+  }, [actualAccountId, pageLabel, reviewMode]);
 
   useEffect(() => {
     void load().finally(() => setLoading(false));
-  }, [actualAccountId, reviewMode]);
+  }, [load]);
 
   const groupedCounts = useMemo(() => {
     if (!preview) {
@@ -150,7 +150,7 @@ export function ReviewPage() {
                 } else {
                   await api.commitSyncReview(actualAccountId, payload);
                 }
-                navigate("/accounts");
+                void navigate("/accounts");
               } finally {
                 setSaving(false);
               }

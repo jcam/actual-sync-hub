@@ -1,16 +1,16 @@
 import type { ConnectionStatus, Provider } from "./core.js";
 import type { SyncHealthDto } from "./health.js";
 
-export interface TellerConnectConfigDto {
+export type TellerConnectConfigDto = {
   applicationId: string;
   environment: "sandbox" | "development" | "production";
   products: string[];
   selectAccount: "disabled" | "single" | "multiple";
 }
 
-export interface TellerReauthConfigDto extends TellerConnectConfigDto {
+export type TellerReauthConfigDto = {
   enrollmentId: string;
-}
+} & TellerConnectConfigDto
 
 export type ConnectionReauthSessionDto =
   | {
@@ -32,7 +32,7 @@ export type ConnectionReauthSessionDto =
       message: string;
     };
 
-export interface ConnectionAccountDto {
+export type ConnectionAccountDto = {
   id: string;
   externalAccountId: string;
   name: string;
@@ -42,16 +42,26 @@ export interface ConnectionAccountDto {
   subtype?: string | null;
   currentBalance?: number | null;
   availableBalance?: number | null;
+  providerConnectionId?: string | null;
+  providerConnectionName?: string | null;
+  providerInstitutionName?: string | null;
 }
 
-export interface ConnectionDto {
+export type ConnectionDto = {
   id: string;
   provider: Provider;
   label: string;
   status: ConnectionStatus;
   institutionName?: string | null;
   institutionId?: string | null;
+  providerUserId?: string | null;
+  providerAccountsUrl?: string | null;
   lastRefreshedAt?: string | null;
   health?: SyncHealthDto | null;
   accounts: ConnectionAccountDto[];
+}
+
+export type ProviderConnectResult = {
+  connectionId: string;
+  warning?: string;
 }

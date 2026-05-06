@@ -2,14 +2,17 @@ import fs from "node:fs/promises";
 import https from "node:https";
 import crypto from "node:crypto";
 import { URL } from "node:url";
-import type { ConnectionReauthSessionDto, TellerConnectConfigDto } from "@actual-sync/shared";
+import type { ConnectionReauthSessionDto, ProviderConnectResult, TellerConnectConfigDto } from "@actual-sync/shared";
 import { prisma } from "../db.js";
-import { env } from "../env.js";
 import { parseLinkConfig } from "./link-config.js";
 import { decryptString, encryptString } from "../lib/crypto.js";
 import { buildProviderCategoryNames } from "./category-matching.js";
-import { providerFixtureCache, type ProviderFixtureCache } from "./provider-fixture-cache.js";
+import { providerFixtureCache } from './provider-fixture-cache.js';
+import type { ProviderFixtureCache } from './provider-fixture-cache.js';
+import { createProviderSettingsService, providerSettingsService } from './provider-settings-service.js';
+import type { ProviderSettingsService } from './provider-settings-service.js';
 import type { ProviderAdapter, ProviderSyncResult } from "./provider-adapter.js";
+import { buildImportedTransactionNotes } from "./provider-sync-helpers.js";
 import { clearSyncHealth, ProviderOperationError, toSyncHealth } from "./sync-health.js";
 
 type DatabaseClient = typeof prisma;
@@ -17,11 +20,13 @@ type DatabaseClient = typeof prisma;
 const TELLER_API_BASE_URL = "https://api.teller.io";
 const TELLER_TRANSACTION_PAGE_SIZE = 500;
 
-export interface TellerConfig {
+export type TellerConfig = {
   appId: string;
   environment: "sandbox" | "development" | "production";
   certificateFile: string;
   keyFile: string;
+  certificatePem?: string;
+  keyPem?: string;
   sandboxAccessToken: string;
   transactionsInitialDays: number;
   transactionsOverlapDays: number;
@@ -29,7 +34,7 @@ export interface TellerConfig {
   webhookToleranceSeconds: number;
 }
 
-export interface TellerEnrollmentPayload {
+export type TellerEnrollmentPayload = {
   accessToken: string;
   enrollmentId: string;
   userId?: string | null;
@@ -37,12 +42,12 @@ export interface TellerEnrollmentPayload {
   label?: string | null;
 }
 
-interface TellerApiInstitution {
+type TellerApiInstitution = {
   id?: string | null;
   name?: string | null;
 }
 
-interface TellerApiAccount {
+type TellerApiAccount = {
   id: string;
   enrollment_id?: string;
   institution?: TellerApiInstitution | null;
@@ -56,12 +61,12 @@ interface TellerApiAccount {
   };
 }
 
-interface TellerApiBalance {
+type TellerApiBalance = {
   ledger?: string | null;
   available?: string | null;
 }
 
-interface TellerApiTransaction {
+type TellerApiTransaction = {
   id: string;
   account_id: string;
   date: string;
@@ -79,7 +84,7 @@ interface TellerApiTransaction {
   } | null;
 }
 
-export interface TellerWebhookEvent {
+export type TellerWebhookEvent = {
   id: string;
   type: "enrollment.disconnected" | "transactions.processed" | "account.number_verification.processed" | "webhook.test";
   timestamp: string;
@@ -92,7 +97,7 @@ export interface TellerWebhookEvent {
   };
 }
 
-interface HydratedTellerAccount {
+type HydratedTellerAccount = {
   account: TellerApiAccount;
   balance: TellerApiBalance | null;
 }
@@ -104,7 +109,7 @@ type TellerRequester = <T>({
 }: {
   accessToken: string;
   path: string;
-  method?: "GET";
+  method?: "GET" | "DELETE";
 }) => Promise<T>;
 
 async function buildMtlsAgent(config: TellerConfig) {
@@ -112,13 +117,17 @@ async function buildMtlsAgent(config: TellerConfig) {
     return undefined;
   }
 
-  if (!config.certificateFile || !config.keyFile) {
+  if (!config.certificatePem && !config.certificateFile) {
+    throw new Error("Teller mTLS certificate is not configured");
+  }
+
+  if (!config.keyPem && !config.keyFile) {
     throw new Error("Teller mTLS credentials are not configured");
   }
 
   const [cert, key] = await Promise.all([
-    fs.readFile(config.certificateFile),
-    fs.readFile(config.keyFile)
+    config.certificatePem ? Buffer.from(config.certificatePem, "utf8") : fs.readFile(config.certificateFile),
+    config.keyPem ? Buffer.from(config.keyPem, "utf8") : fs.readFile(config.keyFile)
   ]);
 
   return new https.Agent({
@@ -127,15 +136,29 @@ async function buildMtlsAgent(config: TellerConfig) {
   });
 }
 
-function createTellerRequester(config: TellerConfig): TellerRequester {
+function createTellerRequester(getConfig: () => Promise<TellerConfig>): TellerRequester {
+  let agentKey: string | null = null;
   let agentPromise: Promise<https.Agent | undefined> | null = null;
 
-  const getAgent = () => {
-    if (!agentPromise) {
+  const getAgent = async () => {
+    const config = await getConfig();
+    const nextKey = JSON.stringify({
+      environment: config.environment,
+      certificateFile: config.certificateFile,
+      keyFile: config.keyFile,
+      certificatePem: config.certificatePem,
+      keyPem: config.keyPem
+    });
+
+    if (!agentPromise || agentKey !== nextKey) {
+      agentKey = nextKey;
       agentPromise = buildMtlsAgent(config);
     }
 
-    return agentPromise;
+    return {
+      config,
+      agent: await agentPromise
+    };
   };
 
   return async function requestJson<T>({
@@ -145,10 +168,10 @@ function createTellerRequester(config: TellerConfig): TellerRequester {
   }: {
     accessToken: string;
     path: string;
-    method?: "GET";
+    method?: "GET" | "DELETE";
   }) {
     const url = new URL(path, TELLER_API_BASE_URL);
-    const agent = await getAgent();
+    const { agent } = await getAgent();
     const authorization = `Basic ${Buffer.from(`${accessToken}:`).toString("base64")}`;
 
     return new Promise<T>((resolve, reject) => {
@@ -436,11 +459,13 @@ async function listAccountsWithBalances({
 async function upsertTellerConnection({
   database,
   request,
-  payload
+  payload,
+  environment
 }: {
   database: DatabaseClient;
   request: TellerRequester;
   payload: TellerEnrollmentPayload;
+  environment: TellerConfig["environment"];
 }) {
   const hydratedAccounts = await listAccountsWithBalances({
     request,
@@ -468,7 +493,7 @@ async function upsertTellerConnection({
       accessTokenCiphertext: encryptString(payload.accessToken),
       metadataJson: JSON.stringify({
         teller: {
-          environment: env.TELLER_ENV,
+          environment,
           enrollmentId: payload.enrollmentId,
           userId: payload.userId || null
         },
@@ -486,7 +511,7 @@ async function upsertTellerConnection({
       accessTokenCiphertext: encryptString(payload.accessToken),
       metadataJson: JSON.stringify({
         teller: {
-          environment: env.TELLER_ENV,
+          environment,
           enrollmentId: payload.enrollmentId,
           userId: payload.userId || null
         },
@@ -522,54 +547,124 @@ async function upsertTellerConnection({
   return connection.id;
 }
 
-export interface TellerService extends ProviderAdapter {
-  getConnectConfig(): TellerConnectConfigDto;
+export type TellerService = {
+  getConnectConfig(): Promise<TellerConnectConfigDto>;
   getReauthConfig(connectionId: string): Promise<TellerConnectConfigDto & { enrollmentId: string }>;
-  enrollConnection(payload: TellerEnrollmentPayload): Promise<string>;
-  reuseCachedConnection(label?: string | null): Promise<string>;
-  seedSandboxConnection(label?: string): Promise<string>;
-  webhooksConfigured(): boolean;
-  verifyWebhookSignature(rawBody: string, signatureHeader: string | string[] | undefined): boolean;
-}
+  enrollConnection(payload: TellerEnrollmentPayload): Promise<ProviderConnectResult>;
+  reuseCachedConnection(label?: string | null): Promise<ProviderConnectResult>;
+  seedSandboxConnection(label?: string): Promise<ProviderConnectResult>;
+  webhooksConfigured(): Promise<boolean>;
+  verifyWebhookSignature(rawBody: string, signatureHeader: string | string[] | undefined): Promise<boolean>;
+} & ProviderAdapter
 
 export function createTellerService({
   prisma: database = prisma,
+  providerSettings = createProviderSettingsService({ prisma: database }),
   config = {
-    appId: env.TELLER_APP_ID,
-    environment: env.TELLER_ENV,
-    certificateFile: env.TELLER_CERT_FILE,
-    keyFile: env.TELLER_KEY_FILE,
-    sandboxAccessToken: env.TELLER_SANDBOX_ACCESS_TOKEN,
-    transactionsInitialDays: env.TELLER_TRANSACTIONS_INITIAL_DAYS,
-    transactionsOverlapDays: env.TELLER_TRANSACTIONS_OVERLAP_DAYS,
-    webhookSigningSecrets: env.TELLER_WEBHOOK_SIGNING_SECRETS.split(",").map(secret => secret.trim()).filter(Boolean),
-    webhookToleranceSeconds: env.TELLER_WEBHOOK_TOLERANCE_SECONDS
+    appId: "",
+    environment: "sandbox",
+    certificateFile: "",
+    keyFile: "",
+    certificatePem: "",
+    keyPem: "",
+    sandboxAccessToken: "",
+    transactionsInitialDays: 90,
+    transactionsOverlapDays: 10,
+    webhookSigningSecrets: [],
+    webhookToleranceSeconds: 180
   } satisfies TellerConfig,
-  request = createTellerRequester(config),
+  request,
   fixtureCache = providerFixtureCache
 }: {
   prisma?: DatabaseClient;
+  providerSettings?: ProviderSettingsService;
   config?: TellerConfig;
   request?: TellerRequester;
   fixtureCache?: ProviderFixtureCache;
 } = {}): TellerService {
+  const getEffectiveConfig = async (): Promise<TellerConfig> => {
+    const settings = await providerSettings.get("TELLER");
+    if (settings.environment === "sandbox") {
+      return {
+        ...config,
+        appId: settings.sandbox.appId,
+        environment: settings.environment,
+        sandboxAccessToken: settings.sandbox.sandboxAccessToken,
+        certificatePem: "",
+        keyPem: "",
+        webhookSigningSecrets: settings.sandbox.webhookSigningSecrets ?? [],
+        transactionsInitialDays: settings.transactionsInitialDays,
+        transactionsOverlapDays: settings.transactionsOverlapDays,
+        webhookToleranceSeconds: settings.webhookToleranceSeconds
+      };
+    }
+
+    const activeSettings = settings.environment === "development" ? settings.development : settings.production;
+    return {
+      ...config,
+      appId: activeSettings.appId,
+      environment: settings.environment,
+      sandboxAccessToken: settings.sandbox.sandboxAccessToken,
+      certificatePem: activeSettings.certificatePem,
+      keyPem: activeSettings.keyPem,
+      webhookSigningSecrets: activeSettings.webhookSigningSecrets,
+      transactionsInitialDays: settings.transactionsInitialDays,
+      transactionsOverlapDays: settings.transactionsOverlapDays,
+      webhookToleranceSeconds: settings.webhookToleranceSeconds
+    };
+  };
+  const requestClient = request ?? createTellerRequester(getEffectiveConfig);
+
   return {
     provider: "TELLER",
     isConfigured() {
-      return Boolean(config.appId);
+      return false;
     },
-    getConnectConfig() {
-      if (!this.isConfigured()) {
+    async getConnectConfig() {
+      const effectiveConfig = await getEffectiveConfig();
+      if (!effectiveConfig.appId) {
         throw new Error("Teller is not configured");
       }
 
       return {
-        applicationId: config.appId,
-        environment: config.environment,
+        applicationId: effectiveConfig.appId,
+        environment: effectiveConfig.environment,
         products: ["transactions", "balance"],
         selectAccount: "multiple"
       };
     },
+
+    async disconnectConnection(connectionId: string) {
+      const connection = await database.connection.findUniqueOrThrow({
+        where: {
+          id: connectionId
+        }
+      });
+
+      if (connection.provider !== "TELLER") {
+        throw new Error("Connection is not a Teller enrollment");
+      }
+
+      try {
+        await requestClient({
+          accessToken: decryptString(connection.accessTokenCiphertext),
+          path: "/accounts",
+          method: "DELETE"
+        });
+      } catch (error) {
+        const providerError = classifyTellerError(error);
+
+        if (
+          providerError.healthAction === "REAUTH_CONNECTION" ||
+          providerError.healthAction === "REAUTH_BANK"
+        ) {
+          return;
+        }
+
+        throw providerError;
+      }
+    },
+
     async getReauthConfig(connectionId: string) {
       const connection = await database.connection.findUniqueOrThrow({
         where: {
@@ -586,7 +681,7 @@ export function createTellerService({
       }
 
       return {
-        ...this.getConnectConfig(),
+        ...(await this.getConnectConfig()),
         enrollmentId: connection.providerItemId
       };
     },
@@ -603,11 +698,13 @@ export function createTellerService({
         config: await this.getReauthConfig(connectionId)
       };
     },
-    webhooksConfigured() {
-      return config.webhookSigningSecrets.length > 0;
+    async webhooksConfigured() {
+      const effectiveConfig = await getEffectiveConfig();
+      return effectiveConfig.webhookSigningSecrets.length > 0;
     },
-    verifyWebhookSignature(rawBody: string, signatureHeader: string | string[] | undefined) {
-      if (!this.webhooksConfigured()) {
+    async verifyWebhookSignature(rawBody: string, signatureHeader: string | string[] | undefined) {
+      const effectiveConfig = await getEffectiveConfig();
+      if (effectiveConfig.webhookSigningSecrets.length === 0) {
         return false;
       }
 
@@ -627,19 +724,20 @@ export function createTellerService({
       }
 
       const nowSeconds = Math.floor(Date.now() / 1000);
-      if (Math.abs(nowSeconds - timestampSeconds) > config.webhookToleranceSeconds) {
+      if (Math.abs(nowSeconds - timestampSeconds) > effectiveConfig.webhookToleranceSeconds) {
         return false;
       }
 
       const signedMessage = `${parsedSignature.timestamp}.${rawBody}`;
 
-      return config.webhookSigningSecrets.some(secret => {
+      return effectiveConfig.webhookSigningSecrets.some(secret => {
         const expectedSignature = crypto.createHmac("sha256", secret).update(signedMessage).digest("hex");
         return parsedSignature.signatures.some(signature => timingSafeHexMatch(signature, expectedSignature));
       });
     },
     async enrollConnection(payload: TellerEnrollmentPayload) {
-      if (!this.isConfigured()) {
+      const effectiveConfig = await getEffectiveConfig();
+      if (!effectiveConfig.appId) {
         throw new Error("Teller is not configured");
       }
 
@@ -649,8 +747,9 @@ export function createTellerService({
 
       const connectionId = await upsertTellerConnection({
         database,
-        request,
-        payload
+        request: requestClient,
+        payload,
+        environment: effectiveConfig.environment
       });
       await fixtureCache.setTeller({
         accessToken: payload.accessToken,
@@ -659,7 +758,9 @@ export function createTellerService({
         institutionName: payload.institutionName ?? null,
         updatedAt: new Date().toISOString()
       });
-      return connectionId;
+      return {
+        connectionId
+      };
     },
     async reuseCachedConnection(label) {
       if (!fixtureCache.isEnabled()) {
@@ -672,17 +773,21 @@ export function createTellerService({
       }
 
       try {
-        return await upsertTellerConnection({
+        const connectionId = await upsertTellerConnection({
           database,
-          request,
+          request: requestClient,
           payload: {
             accessToken: cached.accessToken,
             enrollmentId: cached.enrollmentId,
             userId: cached.userId ?? null,
             institutionName: cached.institutionName ?? null,
             label: label ?? undefined
-          }
+          },
+          environment: (await getEffectiveConfig()).environment
         });
+        return {
+          connectionId
+        };
       } catch (error) {
         const providerError = classifyTellerError(error);
         if (providerError.healthScope === "CONNECTION_AUTH") {
@@ -692,13 +797,14 @@ export function createTellerService({
       }
     },
     async seedSandboxConnection(label) {
-      if (config.environment !== "sandbox") {
+      const effectiveConfig = await getEffectiveConfig();
+      if (effectiveConfig.environment !== "sandbox") {
         throw new Error("Teller sandbox helpers are only available in the sandbox environment");
       }
 
-      const accessToken = config.sandboxAccessToken || "test_token_redacted";
+      const accessToken = effectiveConfig.sandboxAccessToken || "test_token_redacted";
       const accounts = await listAccountsWithBalances({
-        request,
+        request: requestClient,
         accessToken
       });
       const enrollmentId = accounts[0]?.account.enrollment_id;
@@ -708,13 +814,14 @@ export function createTellerService({
 
       const connectionId = await upsertTellerConnection({
         database,
-        request,
+        request: requestClient,
         payload: {
           accessToken,
           enrollmentId,
           institutionName: accounts[0]?.account.institution?.name || "Security Credit Union",
           label: label || `Teller Sandbox ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-        }
+        },
+        environment: effectiveConfig.environment
       });
       await fixtureCache.setTeller({
         accessToken,
@@ -723,7 +830,9 @@ export function createTellerService({
         userId: null,
         updatedAt: new Date().toISOString()
       });
-      return connectionId;
+      return {
+        connectionId
+      };
     },
     async refreshConnection(connectionId: string) {
       const connection = await database.connection.findUniqueOrThrow({
@@ -738,13 +847,14 @@ export function createTellerService({
       try {
         await upsertTellerConnection({
           database,
-          request,
+          request: requestClient,
           payload: {
             accessToken: decryptString(connection.accessTokenCiphertext),
             enrollmentId: connection.providerItemId || metadata.teller?.enrollmentId || connection.id,
             institutionName: connection.institutionName,
             label: connection.label
-          }
+          },
+          environment: (await getEffectiveConfig()).environment
         });
       } catch (error) {
         const health = toSyncHealth(classifyTellerError(error));
@@ -764,6 +874,7 @@ export function createTellerService({
       }
     },
     async syncAccountLink(linkId: string): Promise<ProviderSyncResult> {
+      const effectiveConfig = await getEffectiveConfig();
       const link = await database.accountLink.findUniqueOrThrow({
         where: {
           id: linkId
@@ -785,11 +896,11 @@ export function createTellerService({
         const { startDate, endDate } = buildSyncWindow({
           lastSyncEndDate: configState.providerSyncState?.windowEndDate ?? undefined,
           today,
-          initialDays: config.transactionsInitialDays,
-          overlapDays: config.transactionsOverlapDays
+          initialDays: effectiveConfig.transactionsInitialDays,
+          overlapDays: effectiveConfig.transactionsOverlapDays
         });
         const tellerTransactions = await listTransactionsInWindow({
-          request,
+          request: requestClient,
           accessToken,
           externalAccountId: link.connectionAccount.externalAccountId,
           startDate,
@@ -822,6 +933,10 @@ export function createTellerService({
               amount: Number(transaction.amount),
               payeeName: counterpartyName || description,
               importedPayee: description,
+              notes: buildImportedTransactionNotes({
+                payeeName: counterpartyName || description,
+                description
+              }),
               importedId: transaction.id,
               cleared: transaction.status === "posted",
               categoryNames: getTellerCategoryNames(transaction),

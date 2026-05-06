@@ -2,47 +2,58 @@ import type {
   ActualAccountDto,
   ActualBankSyncLinkDto,
   ActualCategoryDto,
+  ActualExternalSyncStatusDto,
   CommitMigrationPayload,
   ConnectionReauthSessionDto,
   ConnectionAccountOptionDto,
   ConnectionDto,
+  ExternalSyncBridgeSyncResponseDto,
   MigrationPreviewDto,
   Provider,
   RuntimeInfoDto,
   SyncRunDto,
   UpdateAccountLinkPayload
 } from "@actual-sync/shared";
+import {
+  getActivePlaidEnvironmentSettings,
+  getActiveSimpleFinModeSettings,
+  getActiveTellerEnvironmentSettings
+} from "@actual-sync/shared";
 import type { Prisma, Provider as PrismaProvider } from "../generated/prisma/client.js";
 import { prisma } from "../db.js";
 import { env } from "../env.js";
-import { actualService, type ReconcileTransactionInput } from "./actual-service.js";
+import { encryptString } from "../lib/crypto.js";
+import { actualService } from "./actual-service.js";
+import type { ActualExternalSyncMetadataInput, ReconcileTransactionInput } from "./actual-service.js";
 import { getTellerMetadata, parseConnectionMetadata } from "./connection-metadata.js";
 import { learnCategoryMappingsFromHistory, pruneImportedTransactionLedger } from "./imported-transaction-ledger.js";
-import {
-  CURRENT_LINK_STATUSES,
-  type LinkConfigData,
-  linkIdentityChanged,
-  parseLinkConfig,
-  selectCurrentLink,
-  serializeLinkConfig,
-  toLinkDto
-} from "./link-config.js";
-import { plaidService, type PlaidService } from "./plaid-service.js";
+import { CURRENT_LINK_STATUSES, linkIdentityChanged, parseLinkConfig, selectCurrentLink, serializeLinkConfig, toLinkDto } from "./link-config.js";
+import type { LinkConfigData } from "./link-config.js";
+import { plaidService } from "./plaid-service.js";
+import type { PlaidService } from "./plaid-service.js";
 import {
   getPrimarySourceCategory,
   resolveTransactionCategoryId,
-  resolveTransferActualAccountId,
+  resolveTransferActualAccountId
 } from "./provider-sync-helpers.js";
-import { simplefinService, type SimpleFinService } from "./simplefin-service.js";
+import { createProviderSettingsService, providerSettingsService } from "./provider-settings-service.js";
+import type { ProviderSettingsService } from "./provider-settings-service.js";
+import { parseSimpleFinAccountRawJson } from "./simplefin-native-metadata.js";
+import { simplefinService } from "./simplefin-service.js";
+import type { SimpleFinService } from "./simplefin-service.js";
 import { createSyncReviewService } from "./sync-review-service.js";
-import { tellerService, type TellerService } from "./teller-service.js";
-import type { TellerWebhookEvent } from "./teller-service.js";
+import { tellerService } from "./teller-service.js";
+import type { TellerService, TellerWebhookEvent } from "./teller-service.js";
 import type { ProviderAdapter, ProviderSyncOutcome, ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
 import { clearSyncHealth, isBlockingSyncHealth, isRateLimitedSyncError, toSyncHealth } from "./sync-health.js";
 
 type DatabaseClient = typeof prisma;
 type ActualService = typeof actualService;
 type AutomaticSyncConcurrencyConfig = Record<Provider, number>;
+type ProviderBackgroundSyncGate = {
+  limit: number;
+  run: ReturnType<typeof createConcurrencyGate>;
+};
 type SiblingLink = Prisma.AccountLinkGetPayload<{
   include: {
     connectionAccount: true;
@@ -54,6 +65,13 @@ type SyncableLink = Prisma.AccountLinkGetPayload<{
     connectionAccount: true;
   };
 }>;
+type AppliedSyncOutcome = {
+  newTransactions: string[];
+  matchedTransactions: string[];
+  updatedAccounts: string[];
+  summary: string;
+  lastSync: string;
+};
 
 function createConcurrencyGate(limit: number) {
   let active = 0;
@@ -80,7 +98,7 @@ function toPrismaProvider(provider: Provider | null | undefined): PrismaProvider
   return provider as PrismaProvider | null | undefined;
 }
 
-export interface AppService {
+export type AppService = {
   getRuntimeInfo(): Promise<RuntimeInfoDto>;
   listConnections(): Promise<ConnectionDto[]>;
   listActualAccounts(): Promise<ActualAccountDto[]>;
@@ -96,18 +114,21 @@ export interface AppService {
   refreshConnection(connectionId: string): Promise<void>;
   refreshAllConnections(): Promise<void>;
   upsertAccountLink(actualAccountId: string, payload: UpdateAccountLinkPayload): Promise<unknown>;
-  runAccountSync(actualAccountId: string): Promise<void>;
+  runAccountSync(actualAccountId: string): Promise<AppliedSyncOutcome | void>;
   runScheduledLinkSyncs(linkIds: string[]): Promise<void>;
   handleTellerWebhook(event: TellerWebhookEvent): Promise<void>;
   previewAccountSyncReview(actualAccountId: string): Promise<MigrationPreviewDto>;
   commitAccountSyncReview(actualAccountId: string, payload: CommitMigrationPayload): Promise<void>;
   listSyncRuns(limit?: number): Promise<SyncRunDto[]>;
+  getExternalSyncBridgeStatus(actualAccountId?: string): Promise<ActualExternalSyncStatusDto>;
+  runExternalSyncBridgeSync(actualAccountId: string): Promise<ExternalSyncBridgeSyncResponseDto>;
 }
 
 export function createAppService({
   prisma: database = prisma,
   actualService: actual = actualService,
   plaidService: plaid = plaidService,
+  providerSettingsService: settings = createProviderSettingsService({ prisma: database }),
   simplefinService: simplefin = simplefinService,
   tellerService: teller = tellerService,
   runtime = {
@@ -115,16 +136,7 @@ export function createAppService({
     liveSandboxMode: env.liveSandboxMode,
     actualServerUrl: env.ACTUAL_SERVER_URL,
     actualBudgetSyncIdConfigured: Boolean(env.ACTUAL_BUDGET_SYNC_ID),
-    plaidEnabled: env.plaidEnabled,
-    plaidEnvironment: env.PLAID_ENV,
-    plaidSandboxToolsEnabled: env.plaidSandboxToolsEnabled,
-    plaidAutomaticSyncConcurrency: env.PLAID_AUTOMATIC_SYNC_CONCURRENCY,
-    tellerEnabled: env.tellerEnabled,
-    tellerEnvironment: env.TELLER_ENV,
-    tellerMtlsConfigured: env.tellerMtlsConfigured,
-    tellerWebhookSyncDebounceSeconds: env.TELLER_WEBHOOK_SYNC_DEBOUNCE_SECONDS,
-    tellerAutomaticSyncConcurrency: env.TELLER_AUTOMATIC_SYNC_CONCURRENCY,
-    simplefinAutomaticSyncConcurrency: env.SIMPLEFIN_AUTOMATIC_SYNC_CONCURRENCY,
+    actualExternalSyncWritebackEnabled: env.actualExternalSyncWritebackEnabled,
     automaticSyncBackoffBaseMinutes: env.AUTOMATIC_SYNC_BACKOFF_BASE_MINUTES,
     automaticSyncBackoffMaxMinutes: env.AUTOMATIC_SYNC_BACKOFF_MAX_MINUTES
   },
@@ -133,6 +145,7 @@ export function createAppService({
   prisma?: DatabaseClient;
   actualService?: ActualService;
   plaidService?: PlaidService;
+  providerSettingsService?: ProviderSettingsService;
   simplefinService?: SimpleFinService;
   tellerService?: TellerService;
   runtime?: {
@@ -140,16 +153,7 @@ export function createAppService({
     liveSandboxMode: boolean;
     actualServerUrl: string;
     actualBudgetSyncIdConfigured: boolean;
-    plaidEnabled: boolean;
-    plaidEnvironment: "sandbox" | "production";
-    plaidSandboxToolsEnabled: boolean;
-    plaidAutomaticSyncConcurrency: number;
-    tellerEnabled: boolean;
-    tellerEnvironment: "sandbox" | "development" | "production";
-    tellerMtlsConfigured: boolean;
-    tellerWebhookSyncDebounceSeconds: number;
-    tellerAutomaticSyncConcurrency: number;
-    simplefinAutomaticSyncConcurrency: number;
+    actualExternalSyncWritebackEnabled: boolean;
     automaticSyncBackoffBaseMinutes: number;
     automaticSyncBackoffMaxMinutes: number;
   };
@@ -160,12 +164,8 @@ export function createAppService({
     SIMPLEFIN: simplefin,
     TELLER: teller
   } satisfies Record<Provider, ProviderAdapter>;
-  const automaticSyncConcurrency: AutomaticSyncConcurrencyConfig = {
-    PLAID: runtime.plaidAutomaticSyncConcurrency,
-    TELLER: runtime.tellerAutomaticSyncConcurrency,
-    SIMPLEFIN: runtime.simplefinAutomaticSyncConcurrency
-  };
-  const providerBackgroundSyncGates = new Map<Provider, ReturnType<typeof createConcurrencyGate>>();
+  const providerBackgroundSyncGates = new Map<Provider, ProviderBackgroundSyncGate>();
+  const getEffectiveProviderSettings = () => settings.getAll();
 
   const getProviderAdapter = (provider: Provider | null | undefined) => {
     if (!provider) {
@@ -175,14 +175,97 @@ export function createAppService({
     return providerAdapters[provider];
   };
 
+  const getProviderRuntimeInfo = async (): Promise<RuntimeInfoDto["providers"]> => {
+    const providerSettings = await getEffectiveProviderSettings();
+    const plaidEnvironment = providerSettings.PLAID.environment;
+    const activePlaidSettings = getActivePlaidEnvironmentSettings(providerSettings.PLAID);
+    const plaidEnabled = Boolean(activePlaidSettings.clientId && activePlaidSettings.secret);
+    const plaidSandboxToolsEnabled = plaidEnvironment === "sandbox";
+    const activeTellerSettings = getActiveTellerEnvironmentSettings(providerSettings.TELLER);
+    const tellerEnabled = Boolean(activeTellerSettings.appId);
+    const tellerEnvironment = providerSettings.TELLER.environment;
+    const tellerMtlsConfigured =
+      tellerEnvironment === "sandbox" ||
+      Boolean(
+        ("certificatePem" in activeTellerSettings ? activeTellerSettings.certificatePem : "") &&
+          ("keyPem" in activeTellerSettings ? activeTellerSettings.keyPem : "")
+      );
+    const simpleFinMode = providerSettings.SIMPLEFIN.mode;
+    const simpleFinDevelopmentConfigured =
+      simpleFinMode !== "development" || Boolean(getActiveSimpleFinModeSettings(providerSettings.SIMPLEFIN)?.serverUrl);
+
+    return [
+      {
+        provider: "PLAID",
+        label: "Plaid",
+        enabled: plaidEnabled,
+        ready: plaidEnabled,
+        environment: plaidEnvironment,
+        issues: plaidEnabled ? [] : ["Enter a Plaid client ID and secret to enable Plaid connections."],
+        notes: plaidSandboxToolsEnabled
+          ? ["Sandbox tools are enabled for creating fixture Items and transactions."]
+          : []
+      },
+      {
+        provider: "TELLER",
+        label: "Teller.io",
+        enabled: tellerEnabled,
+        ready: tellerEnabled && tellerMtlsConfigured,
+        environment: tellerEnvironment,
+        issues: [
+          ...(tellerEnabled ? [] : ["Enter a Teller application ID to enable Teller Connect."]),
+          ...(tellerEnabled && tellerEnvironment !== "sandbox" && !tellerMtlsConfigured
+            ? ["Enter Teller client certificate and key PEM values to enable non-sandbox Teller connections."]
+            : [])
+        ],
+        notes:
+          tellerEnvironment === "sandbox"
+            ? ["Sandbox enrollments do not require mTLS client certificates."]
+            : ["Webhook signing secrets are optional but recommended for automatic Teller syncs."]
+      },
+      {
+        provider: "SIMPLEFIN",
+        label: "SimpleFIN",
+        enabled: true,
+        ready: simpleFinDevelopmentConfigured,
+        environment: simpleFinMode,
+        issues:
+          simpleFinMode === "development" && !simpleFinDevelopmentConfigured
+            ? ["Enter a SimpleFIN server URL to use development mode."]
+            : [],
+        notes: [
+          simpleFinMode === "development"
+            ? "Use a setup token from your development SimpleFIN server."
+            : simpleFinMode === "sandbox"
+              ? "Use a setup token from the SimpleFIN Bridge demo flow."
+              : "Use a setup token from your production SimpleFIN provider or the live Bridge."
+        ]
+      }
+    ];
+  };
+
   const runWithProviderBackgroundGate = async <T>(provider: Provider, task: () => Promise<T>) => {
+    const providerSettings = await getEffectiveProviderSettings();
+    const dynamicAutomaticSyncConcurrency: AutomaticSyncConcurrencyConfig = {
+      PLAID: providerSettings.PLAID.automaticSyncConcurrency,
+      TELLER: providerSettings.TELLER.automaticSyncConcurrency,
+      SIMPLEFIN: providerSettings.SIMPLEFIN.automaticSyncConcurrency
+    };
+    const limit = dynamicAutomaticSyncConcurrency[provider];
     const existingGate = providerBackgroundSyncGates.get(provider);
-    const gate = existingGate || createConcurrencyGate(automaticSyncConcurrency[provider]);
-    if (!existingGate) {
+    const gate =
+      existingGate && existingGate.limit === limit
+        ? existingGate
+        : {
+            limit,
+            run: createConcurrencyGate(limit)
+          };
+
+    if (!existingGate || existingGate.limit !== limit) {
       providerBackgroundSyncGates.set(provider, gate);
     }
 
-    return gate(task);
+    return gate.run(task);
   };
 
   const buildSiblingLinks = async (link: {
@@ -307,6 +390,31 @@ export function createAppService({
       ]
     });
 
+  const findCurrentSyncLink = async (actualAccountId: string): Promise<SyncableLink | null> =>
+    database.accountLink.findFirst({
+      where: {
+        actualAccountId,
+        status: {
+          in: [...CURRENT_LINK_STATUSES]
+        }
+      },
+      include: {
+        connection: true,
+        connectionAccount: true
+      },
+      orderBy: [
+        {
+          status: "asc"
+        },
+        {
+          updatedAt: "desc"
+        },
+        {
+          createdAt: "desc"
+        }
+      ]
+    });
+
   const createSyncRunForLink = async (link: Pick<SyncableLink, "id" | "connectionId">) =>
     database.syncRun.create({
       data: {
@@ -315,6 +423,77 @@ export function createAppService({
         status: "RUNNING"
       }
     });
+
+  const getCurrentLinkedWritebackState = async (actualAccountId: string) => {
+    const link = await database.accountLink.findFirst({
+      where: {
+        actualAccountId,
+        status: {
+          in: [...CURRENT_LINK_STATUSES]
+        }
+      },
+      include: {
+        connection: true,
+        connectionAccount: true
+      },
+      orderBy: [
+        {
+          status: "asc"
+        },
+        {
+          updatedAt: "desc"
+        },
+        {
+          createdAt: "desc"
+        }
+      ]
+    });
+
+    if (!link || !link.provider || !link.connection || !link.connectionAccount) {
+      return null;
+    }
+
+    const metadata: ActualExternalSyncMetadataInput = {
+      syncSource: "external",
+      providerAccountId: link.connectionAccount.externalAccountId,
+      institutionName: link.connection.institutionName || link.connection.label,
+      institutionExternalId: link.connection.institutionId ?? null,
+      mask: link.connectionAccount.mask ?? null,
+      officialName: link.connectionAccount.officialName ?? null,
+      balanceCurrent: link.connectionAccount.currentBalance ?? null,
+      balanceAvailable: link.connectionAccount.availableBalance ?? null,
+      balanceLimit: null,
+      lastSync: link.lastSyncedAt?.toISOString() ?? null
+    };
+
+    return {
+      link,
+      metadata
+    };
+  };
+
+  const syncActualExternalWriteback = async ({
+    actualAccountId,
+    lastSync
+  }: {
+    actualAccountId: string;
+    lastSync?: string | null;
+  }) => {
+    if (!runtime.actualExternalSyncWritebackEnabled) {
+      return;
+    }
+
+    const current = await getCurrentLinkedWritebackState(actualAccountId);
+    if (!current) {
+      await actual.unlinkExternalSyncAccount(actualAccountId);
+      return;
+    }
+
+    await actual.linkExternalSyncAccount(actualAccountId, {
+      ...current.metadata,
+      lastSync: lastSync ?? current.metadata.lastSync ?? null
+    });
+  };
 
   const markSyncRunFailure = async ({
     link,
@@ -383,7 +562,7 @@ export function createAppService({
     link: SyncableLink;
     syncRunId: string;
     syncResult: ProviderSyncResult;
-  }) => {
+  }): Promise<AppliedSyncOutcome> => {
     const actualCategories = (await actual.listCategories()).map(category => ({
       id: category.id,
       name: category.name
@@ -424,6 +603,18 @@ export function createAppService({
       category: transaction.resolved_category_id,
       transfer_actual_account_id: transaction.transfer_actual_account_id
     }));
+    const existingImportedIds = !migrating && reconcileTransactions.length > 0
+      ? new Set(
+          (
+            await actual.listTransactionsByImportedIds(
+              link.actualAccountId,
+              reconcileTransactions.map(transaction => transaction.imported_id)
+            )
+          )
+            .map(transaction => transaction.imported_id)
+            .filter((importedId): importedId is string => Boolean(importedId))
+        )
+      : new Set<string>();
     const migrationResult = migrating ? await actual.importTransactions(link.actualAccountId, migrationImportPayload) : null;
     if (migrationResult?.errors.length) {
       throw new Error(migrationResult.errors[0]?.message || "Actual migration import failed");
@@ -433,55 +624,33 @@ export function createAppService({
       : !migrating
         ? { added: 0, updated: 0, removed: 0, renamedPayees: 0 }
         : null;
-
     const refreshedTransactions =
-      reconcileTransactions.length > 0
+      !migrating && reconcileTransactions.length > 0
         ? await actual.listTransactionsByImportedIds(
             link.actualAccountId,
             reconcileTransactions.map(transaction => transaction.imported_id)
           )
         : [];
-    const actualTransactionIdByImportedId = new Map(
-      refreshedTransactions
-        .filter(transaction => transaction.imported_id)
-        .map(transaction => [transaction.imported_id as string, transaction.id])
-    );
 
     if (reconcileTransactions.length > 0) {
       await Promise.all(
         reconcileTransactions.map((transaction, index) =>
           database.importedTransaction.upsert({
             where: {
-              accountLinkId_providerImportedId: {
+              accountLinkId_importedId: {
                 accountLinkId: link.id,
-                providerImportedId: transaction.imported_id
+                importedId: transaction.imported_id
               }
             },
             update: {
-              providerImportedId: transaction.imported_id,
-              actualAccountId: link.actualAccountId,
-              actualTransactionId: actualTransactionIdByImportedId.get(transaction.imported_id) ?? null,
-              transactionDate: transaction.date,
-              amount: transaction.amount,
-              payeeName: transaction.payee_name,
-              importedPayee: transaction.imported_payee,
               primarySourceCategory: getPrimarySourceCategory(syncResult.transactions[index]!),
-              sourceCategoryNamesJson: JSON.stringify(syncResult.transactions[index]?.categoryNames || []),
               appliedCategoryId: transaction.resolved_category_id ?? null,
               lastSeenAt: now()
             },
             create: {
               accountLinkId: link.id,
               importedId: transaction.imported_id,
-              providerImportedId: transaction.imported_id,
-              actualAccountId: link.actualAccountId,
-              actualTransactionId: actualTransactionIdByImportedId.get(transaction.imported_id) ?? null,
-              transactionDate: transaction.date,
-              amount: transaction.amount,
-              payeeName: transaction.payee_name,
-              importedPayee: transaction.imported_payee,
               primarySourceCategory: getPrimarySourceCategory(syncResult.transactions[index]!),
-              sourceCategoryNamesJson: JSON.stringify(syncResult.transactions[index]?.categoryNames || []),
               appliedCategoryId: transaction.resolved_category_id ?? null,
               observedCategoryId: transaction.resolved_category_id ?? null,
               lastSeenAt: now()
@@ -532,6 +701,33 @@ export function createAppService({
       }
     });
 
+    await syncActualExternalWriteback({
+      actualAccountId: link.actualAccountId,
+      lastSync: syncCompletedAt.toISOString()
+    });
+
+    const summary = migrating
+      ? `Migration sync imported ${migrationResult?.added.length ?? 0} transactions, updated ${migrationResult?.updated.length ?? 0}, removed 0.`
+      : `Imported ${reconcileResult?.added ?? 0} transactions, updated ${reconcileResult?.updated ?? 0}, removed ${reconcileResult?.removed ?? 0}.`;
+    const newTransactions = migrating
+      ? migrationResult?.added ?? []
+      : refreshedTransactions
+          .filter(
+            transaction => transaction.imported_id && !existingImportedIds.has(transaction.imported_id)
+          )
+          .map(transaction => transaction.id);
+    const matchedTransactions = migrating
+      ? migrationResult?.updated ?? []
+      : refreshedTransactions
+          .filter(
+            transaction => transaction.imported_id && existingImportedIds.has(transaction.imported_id)
+          )
+          .map(transaction => transaction.id);
+    const updatedAccounts =
+      newTransactions.length > 0 || matchedTransactions.length > 0 || removedImportedIds.length > 0
+        ? [link.actualAccountId]
+        : [];
+
     await database.syncRun.update({
       where: {
         id: syncRunId
@@ -539,11 +735,17 @@ export function createAppService({
       data: {
         status: "SUCCESS",
         finishedAt: now(),
-        summary: migrating
-          ? `Migration sync imported ${migrationResult?.added.length ?? 0} transactions, updated ${migrationResult?.updated.length ?? 0}, removed 0.`
-          : `Imported ${reconcileResult?.added ?? 0} transactions, updated ${reconcileResult?.updated ?? 0}, removed ${reconcileResult?.removed ?? 0}.`
+        summary
       }
     });
+
+    return {
+      newTransactions,
+      matchedTransactions,
+      updatedAccounts,
+      summary,
+      lastSync: syncCompletedAt.toISOString()
+    };
   };
 
   const runLoadedLinkSyncBatch = async (links: SyncableLink[]) => {
@@ -684,6 +886,192 @@ export function createAppService({
     }
   };
 
+  const toExternalSyncStatusFromHealth = ({
+    configured,
+    isEnabled,
+    lastSync,
+    health
+  }: {
+    configured: boolean;
+    isEnabled: boolean;
+    lastSync?: string | null;
+    health?: ReturnType<typeof parseLinkConfig>["health"]   | null;
+  }): ActualExternalSyncStatusDto => {
+    if (!health) {
+      if (!isEnabled) {
+        return {
+          configured,
+          state: "error",
+          message: "External sync is disabled for this account.",
+          lastSync: lastSync ?? null,
+          canSync: false,
+          needsReauth: false
+        };
+      }
+
+      return {
+        configured,
+        state: "ok",
+        message: null,
+        lastSync: lastSync ?? null,
+        canSync: true,
+        needsReauth: false
+      };
+    }
+
+    const reauthRequired =
+      health.action === "REAUTH_CONNECTION" ||
+      health.action === "REAUTH_BANK" ||
+      health.action === "MANUAL_RECONNECT" ||
+      health.action === "CHECK_PROVIDER";
+
+    return {
+      configured,
+      state: reauthRequired ? "reauth_required" : "error",
+      message: health.message ?? null,
+      lastSync: lastSync ?? null,
+      canSync: !reauthRequired && isEnabled,
+      needsReauth: reauthRequired
+    };
+  };
+
+  const getExternalSyncBridgeStatus = async (actualAccountId?: string): Promise<ActualExternalSyncStatusDto> => {
+    if (!actualAccountId) {
+      return {
+        configured: true,
+        state: "ok",
+        message: null,
+        lastSync: null,
+        canSync: false,
+        needsReauth: false
+      };
+    }
+
+    const link = await findCurrentSyncLink(actualAccountId);
+    if (!link || !link.provider || !link.connection || !link.connectionAccount) {
+      return {
+        configured: false,
+        state: "not_configured",
+        message: "No external sync link is configured for this account.",
+        lastSync: null,
+        canSync: false,
+        needsReauth: false
+      };
+    }
+
+    const providerSettings = await getEffectiveProviderSettings();
+    const configured =
+      link.provider === "PLAID"
+        ? Boolean(
+            getActivePlaidEnvironmentSettings(providerSettings.PLAID).clientId &&
+              getActivePlaidEnvironmentSettings(providerSettings.PLAID).secret
+          )
+        : link.provider === "TELLER"
+          ? Boolean(getActiveTellerEnvironmentSettings(providerSettings.TELLER).appId)
+          : true;
+
+    if (!configured) {
+      return {
+        configured: false,
+        state: "not_configured",
+        message: `${link.provider} is not configured in Actual Sync Hub.`,
+        lastSync: link.lastSyncedAt?.toISOString() ?? null,
+        canSync: false,
+        needsReauth: false
+      };
+    }
+
+    const linkHealth = parseLinkConfig(link.configJson).health;
+    if (linkHealth) {
+      return toExternalSyncStatusFromHealth({
+        configured: true,
+        isEnabled: link.isEnabled,
+        lastSync: link.lastSyncedAt?.toISOString() ?? null,
+        health: linkHealth
+      });
+    }
+
+    const connectionHealth = parseConnectionMetadata(link.connection.metadataJson).health;
+    if (connectionHealth) {
+      return toExternalSyncStatusFromHealth({
+        configured: true,
+        isEnabled: link.isEnabled,
+        lastSync: link.lastSyncedAt?.toISOString() ?? null,
+        health: connectionHealth
+      });
+    }
+
+    return toExternalSyncStatusFromHealth({
+      configured: true,
+      isEnabled: link.isEnabled,
+      lastSync: link.lastSyncedAt?.toISOString() ?? null,
+      health: null
+    });
+  };
+
+  const runExternalSyncBridgeSync = async (actualAccountId: string): Promise<ExternalSyncBridgeSyncResponseDto> => {
+    const status = await getExternalSyncBridgeStatus(actualAccountId);
+    if (!status.configured) {
+      return {
+        error_code: "NOT_CONFIGURED",
+        error_type: "EXTERNAL_SYNC",
+        message: status.message ?? "No external sync link is configured for this account.",
+        lastSync: status.lastSync ?? null,
+        newTransactions: [],
+        matchedTransactions: [],
+        updatedAccounts: []
+      };
+    }
+
+    if (status.needsReauth) {
+      return {
+        error_code: "REAUTH_REQUIRED",
+        error_type: "EXTERNAL_SYNC",
+        message: status.message ?? "Bank credentials need to be refreshed.",
+        lastSync: status.lastSync ?? null,
+        newTransactions: [],
+        matchedTransactions: [],
+        updatedAccounts: []
+      };
+    }
+
+    if (!status.canSync) {
+      return {
+        error_code: "SYNC_FAILED",
+        error_type: "EXTERNAL_SYNC",
+        message: status.message ?? "External sync is not currently available for this account.",
+        lastSync: status.lastSync ?? null,
+        newTransactions: [],
+        matchedTransactions: [],
+        updatedAccounts: []
+      };
+    }
+
+    try {
+      const outcome = await appService.runAccountSync(actualAccountId);
+      return {
+        message: outcome?.summary ?? "Sync completed.",
+        lastSync: outcome?.lastSync ?? status.lastSync ?? null,
+        newTransactions: outcome?.newTransactions ?? [],
+        matchedTransactions: outcome?.matchedTransactions ?? [],
+        updatedAccounts: outcome?.updatedAccounts ?? []
+      };
+    } catch (error) {
+      const nextStatus = await getExternalSyncBridgeStatus(actualAccountId);
+      return {
+        error_code: nextStatus.needsReauth ? "REAUTH_REQUIRED" : "SYNC_FAILED",
+        error_type: "EXTERNAL_SYNC",
+        message:
+          nextStatus.message ??
+          (error instanceof Error ? error.message : "External sync failed."),
+        lastSync: nextStatus.lastSync ?? null,
+        newTransactions: [],
+        matchedTransactions: [],
+        updatedAccounts: []
+      };
+    }
+  };
+
   const syncReviewService = createSyncReviewService({
     database,
     actual,
@@ -694,24 +1082,45 @@ export function createAppService({
     now
   });
 
-  return {
+  const appService: AppService = {
     async getRuntimeInfo(): Promise<RuntimeInfoDto> {
+      const effectiveSettings = await getEffectiveProviderSettings();
+      const providers = await getProviderRuntimeInfo();
+      const activePlaidSettings = getActivePlaidEnvironmentSettings(effectiveSettings.PLAID);
+      const plaidEnabled = Boolean(activePlaidSettings.clientId && activePlaidSettings.secret);
+      const activeTellerSettings = getActiveTellerEnvironmentSettings(effectiveSettings.TELLER);
+      const tellerEnabled = Boolean(activeTellerSettings.appId);
+      const tellerMtlsConfigured =
+        effectiveSettings.TELLER.environment === "sandbox" ||
+        Boolean(
+          ("certificatePem" in activeTellerSettings ? activeTellerSettings.certificatePem : "") &&
+            ("keyPem" in activeTellerSettings ? activeTellerSettings.keyPem : "")
+        );
+      const plaidSandboxToolsEnabled = effectiveSettings.PLAID.environment === "sandbox";
       return {
         instanceLabel: runtime.instanceLabel,
         liveSandboxMode: runtime.liveSandboxMode,
+        providers,
+        settings: effectiveSettings,
         plaid: {
-          enabled: runtime.plaidEnabled,
-          environment: runtime.plaidEnvironment,
-          sandboxToolsEnabled: runtime.plaidSandboxToolsEnabled
+          enabled: plaidEnabled,
+          environment: effectiveSettings.PLAID.environment,
+          sandboxToolsEnabled: plaidSandboxToolsEnabled
         },
         teller: {
-          enabled: runtime.tellerEnabled,
-          environment: runtime.tellerEnvironment,
-          mtlsConfigured: runtime.tellerMtlsConfigured
+          enabled: tellerEnabled,
+          environment: effectiveSettings.TELLER.environment,
+          mtlsConfigured: tellerMtlsConfigured
+        },
+        simplefin: {
+          enabled: true,
+          mode: effectiveSettings.SIMPLEFIN.mode,
+          requiresSetupToken: true
         },
         actual: {
           serverUrl: runtime.actualServerUrl,
-          budgetSyncIdConfigured: runtime.actualBudgetSyncIdConfigured
+          budgetSyncIdConfigured: runtime.actualBudgetSyncIdConfigured,
+          externalSyncWritebackEnabled: runtime.actualExternalSyncWritebackEnabled
         }
       };
     },
@@ -736,19 +1145,49 @@ export function createAppService({
           status: connection.status,
           institutionName: connection.institutionName,
           institutionId: connection.institutionId,
+          providerUserId:
+            connection.provider === "TELLER" &&
+            typeof metadata.teller === "object" &&
+            metadata.teller &&
+            "userId" in metadata.teller &&
+            typeof metadata.teller.userId === "string"
+              ? metadata.teller.userId
+              : null,
+          providerAccountsUrl:
+            connection.provider === "SIMPLEFIN" &&
+            typeof metadata.simplefin === "object" &&
+            metadata.simplefin &&
+            "baseUrl" in metadata.simplefin &&
+            typeof metadata.simplefin.baseUrl === "string"
+              ? (() => {
+                  try {
+                    const url = new URL(metadata.simplefin.baseUrl);
+                    return `${url.origin}/my-account`;
+                  } catch {
+                    return null;
+                  }
+                })()
+              : null,
           lastRefreshedAt: connection.lastRefreshedAt?.toISOString() ?? null,
           health: metadata.health ?? null,
-          accounts: connection.accounts.map(account => ({
-            id: account.id,
-            externalAccountId: account.externalAccountId,
-            name: account.name,
-            officialName: account.officialName,
-            mask: account.mask,
-            type: account.type,
-            subtype: account.subtype,
-            currentBalance: account.currentBalance,
-            availableBalance: account.availableBalance
-          }))
+          accounts: connection.accounts.map(account => {
+            const simplefinRaw =
+              connection.provider === "SIMPLEFIN" ? parseSimpleFinAccountRawJson(account.rawJson) : {};
+            return {
+              id: account.id,
+              externalAccountId: account.externalAccountId,
+              name: account.name,
+              officialName: account.officialName,
+              mask: account.mask,
+              type: account.type,
+              subtype: account.subtype,
+              currentBalance: account.currentBalance,
+              availableBalance: account.availableBalance,
+              providerConnectionId: account.providerConnectionId ?? simplefinRaw.connId ?? null,
+              providerConnectionName: account.providerConnectionName ?? simplefinRaw.connName ?? null,
+              providerInstitutionName: simplefinRaw.institution ?? simplefinRaw.connOrgName ?? null
+            };
+          })
         };
       });
     },
@@ -788,6 +1227,7 @@ export function createAppService({
     const options: ConnectionAccountOptionDto[] = connections.flatMap(connection =>
       connection.accounts.map(account => {
         const metadata = parseConnectionMetadata(connection.metadataJson);
+        const simplefinRaw = connection.provider === "SIMPLEFIN" ? parseSimpleFinAccountRawJson(account.rawJson) : {};
         return {
           connectionId: connection.id,
           connectionLabel: connection.label,
@@ -800,7 +1240,10 @@ export function createAppService({
           accountName: account.name,
           mask: account.mask,
           type: account.type,
-          subtype: account.subtype
+          subtype: account.subtype,
+          providerConnectionId: account.providerConnectionId ?? simplefinRaw.connId ?? null,
+          providerConnectionName: account.providerConnectionName ?? simplefinRaw.connName ?? null,
+          providerInstitutionName: simplefinRaw.institution ?? simplefinRaw.connOrgName ?? null
         };
       })
     );
@@ -916,6 +1359,7 @@ export function createAppService({
       let updated = 0;
       let skipped = 0;
       let unmatched = 0;
+      const syncedActualAccountIds = new Set<string>();
 
       for (const actualLink of actualBankSyncLinks.filter(link => link.accountSyncSource === "simpleFin")) {
         const connectionAccount = connectionAccountsByExternalId.get(actualLink.externalAccountId);
@@ -941,6 +1385,7 @@ export function createAppService({
             }
           });
           imported += 1;
+          syncedActualAccountIds.add(actualLink.actualAccountId);
           continue;
         }
 
@@ -958,11 +1403,16 @@ export function createAppService({
             }
           });
           updated += 1;
+          syncedActualAccountIds.add(actualLink.actualAccountId);
           continue;
         }
 
         skipped += 1;
       }
+
+      await Promise.all(
+        [...syncedActualAccountIds].map(accountId => syncActualExternalWriteback({ actualAccountId: accountId }))
+      );
 
       return {
         imported,
@@ -1008,15 +1458,66 @@ export function createAppService({
           id: connectionId
         },
         select: {
-          provider: true
+          id: true,
+          provider: true,
+          metadataJson: true
         }
       });
 
-      if (connection.provider !== "SIMPLEFIN") {
-        throw new Error("Disconnect is only implemented for SimpleFIN today");
+      const adapter = getProviderAdapter(connection.provider);
+      if (adapter?.disconnectConnection) {
+        await adapter.disconnectConnection(connectionId);
       }
 
-      await simplefin.disconnectConnection(connectionId);
+      const metadata = parseConnectionMetadata(connection.metadataJson);
+      const providerKey = connection.provider.toLowerCase();
+      const healthAction = connection.provider === "SIMPLEFIN" ? "MANUAL_RECONNECT" : "REAUTH_CONNECTION";
+      const healthMessage = `${connection.provider === "TELLER" ? "Teller" : connection.provider === "PLAID" ? "Plaid" : "SimpleFIN"} connection was disconnected and must be reconnected.`;
+
+      await database.$transaction(async tx => {
+        await tx.connection.update({
+          where: {
+            id: connection.id
+          },
+          data: {
+            status: "DISCONNECTED",
+            ...(connection.provider === "SIMPLEFIN"
+              ? {
+                  accessTokenCiphertext: encryptString("")
+                }
+              : {}),
+            metadataJson: JSON.stringify({
+              ...metadata,
+              [providerKey]: {
+                ...(typeof metadata[providerKey] === "object" && metadata[providerKey]
+                  ? (metadata[providerKey] as Record<string, unknown>)
+                  : {}),
+                disconnectedAt: now().toISOString()
+              },
+              health: {
+                state: "REAUTH_REQUIRED",
+                scope: "CONNECTION_AUTH",
+                action: healthAction,
+                code: "DISCONNECTED",
+                message: healthMessage,
+                updatedAt: now().toISOString()
+              }
+            })
+          }
+        });
+
+        await tx.accountLink.updateMany({
+          where: {
+            connectionId: connection.id,
+            status: {
+              in: ["ACTIVE", "MIGRATING"]
+            }
+          },
+          data: {
+            isEnabled: false
+          }
+        });
+      });
     },
 
     async refreshConnection(connectionId: string) {
@@ -1035,6 +1536,25 @@ export function createAppService({
       }
 
       await adapter.refreshConnection(connectionId);
+
+      if (runtime.actualExternalSyncWritebackEnabled) {
+        const linkedAccounts = await database.accountLink.findMany({
+          where: {
+            connectionId,
+            status: {
+              in: [...CURRENT_LINK_STATUSES]
+            }
+          },
+          select: {
+            actualAccountId: true
+          },
+          distinct: ["actualAccountId"]
+        });
+
+        await Promise.all(
+          linkedAccounts.map(link => syncActualExternalWriteback({ actualAccountId: link.actualAccountId }))
+        );
+      }
     },
 
     async refreshAllConnections() {
@@ -1105,7 +1625,7 @@ export function createAppService({
         (hasHistoricalImports || Boolean(currentLink?.lastSyncedAt));
 
       if (!currentLink) {
-        return database.accountLink.create({
+        const created = await database.accountLink.create({
           data: {
             status: "ACTIVE",
             actualAccountId,
@@ -1121,10 +1641,12 @@ export function createAppService({
             configJson: serializeLinkConfig(nextConfig)
           }
         });
+        await syncActualExternalWriteback({ actualAccountId });
+        return created;
       }
 
       if (!shouldReplaceCurrentLink) {
-        return database.accountLink.update({
+        const updated = await database.accountLink.update({
           where: {
             id: currentLink.id
           },
@@ -1141,10 +1663,12 @@ export function createAppService({
             configJson: serializeLinkConfig(nextConfig)
           }
         });
+        await syncActualExternalWriteback({ actualAccountId });
+        return updated;
       }
 
       const timestamp = now();
-      return database.$transaction(async tx => {
+      const replacement = await database.$transaction(async tx => {
         const replacement = await tx.accountLink.create({
           data: {
             status: "MIGRATING",
@@ -1177,6 +1701,8 @@ export function createAppService({
 
         return replacement;
       });
+      await syncActualExternalWriteback({ actualAccountId });
+      return replacement;
     },
 
     async runAccountSync(actualAccountId: string) {
@@ -1199,7 +1725,7 @@ export function createAppService({
 
       try {
         const syncResult = await adapter.syncAccountLink(link.id);
-        await applySyncResultToLink({
+        return await applySyncResultToLink({
           link,
           syncRunId: syncRun.id,
           syncResult
@@ -1338,8 +1864,9 @@ export function createAppService({
       const nowIso = now().toISOString();
       const lastWebhookSyncStartedAt =
         typeof tellerMetadata.lastWebhookSyncStartedAt === "string" ? tellerMetadata.lastWebhookSyncStartedAt : null;
-      if (runtime.tellerWebhookSyncDebounceSeconds > 0 && lastWebhookSyncStartedAt) {
-        const debounceMs = runtime.tellerWebhookSyncDebounceSeconds * 1000;
+      const effectiveSettings = await getEffectiveProviderSettings();
+      if (effectiveSettings.TELLER.webhookSyncDebounceSeconds > 0 && lastWebhookSyncStartedAt) {
+        const debounceMs = effectiveSettings.TELLER.webhookSyncDebounceSeconds * 1000;
         const lastSyncMs = Date.parse(lastWebhookSyncStartedAt);
         if (Number.isFinite(lastSyncMs) && now().getTime() - lastSyncMs < debounceMs) {
           await database.connection.update({
@@ -1396,6 +1923,10 @@ export function createAppService({
       await this.runScheduledLinkSyncs(eligibleLinks.map(link => link.id));
     },
 
+    getExternalSyncBridgeStatus,
+
+    runExternalSyncBridgeSync,
+
     previewAccountSyncReview: syncReviewService.previewAccountSyncReview,
 
     commitAccountSyncReview: syncReviewService.commitAccountSyncReview,
@@ -1419,6 +1950,8 @@ export function createAppService({
       }));
     }
   };
+
+  return appService;
 }
 
 export const appService = createAppService();

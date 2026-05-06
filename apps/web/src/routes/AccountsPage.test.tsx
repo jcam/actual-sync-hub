@@ -64,6 +64,26 @@ describe("AccountsPage", () => {
     getRuntimeInfo.mockResolvedValue({
       instanceLabel: "Live Sandbox",
       liveSandboxMode: true,
+      providers: [],
+      settings: {
+        PLAID: {
+          countryCodes: ["US"],
+          products: ["transactions"],
+          transactionsDaysRequested: 365,
+          personalFinanceCategoryVersion: "v2",
+          automaticSyncConcurrency: 2
+        },
+        TELLER: {
+          transactionsInitialDays: 90,
+          transactionsOverlapDays: 10,
+          automaticSyncConcurrency: 2,
+          webhookSyncDebounceSeconds: 30
+        },
+        SIMPLEFIN: {
+          transactionsInitialDays: 45,
+          automaticSyncConcurrency: 1
+        }
+      },
       plaid: {
         enabled: true,
         environment: "sandbox",
@@ -74,9 +94,14 @@ describe("AccountsPage", () => {
         environment: "sandbox",
         mtlsConfigured: false
       },
+      simplefin: {
+        enabled: true,
+        requiresSetupToken: true
+      },
       actual: {
         serverUrl: "http://127.0.0.1:5006",
-        budgetSyncIdConfigured: true
+        budgetSyncIdConfigured: true,
+        externalSyncWritebackEnabled: false
       }
     });
 

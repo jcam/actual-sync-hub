@@ -1,6 +1,6 @@
 import type { SyncRunStatus } from "./core.js";
 
-export interface SyncRunDto {
+export type SyncRunDto = {
   id: string;
   accountLinkId?: string | null;
   status: SyncRunStatus;

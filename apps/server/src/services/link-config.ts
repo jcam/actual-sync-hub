@@ -4,11 +4,11 @@ import type {
   LinkConfigDto,
   Provider,
   ProviderSyncStateDto,
-  SyncHealthDto
+  SyncHealthDto,
+  UpdateAccountLinkPayload
 } from "@actual-sync/shared";
-import type { UpdateAccountLinkPayload } from "@actual-sync/shared";
 
-export interface LinkConfigData {
+export type LinkConfigData = {
   providerSyncState?: ProviderSyncStateDto;
   health?: SyncHealthDto | null;
   categoryMappings?: CategoryMappingDto[];

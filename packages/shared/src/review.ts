@@ -1,6 +1,6 @@
 import type { AccountLinkStatus } from "./core.js";
 
-export interface MigrationPreviewExistingTransactionDto {
+export type MigrationPreviewExistingTransactionDto = {
   id: string;
   date: string;
   amount: number;
@@ -12,7 +12,7 @@ export interface MigrationPreviewExistingTransactionDto {
 
 export type MigrationPreviewAction = "add" | "update" | "ignore";
 
-export interface MigrationPreviewItemDto {
+export type MigrationPreviewItemDto = {
   importedId: string;
   date: string;
   amount: number;
@@ -24,7 +24,7 @@ export interface MigrationPreviewItemDto {
   existing?: MigrationPreviewExistingTransactionDto | null;
 }
 
-export interface MigrationPreviewDto {
+export type MigrationPreviewDto = {
   actualAccountId: string;
   actualAccountName: string;
   linkId: string;
@@ -32,6 +32,6 @@ export interface MigrationPreviewDto {
   items: MigrationPreviewItemDto[];
 }
 
-export interface CommitMigrationPayload {
+export type CommitMigrationPayload = {
   importedIds: string[];
 }

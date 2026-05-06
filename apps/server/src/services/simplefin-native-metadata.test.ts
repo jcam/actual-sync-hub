@@ -18,8 +18,11 @@ describe("deriveDesiredActualSimpleFinMetadata", () => {
           currentBalance: 1234.56,
           availableBalance: 1200.12,
           rawJson: JSON.stringify({
+            accountId: "sf-account-1",
             institution: "SimpleFIN Credit Union",
-            orgDomain: "credit-union.example"
+            orgDomain: "credit-union.example",
+            connId: "conn-123",
+            connName: "SimpleFIN Credit Union - Household"
           })
         }
       })

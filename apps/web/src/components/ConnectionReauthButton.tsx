@@ -31,16 +31,18 @@ export function ConnectionReauthButton({
 
   const plaid = usePlaidLink({
     token: plaidSession?.linkToken ?? null,
-    onSuccess: async () => {
-      try {
-        await api.refreshConnection(connectionId);
-        await onCompleted?.();
-      } catch (refreshError) {
-        setError(getErrorMessage(refreshError));
-      } finally {
-        setPlaidSession(null);
-        setBusy(false);
-      }
+    onSuccess: () => {
+      void (async () => {
+        try {
+          await api.refreshConnection(connectionId);
+          await onCompleted?.();
+        } catch (refreshError) {
+          setError(getErrorMessage(refreshError));
+        } finally {
+          setPlaidSession(null);
+          setBusy(false);
+        }
+      })();
     },
     onExit: error => {
       if (error) {
@@ -85,15 +87,17 @@ export function ConnectionReauthButton({
               const TellerConnect = await loadTellerConnect();
               const teller = TellerConnect.setup({
                 ...session.config,
-                onSuccess: async () => {
-                  try {
-                    await api.refreshConnection(connectionId);
-                    await onCompleted?.();
-                  } catch (refreshError) {
-                    setError(getErrorMessage(refreshError));
-                  } finally {
-                    setBusy(false);
-                  }
+                onSuccess: () => {
+                  void (async () => {
+                    try {
+                      await api.refreshConnection(connectionId);
+                      await onCompleted?.();
+                    } catch (refreshError) {
+                      setError(getErrorMessage(refreshError));
+                    } finally {
+                      setBusy(false);
+                    }
+                  })();
                 },
                 onExit: () => {
                   setBusy(false);

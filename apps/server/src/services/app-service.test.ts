@@ -224,6 +224,273 @@ describe.sequential("app service", () => {
     ]);
   });
 
+  it("surfaces persisted Teller user ids in connection listings", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    await prisma.connection.create({
+      data: {
+        provider: "TELLER",
+        label: "Primary Teller",
+        providerItemId: "enr-123",
+        accessTokenCiphertext: "cipher",
+        metadataJson: JSON.stringify({
+          teller: {
+            enrollmentId: "enr-123",
+            userId: "usr-123"
+          }
+        })
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        listBankSyncLinks: vi.fn().mockResolvedValue([])
+      } as never
+    });
+
+    await expect(service.listConnections()).resolves.toEqual([
+      expect.objectContaining({
+        provider: "TELLER",
+        providerUserId: "usr-123"
+      })
+    ]);
+  });
+
+  it("reports unified provider readiness details in runtime info", async () => {
+    const service = createAppService({
+      providerSettingsService: {
+        getAll: vi.fn().mockResolvedValue({
+          PLAID: {
+            environment: "sandbox",
+            sandbox: {
+              clientId: "",
+              secret: ""
+            },
+            production: {
+              clientId: "",
+              secret: ""
+            },
+            countryCodes: ["US"],
+            products: ["transactions"],
+            transactionsDaysRequested: 30,
+            personalFinanceCategoryVersion: "v2",
+            automaticSyncConcurrency: 2
+          },
+          TELLER: {
+            environment: "development",
+            sandbox: {
+              appId: "",
+              sandboxAccessToken: ""
+            },
+            development: {
+              appId: "app_test_123",
+              certificatePem: "",
+              keyPem: "",
+              webhookSigningSecrets: []
+            },
+            production: {
+              appId: "",
+              certificatePem: "",
+              keyPem: "",
+              webhookSigningSecrets: []
+            },
+            transactionsInitialDays: 30,
+            transactionsOverlapDays: 3,
+            automaticSyncConcurrency: 1,
+            webhookSyncDebounceSeconds: 30
+          },
+          SIMPLEFIN: {
+            mode: "sandbox",
+            development: {
+              serverUrl: ""
+            },
+            transactionsInitialDays: 45,
+            automaticSyncConcurrency: 2
+          }
+        })
+      } as never,
+      runtime: {
+        instanceLabel: "Dev Sandbox",
+        liveSandboxMode: true,
+        actualServerUrl: "http://127.0.0.1:5007",
+        actualBudgetSyncIdConfigured: true,
+        actualExternalSyncWritebackEnabled: false,
+        automaticSyncBackoffBaseMinutes: 5,
+        automaticSyncBackoffMaxMinutes: 60
+      }
+    });
+
+    const runtime = await service.getRuntimeInfo();
+
+    expect(runtime.providers).toEqual([
+      expect.objectContaining({
+        provider: "PLAID",
+        ready: false,
+        issues: ["Enter a Plaid client ID and secret to enable Plaid connections."]
+      }),
+      expect.objectContaining({
+        provider: "TELLER",
+        ready: false,
+        issues: ["Enter Teller client certificate and key PEM values to enable non-sandbox Teller connections."]
+      }),
+      expect.objectContaining({
+        provider: "SIMPLEFIN",
+        ready: true
+      })
+    ]);
+  });
+
+  it("disconnects a provider connection and disables its active links", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-1",
+        accessTokenCiphertext: "cipher",
+        metadataJson: JSON.stringify({
+          plaid: {
+            linkedAt: "2026-05-05T00:00:00.000Z"
+          }
+        })
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    const disconnectConnection = vi.fn().mockResolvedValue(undefined);
+    const disconnectedAt = new Date("2026-05-06T12:00:00.000Z");
+
+    const service = createAppService({
+      prisma,
+      plaidService: {
+        disconnectConnection
+      } as never,
+      now: () => disconnectedAt
+    });
+
+    await service.disconnectConnection(connection.id);
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const updatedLink = await prisma.accountLink.findFirstOrThrow({
+      where: {
+        connectionId: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}") as {
+      health?: { action?: string; code?: string };
+      plaid?: { disconnectedAt?: string };
+    };
+
+    expect(disconnectConnection).toHaveBeenCalledWith(connection.id);
+    expect(updatedConnection.status).toBe("DISCONNECTED");
+    expect(metadata.health).toMatchObject({
+      action: "REAUTH_CONNECTION",
+      code: "DISCONNECTED"
+    });
+    expect(metadata.plaid?.disconnectedAt).toBe(disconnectedAt.toISOString());
+    expect(updatedLink.isEnabled).toBe(false);
+  });
+
+  it("writes external-sync metadata through Actual when the feature gate is enabled", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        institutionName: "First Platypus Bank",
+        institutionId: "platypus-bank",
+        providerItemId: "item-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "ext-checking",
+        name: "Checking",
+        officialName: "Household Checking",
+        mask: "1234",
+        type: "depository",
+        currentBalance: 1500.25,
+        availableBalance: 1400
+      }
+    });
+
+    const linkExternalSyncAccount = vi.fn().mockResolvedValue(undefined);
+    const unlinkExternalSyncAccount = vi.fn().mockResolvedValue(undefined);
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions: vi.fn(),
+        linkExternalSyncAccount,
+        unlinkExternalSyncAccount
+      } as never,
+      runtime: {
+        instanceLabel: "Dev Sandbox",
+        liveSandboxMode: false,
+        actualServerUrl: "http://127.0.0.1:5007",
+        actualBudgetSyncIdConfigured: true,
+        actualExternalSyncWritebackEnabled: true,
+        automaticSyncBackoffBaseMinutes: 5,
+        automaticSyncBackoffMaxMinutes: 60
+      }
+    });
+
+    await service.upsertAccountLink("actual-1", {
+      actualAccountName: "Household Checking",
+      assetType: "BANK",
+      provider: "PLAID",
+      connectionId: connection.id,
+      connectionAccountId: connectionAccount.id,
+      syncFrequency: "MANUAL",
+      isEnabled: true,
+      categoryMappings: []
+    });
+
+    expect(linkExternalSyncAccount).toHaveBeenCalledWith("actual-1", {
+      syncSource: "external",
+      providerAccountId: "ext-checking",
+      institutionName: "First Platypus Bank",
+      institutionExternalId: "platypus-bank",
+      mask: "1234",
+      officialName: "Household Checking",
+      balanceCurrent: 1500.25,
+      balanceAvailable: 1400,
+      balanceLimit: null,
+      lastSync: null
+    });
+    expect(unlinkExternalSyncAccount).not.toHaveBeenCalled();
+  });
+
   it("imports matching existing Actual SimpleFIN links into local account links", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
@@ -562,16 +829,7 @@ describe.sequential("app service", () => {
         liveSandboxMode: false,
         actualServerUrl: "http://127.0.0.1:5006",
         actualBudgetSyncIdConfigured: true,
-        plaidEnabled: true,
-        plaidEnvironment: "sandbox",
-        plaidSandboxToolsEnabled: true,
-        plaidAutomaticSyncConcurrency: 2,
-        tellerEnabled: true,
-        tellerEnvironment: "sandbox",
-        tellerMtlsConfigured: false,
-        tellerWebhookSyncDebounceSeconds: 30,
-        tellerAutomaticSyncConcurrency: 1,
-        simplefinAutomaticSyncConcurrency: 2,
+        actualExternalSyncWritebackEnabled: false,
         automaticSyncBackoffBaseMinutes: 5,
         automaticSyncBackoffMaxMinutes: 60
       }
@@ -634,16 +892,7 @@ describe.sequential("app service", () => {
         liveSandboxMode: false,
         actualServerUrl: "http://127.0.0.1:5006",
         actualBudgetSyncIdConfigured: true,
-        plaidEnabled: true,
-        plaidEnvironment: "sandbox",
-        plaidSandboxToolsEnabled: true,
-        plaidAutomaticSyncConcurrency: 2,
-        tellerEnabled: true,
-        tellerEnvironment: "sandbox",
-        tellerMtlsConfigured: false,
-        tellerWebhookSyncDebounceSeconds: 30,
-        tellerAutomaticSyncConcurrency: 1,
-        simplefinAutomaticSyncConcurrency: 2,
+        actualExternalSyncWritebackEnabled: false,
         automaticSyncBackoffBaseMinutes: 5,
         automaticSyncBackoffMaxMinutes: 60
       },
@@ -735,14 +984,7 @@ describe.sequential("app service", () => {
       data: {
         accountLinkId: originalLink.id,
         importedId: "old-1",
-        providerImportedId: "old-1",
-        actualAccountId: "actual-1",
-        transactionDate: "2026-05-01",
-        amount: -10,
-        payeeName: "Store",
-        importedPayee: "STORE",
         primarySourceCategory: "Groceries",
-        sourceCategoryNamesJson: JSON.stringify(["Groceries"]),
         appliedCategoryId: null,
         observedCategoryId: null
       }
@@ -913,7 +1155,6 @@ describe.sequential("app service", () => {
     expect(importedTransactions).toHaveLength(1);
     expect(importedTransactions[0]).toMatchObject({
       importedId: "plaid-1",
-      providerImportedId: "plaid-1",
       primarySourceCategory: "Food And Drink",
       appliedCategoryId: "cat-food",
       observedCategoryId: "cat-food"
@@ -1039,8 +1280,8 @@ describe.sequential("app service", () => {
     expect(syncRuns[0]?.summary).toBe("Migration sync imported 1 transactions, updated 1, removed 0.");
     expect(ledgerRows[0]).toMatchObject({
       importedId: "plaid-1",
-      providerImportedId: "plaid-1",
-      actualTransactionId: "txn-existing"
+      appliedCategoryId: "cat-food",
+      observedCategoryId: "cat-food"
     });
   });
 
@@ -1201,28 +1442,14 @@ describe.sequential("app service", () => {
         {
           accountLinkId: link.id,
           importedId: "old-1",
-          providerImportedId: "old-1",
-          actualAccountId: "actual-1",
-          transactionDate: "2026-05-01",
-          amount: -12.5,
-          payeeName: "Store A",
-          importedPayee: "STORE A",
           primarySourceCategory: "Groceries",
-          sourceCategoryNamesJson: JSON.stringify(["Groceries", "Food And Drink"]),
           appliedCategoryId: null,
           observedCategoryId: null
         },
         {
           accountLinkId: link.id,
           importedId: "old-2",
-          providerImportedId: "old-2",
-          actualAccountId: "actual-1",
-          transactionDate: "2026-05-02",
-          amount: -20,
-          payeeName: "Store B",
-          importedPayee: "STORE B",
           primarySourceCategory: "Groceries",
-          sourceCategoryNamesJson: JSON.stringify(["Groceries", "Food And Drink"]),
           appliedCategoryId: null,
           observedCategoryId: null
         }
@@ -1349,14 +1576,7 @@ describe.sequential("app service", () => {
       data: {
         accountLinkId: link.id,
         importedId: "old-stale",
-        providerImportedId: "old-stale",
-        actualAccountId: "actual-1",
-        transactionDate: "2025-10-01",
-        amount: -15,
-        payeeName: "Old Merchant",
-        importedPayee: "OLD MERCHANT",
         primarySourceCategory: "Groceries",
-        sourceCategoryNamesJson: JSON.stringify(["Groceries"]),
         appliedCategoryId: "cat-groceries",
         observedCategoryId: "cat-groceries",
         lastSeenAt: new Date("2025-10-01T00:00:00.000Z")
@@ -1457,14 +1677,7 @@ describe.sequential("app service", () => {
       data: {
         accountLinkId: link.id,
         importedId: "gone-1",
-        providerImportedId: "gone-1",
-        actualAccountId: "actual-1",
-        transactionDate: "2026-05-01",
-        amount: -15,
-        payeeName: "Old Merchant",
-        importedPayee: "OLD MERCHANT",
         primarySourceCategory: "Groceries",
-        sourceCategoryNamesJson: JSON.stringify(["Groceries"]),
         appliedCategoryId: "cat-groceries",
         observedCategoryId: "cat-groceries"
       }

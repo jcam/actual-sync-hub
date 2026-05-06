@@ -1,4 +1,78 @@
 import fs from "node:fs/promises";
+import type * as ActualApi from "@actual-app/api";
+
+async function seedSandboxCategories(actual: typeof ActualApi) {
+  const existingGroups = await actual.getCategoryGroups();
+  const groupIdByName = new Map(existingGroups.map(group => [group.name, group.id]));
+
+  const getOrCreateGroup = async (name: string, isIncome = false) => {
+    const existingId = groupIdByName.get(name);
+    if (existingId) {
+      return existingId;
+    }
+
+    const createdId = await actual.createCategoryGroup({
+      name,
+      is_income: isIncome,
+      hidden: false
+    } as never);
+    groupIdByName.set(name, createdId);
+    return createdId;
+  };
+
+  const categories = await actual.getCategories();
+  const existingCategoryKeys = new Set(
+    categories
+      .map(category => {
+        const groupId = "group_id" in category ? category.group_id : null;
+        return groupId ? `${groupId}:${category.name}` : null;
+      })
+      .filter((key): key is string => Boolean(key))
+  );
+
+  const createCategory = async (groupId: string, name: string, isIncome = false) => {
+    const key = `${groupId}:${name}`;
+    if (existingCategoryKeys.has(key)) {
+      return;
+    }
+
+    await actual.createCategory({
+      name,
+      group_id: groupId,
+      is_income: isIncome,
+      hidden: false
+    } as never);
+    existingCategoryKeys.add(key);
+  };
+
+  const foodGroup = await getOrCreateGroup("Food");
+  await createCategory(foodGroup, "Groceries");
+  await createCategory(foodGroup, "Eating Out");
+  await createCategory(foodGroup, "Coffee");
+
+  const lifestyleGroup = await getOrCreateGroup("Lifestyle");
+  await createCategory(lifestyleGroup, "Entertainment");
+  await createCategory(lifestyleGroup, "Shopping");
+  await createCategory(lifestyleGroup, "Fitness");
+  await createCategory(lifestyleGroup, "Services");
+  await createCategory(lifestyleGroup, "Software");
+
+  const transportGroup = await getOrCreateGroup("Transportation");
+  await createCategory(transportGroup, "Transportation");
+  await createCategory(transportGroup, "Gas");
+  await createCategory(transportGroup, "Parking");
+  await createCategory(transportGroup, "Travel");
+
+  const homeGroup = await getOrCreateGroup("Home");
+  await createCategory(homeGroup, "Utilities");
+
+  const workGroup = await getOrCreateGroup("Work");
+  await createCategory(workGroup, "Taxes");
+
+  const incomeGroup = await getOrCreateGroup("Income", true);
+  await createCategory(incomeGroup, "Paycheck", true);
+  await createCategory(incomeGroup, "Interest", true);
+}
 
 export async function seedActualSandboxBudget({
   serverURL,
@@ -24,6 +98,8 @@ export async function seedActualSandboxBudget({
 
   try {
     await actual.runImport(budgetName, async () => {
+      await seedSandboxCategories(actual);
+
       const checkingId = await actual.createAccount(
         {
           name: "Sandbox Checking"

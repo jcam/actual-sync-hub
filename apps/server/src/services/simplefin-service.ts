@@ -1,38 +1,44 @@
 import { prisma } from "../db.js";
-import { env } from "../env.js";
 import type { Prisma } from "../generated/prisma/client.js";
+import type { ProviderConnectResult } from "@actual-sync/shared";
 import { decryptString, encryptString } from "../lib/crypto.js";
 import { buildProviderCategoryNames } from "./category-matching.js";
 import { parseLinkConfig } from "./link-config.js";
-import { providerFixtureCache, type ProviderFixtureCache } from "./provider-fixture-cache.js";
+import { providerFixtureCache } from './provider-fixture-cache.js';
+import type { ProviderFixtureCache } from './provider-fixture-cache.js';
 import type { ProviderAdapter, ProviderSyncOutcome, ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
+import { buildImportedTransactionNotes } from "./provider-sync-helpers.js";
+import { createProviderSettingsService, providerSettingsService } from './provider-settings-service.js';
+import type { ProviderSettingsService } from './provider-settings-service.js';
 import { clearSyncHealth, ProviderOperationError, toSyncHealth } from "./sync-health.js";
 
 type DatabaseClient = typeof prisma;
 
-const SIMPLEFIN_DEFAULT_LOOKBACK_DAYS = 90;
+const SIMPLEFIN_DEFAULT_LOOKBACK_DAYS = 45;
 
-export interface SimpleFinConfig {
+export type SimpleFinConfig = {
   defaultLookbackDays: number;
   overlapDays: number;
 }
 
-export interface SimpleFinConnectPayload {
+export type SimpleFinConnectPayload = {
   setupToken: string;
   label?: string | null;
 }
 
-interface SimpleFinOrganization {
+type SimpleFinOrganization = {
   id?: string | null;
   name?: string | null;
   domain?: string | null;
+  url?: string | null;
 }
 
-interface SimpleFinTransaction {
+type SimpleFinTransaction = {
   id: string;
   amount: string | number;
   payee?: string | null;
   description?: string | null;
+  memo?: string | null;
   pending?: number | null;
   posted?: number | null;
   transacted_at?: number | null;
@@ -41,16 +47,29 @@ interface SimpleFinTransaction {
   } | null;
 }
 
-interface SimpleFinAccount {
+type SimpleFinAccount = {
   id: string;
   name: string;
   balance?: string | number | null;
+  "available-balance"?: string | number | null;
   org?: SimpleFinOrganization | null;
+  conn_id?: string | null;
+  conn_name?: string | null;
   transactions?: SimpleFinTransaction[];
 }
 
-interface SimpleFinAccountsResponse {
+type SimpleFinConnectionRecord = {
+  conn_id: string;
+  name?: string | null;
+  org_id?: string | null;
+  org_name?: string | null;
+  org_url?: string | null;
+  sfin_url?: string | null;
+}
+
+type SimpleFinAccountsResponse = {
   accounts?: SimpleFinAccount[];
+  connections?: SimpleFinConnectionRecord[];
   errors?: string[];
   errlist?: Array<{
     msg?: string;
@@ -180,11 +199,22 @@ async function fetchSimpleFinAccounts({
   return (await response.json()) as SimpleFinAccountsResponse;
 }
 
-function buildConnectionMetadata(account: SimpleFinAccount) {
+function buildSimpleFinConnectionMap(response: SimpleFinAccountsResponse) {
+  return new Map((response.connections || []).map(connection => [connection.conn_id, connection]));
+}
+
+function buildConnectionMetadata(account: SimpleFinAccount, connection?: SimpleFinConnectionRecord | null) {
   return JSON.stringify({
+    accountId: account.id,
     institution: account.org?.name ?? null,
     orgDomain: account.org?.domain ?? null,
-    orgId: account.org?.id ?? null
+    orgId: account.org?.id ?? null,
+    connId: account.conn_id ?? connection?.conn_id ?? null,
+    connName: account.conn_name ?? connection?.name ?? null,
+    connOrgId: connection?.org_id ?? null,
+    connOrgName: connection?.org_name ?? null,
+    connOrgUrl: connection?.org_url ?? null,
+    sfinUrl: connection?.sfin_url ?? null
   });
 }
 
@@ -211,19 +241,28 @@ function formatSimpleFinErrors(payload: SimpleFinAccountsResponse) {
   return [...new Set([...legacyErrors, ...structuredErrors])];
 }
 
-function buildConnectionAccountRows(connectionId: string, accounts: SimpleFinAccount[]) {
-  return accounts.map(account => ({
-    connectionId,
-    externalAccountId: account.id,
-    name: account.name,
-    officialName: account.name,
-    mask: null,
-    type: "bank",
-    subtype: null,
-    currentBalance: parseCurrency(account.balance),
-    availableBalance: null,
-    rawJson: buildConnectionMetadata(account)
-  }));
+function buildConnectionAccountRows(connectionId: string, response: SimpleFinAccountsResponse) {
+  const connectionMap = buildSimpleFinConnectionMap(response);
+  const accounts = response.accounts || [];
+  return accounts.map(account => {
+    const connectionRecord = account.conn_id ? connectionMap.get(account.conn_id) : null;
+    return {
+      connectionId,
+      externalAccountId: account.id,
+      name: account.name,
+      officialName: account.name,
+      mask: null,
+      type: "bank",
+      subtype: null,
+      currentBalance: parseCurrency(account.balance),
+      availableBalance: parseCurrency(account["available-balance"]),
+      providerConnectionId: account.conn_id ?? null,
+      providerConnectionName: account.conn_name ?? connectionRecord?.name ?? null,
+      providerInstitutionId: account.org?.id ?? connectionRecord?.org_id ?? null,
+      providerInstitutionDomain: account.org?.domain ?? null,
+      rawJson: buildConnectionMetadata(account, connectionRecord)
+    };
+  });
 }
 
 function classifySimpleFinError(error: unknown) {
@@ -286,8 +325,11 @@ function normalizeSimpleFinTransactions({
 
       const payeeName = transaction.payee?.trim() || transaction.description?.trim() || account.name;
       const importedPayee = transaction.payee?.trim() || transaction.description?.trim() || payeeName;
-      const notes =
-        transaction.description && transaction.description.trim() !== payeeName ? transaction.description.trim() : undefined;
+      const notes = buildImportedTransactionNotes({
+        payeeName,
+        description: transaction.description,
+        memo: transaction.memo
+      });
       const amount = parseCurrency(transaction.amount);
       if (amount == null) {
         return [];
@@ -303,7 +345,7 @@ function normalizeSimpleFinTransactions({
           importedId: transaction.id,
           cleared: booked,
           categoryNames: buildProviderCategoryNames(transaction.extra?.category),
-          searchText: [transaction.payee?.trim(), transaction.description?.trim()].filter(
+          searchText: [transaction.payee?.trim(), transaction.description?.trim(), transaction.memo?.trim()].filter(
             (value): value is string => Boolean(value)
           )
         }
@@ -312,29 +354,39 @@ function normalizeSimpleFinTransactions({
     .sort((left, right) => right.date.localeCompare(left.date));
 }
 
-export interface SimpleFinService extends ProviderAdapter {
-  connectSetupToken(payload: SimpleFinConnectPayload): Promise<string>;
-  reuseCachedConnection(label?: string | null): Promise<string>;
-  disconnectConnection(connectionId: string): Promise<void>;
-}
+export type SimpleFinService = {
+  connectSetupToken(payload: SimpleFinConnectPayload): Promise<ProviderConnectResult>;
+  reuseCachedConnection(label?: string | null): Promise<ProviderConnectResult>;
+} & ProviderAdapter
 
 export function createSimpleFinService({
   prisma: database = prisma,
+  providerSettings = createProviderSettingsService({ prisma: database }),
   config = {
     defaultLookbackDays: SIMPLEFIN_DEFAULT_LOOKBACK_DAYS,
-    overlapDays: env.TELLER_TRANSACTIONS_OVERLAP_DAYS
+    overlapDays: 10
   } satisfies SimpleFinConfig,
   fetchImpl = fetch,
   now = () => new Date(),
   fixtureCache = providerFixtureCache
 }: {
   prisma?: DatabaseClient;
+  providerSettings?: ProviderSettingsService;
   config?: SimpleFinConfig;
   fetchImpl?: FetchLike;
   now?: () => Date;
   fixtureCache?: ProviderFixtureCache;
 } = {}): SimpleFinService {
-  const replaceConnectionAccounts = async (connectionId: string, accounts: SimpleFinAccount[]) => {
+  const getEffectiveConfig = async (): Promise<SimpleFinConfig> => {
+    const settings = await providerSettings.get("SIMPLEFIN");
+    return {
+      defaultLookbackDays: settings.transactionsInitialDays,
+      overlapDays: config.overlapDays
+    };
+  };
+
+  const replaceConnectionAccounts = async (connectionId: string, response: SimpleFinAccountsResponse) => {
+    const accounts = response.accounts || [];
     await database.connectionAccount.deleteMany({
       where: {
         connectionId
@@ -343,7 +395,7 @@ export function createSimpleFinService({
 
     if (accounts.length > 0) {
       await database.connectionAccount.createMany({
-        data: buildConnectionAccountRows(connectionId, accounts)
+        data: buildConnectionAccountRows(connectionId, response)
       });
     }
   };
@@ -389,22 +441,31 @@ export function createSimpleFinService({
   }: {
     accessKey: string;
     label?: string | null;
-  }) => {
+  }): Promise<ProviderConnectResult> => {
     const accountsResponse = await fetchSimpleFinAccounts({
       accessKey,
       fetchImpl,
       balancesOnly: true
     });
-    const errorMessages = formatSimpleFinErrors(accountsResponse);
-    if (errorMessages.length > 0) {
-      throw new Error(errorMessages.join(" "));
-    }
     const accounts = accountsResponse.accounts || [];
+    const responseConnections = accountsResponse.connections || [];
     const identity = parseAccessKey(accessKey);
     const providerItemId = `${identity.baseUrl}|${identity.username}`;
-    const uniqueInstitutions = [...new Set(accounts.map(account => account.org?.name).filter(Boolean))];
+    const uniqueInstitutions = [
+      ...new Set(
+        [
+          ...responseConnections.map(connection => connection.org_name || connection.name).filter(Boolean),
+          ...accounts.map(account => account.org?.name || account.conn_name).filter(Boolean)
+        ]
+      )
+    ];
     const uniqueInstitutionIds = [
-      ...new Set(accounts.map(account => account.org?.domain || account.org?.id).filter(Boolean))
+      ...new Set(
+        [
+          ...responseConnections.map(connection => connection.org_id || connection.conn_id).filter(Boolean),
+          ...accounts.map(account => account.org?.domain || account.org?.id || account.conn_id).filter(Boolean)
+        ]
+      )
     ] as string[];
     const nextLabel =
       label?.trim() ||
@@ -453,14 +514,38 @@ export function createSimpleFinService({
       }
     });
 
-    await replaceConnectionAccounts(connection.id, accounts);
+    await replaceConnectionAccounts(connection.id, accountsResponse);
 
     await fixtureCache.setSimpleFin({
       accessKey,
       updatedAt: now().toISOString()
     });
 
-    return connection.id;
+    const errorMessages = formatSimpleFinErrors(accountsResponse);
+    if (errorMessages.length > 0) {
+      const providerError = classifySimpleFinError(new Error(errorMessages.join(" ")));
+      await database.connection.update({
+        where: {
+          id: connection.id
+        },
+        data: {
+          status: "ERROR",
+          metadataJson: JSON.stringify({
+            ...parseConnectionMetadata(connection.metadataJson),
+            health: toSyncHealth(providerError)
+          })
+        }
+      });
+
+      return {
+        connectionId: connection.id,
+        warning: providerError.message
+      };
+    }
+
+    return {
+      connectionId: connection.id
+    };
   };
 
   return {
@@ -502,60 +587,8 @@ export function createSimpleFinService({
       }
     },
 
-    async disconnectConnection(connectionId: string) {
-      const connection = await database.connection.findUniqueOrThrow({
-        where: {
-          id: connectionId
-        }
-      });
-
-      if (connection.provider !== "SIMPLEFIN") {
-        throw new Error("Connection is not a SimpleFIN connection");
-      }
-
-      const metadata =
-        connection.metadataJson && connection.metadataJson.length > 0
-          ? (JSON.parse(connection.metadataJson) as Record<string, unknown>)
-          : {};
-
-      await database.$transaction(async tx => {
-        await tx.connection.update({
-          where: {
-            id: connection.id
-          },
-          data: {
-            status: "DISCONNECTED",
-            accessTokenCiphertext: encryptString(""),
-            metadataJson: JSON.stringify({
-              ...metadata,
-              simplefin: {
-                ...(typeof metadata.simplefin === "object" && metadata.simplefin ? (metadata.simplefin as object) : {}),
-                disconnectedAt: now().toISOString()
-              },
-              health: {
-                state: "REAUTH_REQUIRED",
-                scope: "CONNECTION_AUTH",
-                action: "MANUAL_RECONNECT",
-                code: "DISCONNECTED",
-                message: "SimpleFIN credentials were disconnected and must be reconnected.",
-                updatedAt: now().toISOString()
-              }
-            })
-          }
-        });
-
-        await tx.accountLink.updateMany({
-          where: {
-            connectionId: connection.id,
-            status: {
-              in: ["ACTIVE", "MIGRATING"]
-            }
-          },
-          data: {
-            isEnabled: false
-          }
-        });
-      });
+    async disconnectConnection(_connectionId: string) {
+      void _connectionId;
     },
 
     async refreshConnection(connectionId: string) {
@@ -580,8 +613,7 @@ export function createSimpleFinService({
         if (errorMessages.length > 0) {
           throw classifySimpleFinError(new Error(errorMessages.join(" ")));
         }
-        const accounts = accountsResponse.accounts || [];
-        await replaceConnectionAccounts(connection.id, accounts);
+        await replaceConnectionAccounts(connection.id, accountsResponse);
         await markConnectionHealthy(connection);
       } catch (error) {
         throw await markConnectionError(connection, error);
@@ -589,6 +621,7 @@ export function createSimpleFinService({
     },
 
     async syncAccountLinks(linkIds: string[]) {
+      const effectiveConfig = await getEffectiveConfig();
       const links = await database.accountLink.findMany({
         where: {
           id: {
@@ -639,8 +672,8 @@ export function createSimpleFinService({
           const configState = parseLinkConfig(link.configJson);
           const endDate = today;
           const startDate = configState.providerSyncState?.windowEndDate
-            ? shiftIsoDate(configState.providerSyncState.windowEndDate, -config.overlapDays)
-            : shiftIsoDate(today, -(config.defaultLookbackDays - 1));
+            ? shiftIsoDate(configState.providerSyncState.windowEndDate, -effectiveConfig.overlapDays)
+            : shiftIsoDate(today, -(effectiveConfig.defaultLookbackDays - 1));
           return {
             link,
             startDate,

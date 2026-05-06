@@ -1,4 +1,4 @@
-export interface ActualCategoryOption {
+export type ActualCategoryOption = {
   id: string;
   name: string;
 }
@@ -16,24 +16,39 @@ const CATEGORY_ALIASES: Record<string, string[]> = {
   education: ["Education", "School"],
   electronics: ["Electronics", "Shopping"],
   "entertainment": ["Entertainment"],
+  "entertainment music and audio": ["Entertainment"],
+  "entertainment sporting events amusement parks and museums": ["Entertainment"],
+  "entertainment video games": ["Entertainment"],
+  ewa: ["Loan", "Debt"],
+  "food and drink fast food": ["Eating Out", "Restaurants", "Dining", "Food"],
   food: ["Food", "Groceries", "Eating Out", "Dining"],
   "food and drink": ["Food", "Eating Out", "Dining", "Restaurants", "Groceries"],
   "food and drink coffee": ["Eating Out", "Coffee", "Dining", "Food"],
   "food and drink groceries": ["Groceries", "Food"],
+  "food and drink other food and drink": ["Eating Out", "Dining", "Food"],
+  "food and drink restaurant": ["Eating Out", "Restaurants", "Dining", "Food"],
   "food and drink restaurants": ["Eating Out", "Restaurants", "Dining", "Food"],
   fuel: ["Gas", "Fuel", "Transportation", "Auto"],
   general: [],
+  "general merchandise electronics": ["Electronics", "Shopping"],
   "general merchandise": ["Shopping"],
   "general merchandise clothing and accessories": ["Clothing", "Shopping"],
-  "general merchandise superstores": ["Shopping"],
+  "general merchandise online marketplaces": ["Shopping"],
+  "general merchandise superstores": ["Shopping", "Groceries"],
   "general services": ["Services"],
   groceries: ["Groceries", "Food"],
   health: ["Medical", "Healthcare", "Health"],
   home: ["Home", "Housing"],
+  "income interest earned": ["Interest", "Income"],
+  "income salary": ["Paycheck", "Income"],
   income: ["Income", "Paycheck"],
   insurance: ["Insurance"],
   investment: ["Investments", "Investment"],
+  "loan disbursements cash advances": ["Loan", "Debt"],
   loan: ["Loan", "Loans", "Debt"],
+  "loan payments cash advances": ["Loan", "Debt"],
+  "loan payments credit card payment": ["Credit Card", "Debt"],
+  "loan payments ewa": ["Loan", "Debt"],
   "medical": ["Medical", "Healthcare"],
   office: ["Office", "Work"],
   "payment": [],
@@ -54,6 +69,7 @@ const CATEGORY_ALIASES: Record<string, string[]> = {
   "travel": ["Travel", "Vacation"],
   "travel flights": ["Airfare", "Travel", "Vacation"],
   "travel lodging": ["Hotels", "Lodging", "Travel", "Vacation"],
+  "government and non profit tax payment": ["Taxes", "Tax"],
   utilities: ["Utilities", "Bills"]
 };
 

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ActualBankSyncLinkDto, ConnectionDto } from "@actual-sync/shared";
+import type { ActualBankSyncLinkDto, ConnectionDto, RuntimeInfoDto, SyncHealthDto } from "@actual-sync/shared";
 import { api } from "../api";
-import { SyncHealthPanel } from "../components/SyncHealthPanel";
+import { ProviderSettingsPanel } from "../components/ProviderSettingsPanel";
+import { ProviderReadinessPanel } from "../components/ProviderReadinessPanel";
 import { SyncHealthBadge } from "../components/SyncHealthBadge";
 import { getDisplayErrorMessage } from "../lib/errors";
 
@@ -27,9 +28,52 @@ function formatSimpleFinPageError(error: unknown, fallback: string) {
   return message || fallback;
 }
 
+function normalizeSimpleFinGroupKey(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function parseSimpleFinConnectionWarnings(health: SyncHealthDto | null | undefined) {
+  if (!health?.message) {
+    return {
+      byName: new Map<string, string>(),
+      unmatched: [] as string[]
+    };
+  }
+
+  const byName = new Map<string, string>();
+  const pattern = /Connection to (.+?) may need attention\.\s*([\s\S]*?)(?=Connection to .+? may need attention\.|$)/g;
+  const matches = [...health.message.matchAll(pattern)];
+
+  if (matches.length === 0) {
+    return {
+      byName,
+      unmatched: [health.message]
+    };
+  }
+
+  for (const match of matches) {
+    const name = match[1]?.trim();
+    if (!name) {
+      continue;
+    }
+
+    const detail = match[2]?.trim();
+    byName.set(
+      normalizeSimpleFinGroupKey(name),
+      detail ? `Connection to ${name} may need attention. ${detail}` : `Connection to ${name} may need attention.`
+    );
+  }
+
+  return {
+    byName,
+    unmatched: [] as string[]
+  };
+}
+
 export function SimpleFinConnectionsPage() {
   const [connections, setConnections] = useState<ConnectionDto[]>([]);
   const [bankSyncLinks, setBankSyncLinks] = useState<ActualBankSyncLinkDto[]>([]);
+  const [runtime, setRuntime] = useState<RuntimeInfoDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [setupToken, setSetupToken] = useState("");
   const [label, setLabel] = useState("");
@@ -38,14 +82,16 @@ export function SimpleFinConnectionsPage() {
   const [refreshingConnectionId, setRefreshingConnectionId] = useState<string | null>(null);
   const [importingConnectionId, setImportingConnectionId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connectionsError, setConnectionsError] = useState<string | null>(null);
   const [bankSyncLinksError, setBankSyncLinksError] = useState<string | null>(null);
 
   const load = async () => {
-    const [connectionsResult, bankSyncLinksResult] = await Promise.allSettled([
+    const [connectionsResult, bankSyncLinksResult, runtimeResult] = await Promise.allSettled([
       api.listConnections(),
-      api.listActualBankSyncLinks()
+      api.listActualBankSyncLinks(),
+      api.getRuntimeInfo()
     ]);
 
     if (connectionsResult.status === "fulfilled") {
@@ -73,6 +119,12 @@ export function SimpleFinConnectionsPage() {
         )
       );
     }
+
+    if (runtimeResult?.status === "fulfilled") {
+      setRuntime(runtimeResult.value);
+    } else {
+      setRuntime(null);
+    }
   };
 
   useEffect(() => {
@@ -83,13 +135,113 @@ export function SimpleFinConnectionsPage() {
     () => connections.filter(connection => connection.provider === "SIMPLEFIN"),
     [connections]
   );
+  const groupedSimpleFinConnections = useMemo(
+    () =>
+      simplefinConnections.map(connection => {
+        const groups = new Map<
+          string,
+          {
+            connectionIds: string[];
+            connectionNames: string[];
+            institutionName: string | null;
+            accounts: typeof connection.accounts;
+          }
+        >();
+
+        for (const account of connection.accounts) {
+          const key =
+            account.providerInstitutionName ||
+            account.providerConnectionId ||
+            account.providerConnectionName ||
+            "__unscoped__";
+          const existing = groups.get(key);
+          if (existing) {
+            if (
+              account.providerConnectionId &&
+              !existing.connectionIds.includes(account.providerConnectionId)
+            ) {
+              existing.connectionIds.push(account.providerConnectionId);
+            }
+            if (
+              account.providerConnectionName &&
+              !existing.connectionNames.includes(account.providerConnectionName)
+            ) {
+              existing.connectionNames.push(account.providerConnectionName);
+            }
+            existing.accounts.push(account);
+            continue;
+          }
+          groups.set(key, {
+            connectionIds: account.providerConnectionId ? [account.providerConnectionId] : [],
+            connectionNames: account.providerConnectionName ? [account.providerConnectionName] : [],
+            institutionName: account.providerInstitutionName ?? null,
+            accounts: [account]
+          });
+        }
+
+        const providerConnections = [...groups.values()];
+        const parsedWarnings = parseSimpleFinConnectionWarnings(connection.health);
+        const rows = providerConnections.map(group => {
+          const institutionWarning = group.institutionName
+            ? parsedWarnings.byName.get(normalizeSimpleFinGroupKey(group.institutionName)) ?? null
+            : null;
+          const matchedConnectionName = group.connectionNames.find(name =>
+            parsedWarnings.byName.has(normalizeSimpleFinGroupKey(name))
+          );
+          const connectionWarning = matchedConnectionName
+            ? parsedWarnings.byName.get(normalizeSimpleFinGroupKey(matchedConnectionName)) ?? null
+            : null;
+          const matchedWarning = institutionWarning || connectionWarning;
+          const health =
+            matchedWarning && connection.health
+              ? {
+                  ...connection.health,
+                  message: matchedWarning
+                }
+              : !matchedWarning && providerConnections.length === 1 && parsedWarnings.unmatched.length > 0 && connection.health
+                ? connection.health
+                : null;
+
+          return {
+            ...group,
+            health
+          };
+        });
+
+        return {
+          connection,
+          providerConnections: rows,
+          unmatchedWarnings:
+            rows.some(group => group.health) || parsedWarnings.unmatched.length === 0 ? [] : parsedWarnings.unmatched
+        };
+      }),
+    [simplefinConnections]
+  );
   const simplefinBudgetLinks = useMemo(
     () => bankSyncLinks.filter(link => link.accountSyncSource === "simpleFin"),
     [bankSyncLinks]
   );
+  const simplefinRuntime = runtime?.providers.find(provider => provider.provider === "SIMPLEFIN") ?? {
+    provider: "SIMPLEFIN" as const,
+    label: "SimpleFIN",
+    enabled: true,
+    ready: true,
+    environment: null,
+    issues: [],
+    notes: ["Each SimpleFIN connection is created from a one-time setup token."]
+  };
 
   return (
     <div className="page-stack">
+      <ProviderReadinessPanel provider={simplefinRuntime} />
+      {runtime ? (
+        <ProviderSettingsPanel
+          provider="SIMPLEFIN"
+          label="SimpleFIN"
+          settings={runtime.settings.SIMPLEFIN}
+          onSaved={load}
+        />
+      ) : null}
       <section className="panel">
         <p className="eyebrow">Connect SimpleFIN</p>
         <div className="status-copy">
@@ -126,11 +278,15 @@ export function SimpleFinConnectionsPage() {
               setSubmitting(true);
               setError(null);
               setMessage(null);
+              setWarning(null);
               try {
-                await api.connectSimpleFin(setupToken.trim(), label.trim() || undefined);
+                const result = await api.connectSimpleFin(setupToken.trim(), label.trim() || undefined);
                 setSetupToken("");
                 setLabel("");
                 setMessage("SimpleFIN connection saved.");
+                if (result.warning) {
+                  setWarning("Connections may need attention. Review the managed connections below.");
+                }
                 await load();
               } catch (connectError) {
                 setError(
@@ -153,10 +309,14 @@ export function SimpleFinConnectionsPage() {
               setReusingCached(true);
               setError(null);
               setMessage(null);
+              setWarning(null);
               try {
-                await api.reuseCachedSimpleFinConnection(label.trim() || undefined);
+                const result = await api.reuseCachedSimpleFinConnection(label.trim() || undefined);
                 setLabel("");
                 setMessage("Reused cached SimpleFIN fixture.");
+                if (result.warning) {
+                  setWarning("Connections may need attention. Review the managed connections below.");
+                }
                 await load();
               } catch (reuseError) {
                 setError(
@@ -175,6 +335,7 @@ export function SimpleFinConnectionsPage() {
         </div>
         <p className="muted">When provider fixture caching is enabled, you can reuse the most recent SimpleFIN credentials instead of pasting a new setup token.</p>
         {message ? <p className="success-text">{message}</p> : null}
+        {warning ? <p className="warning-text">{warning}</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
       </section>
 
@@ -220,27 +381,81 @@ export function SimpleFinConnectionsPage() {
           <p className="muted">No SimpleFIN connections have been added.</p>
         ) : null}
         <div className="stack-list">
-          {simplefinConnections.map(connection => (
+          {groupedSimpleFinConnections.map(({ connection, providerConnections, unmatchedWarnings }) => (
             <article key={connection.id} className="list-card">
               <div className="list-card-header">
                 <strong>{connection.label}</strong>
                 <div className="status-row">
+                  {connection.providerAccountsUrl ? (
+                    <a
+                      className="ghost-button inline-link-button"
+                      href={connection.providerAccountsUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open SimpleFIN accounts
+                    </a>
+                  ) : null}
                   <span className="tag">{connection.status}</span>
                   {connection.health ? <SyncHealthBadge health={connection.health} compact /> : null}
                 </div>
               </div>
-              {connection.health ? (
-                <SyncHealthPanel
-                  eyebrow="Connection status"
-                  health={connection.health}
-                  provider={connection.provider}
-                  scope="connection"
-                />
-              ) : null}
               <div className="list-card-meta">
                 <span>{connection.institutionName || "SimpleFIN"}</span>
                 <span>{connection.accounts.length} provider account{connection.accounts.length === 1 ? "" : "s"}</span>
+                <span>{providerConnections.length} provider institution{providerConnections.length === 1 ? "" : "s"}</span>
               </div>
+              {connection.health ? (
+                <p className="muted">Review the provider connection rows below for current status.</p>
+              ) : null}
+              {providerConnections.length > 0 ? (
+                <div className="stack-list">
+                  {providerConnections.map(group => (
+                    <div
+                      key={group.institutionName || group.connectionIds.join("|") || group.connectionNames.join("|") || "unscoped"}
+                      className="list-card simplefin-provider-row"
+                    >
+                      <div className="list-card-header">
+                        <div>
+                          <strong>{group.institutionName || group.connectionNames[0] || "Provider institution"}</strong>
+                          {group.connectionNames.length > 0 ? (
+                            <p className="muted">
+                              Connection{group.connectionNames.length === 1 ? "" : "s"}: {group.connectionNames.join(", ")}
+                            </p>
+                          ) : null}
+                          {group.connectionIds.length > 0 ? (
+                            <p className="muted">
+                              Connection id{group.connectionIds.length === 1 ? "" : "s"}: {group.connectionIds.join(", ")}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="status-row">
+                          {group.health ? <SyncHealthBadge health={group.health} compact /> : <span className="tag success-tag">Healthy</span>}
+                        </div>
+                      </div>
+                      {group.health?.message ? <p className="warning-text">{group.health.message}</p> : null}
+                      <div className="simplefin-provider-accounts">
+                        {group.accounts.map(account => (
+                          <div key={account.id} className="simplefin-provider-account">
+                            <strong>{account.name}</strong>
+                            {account.externalAccountId ? <span className="muted">{account.externalAccountId}</span> : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {unmatchedWarnings.length > 0 ? (
+                <div className="list-card">
+                  <p className="eyebrow">Connection note</p>
+                  {unmatchedWarnings.map(messageText => (
+                    <p key={messageText} className="warning-text">
+                      {messageText}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
               <div className="button-row">
                 <button
                   className="ghost-button"

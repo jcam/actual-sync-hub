@@ -1,5 +1,5 @@
 import http from "node:http";
-import { AddressInfo } from "node:net";
+import { type AddressInfo } from "node:net";
 
 export function createSimpleFinFixtureServer() {
   let accountRequests = 0;
@@ -22,8 +22,11 @@ export function createSimpleFinFixtureServer() {
       const accounts = [
         {
           id: "acct-checking",
+          conn_id: "conn-fixture",
+          conn_name: "Fixture CU - Primary",
           name: "Fixture Checking",
           balance: "123.45",
+          "available-balance": "120.00",
           org: {
             id: "org-fixture",
             name: "Fixture CU",
@@ -51,6 +54,16 @@ export function createSimpleFinFixtureServer() {
       });
       res.end(
         JSON.stringify({
+          connections: [
+            {
+              conn_id: "conn-fixture",
+              name: "Fixture CU - Primary",
+              org_id: "org-fixture",
+              org_name: "Fixture CU",
+              org_url: "https://fixture.example",
+              sfin_url: "https://sfin.fixture.example"
+            }
+          ],
           accounts
         })
       );

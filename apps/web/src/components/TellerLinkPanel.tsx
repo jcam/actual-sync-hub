@@ -21,6 +21,7 @@ export function TellerLinkPanel({
   const [seeding, setSeeding] = useState(false);
   const [reusingCached, setReusingCached] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!enabled) {
@@ -50,19 +51,21 @@ export function TellerLinkPanel({
 
     setBusy(true);
     setError(null);
+    setMessage(null);
     try {
       const TellerConnect = await loadTellerConnect();
       const teller = TellerConnect.setup({
         ...config,
         onSuccess: async enrollment => {
           try {
-            await api.enrollTellerConnection({
+            const result = await api.enrollTellerConnection({
               accessToken: enrollment.accessToken,
               enrollmentId: enrollment.enrollment?.id || "",
               userId: enrollment.user?.id || null,
               institutionName: enrollment.enrollment?.institution?.name || null
             });
             await onConnected();
+            setMessage(result.warning ? `Teller connection saved. ${result.warning}` : null);
           } catch (err) {
             setError(
               getDisplayErrorMessage(err, "Failed to persist Teller enrollment.", {
@@ -101,6 +104,7 @@ export function TellerLinkPanel({
           className="ghost-button"
           onClick={async () => {
             setRefreshing(true);
+            setMessage(null);
             try {
               await api.refreshAllConnections();
               await onRefreshAll();
@@ -118,9 +122,11 @@ export function TellerLinkPanel({
             onClick={async () => {
               setSeeding(true);
               setError(null);
+              setMessage(null);
               try {
-                await api.seedTellerSandboxConnection();
+                const result = await api.seedTellerSandboxConnection();
                 await onConnected();
+                setMessage(result.warning ? `Teller connection saved. ${result.warning}` : null);
               } catch (err) {
                 setError(
                   getDisplayErrorMessage(err, "Failed to seed Teller sandbox connection.", {
@@ -141,9 +147,11 @@ export function TellerLinkPanel({
           onClick={async () => {
             setReusingCached(true);
             setError(null);
+            setMessage(null);
             try {
-              await api.reuseCachedTellerConnection();
+              const result = await api.reuseCachedTellerConnection();
               await onConnected();
+              setMessage(result.warning ? `Reused cached Teller fixture. ${result.warning}` : null);
             } catch (err) {
               setError(
                 getDisplayErrorMessage(err, "Failed to reuse cached Teller fixture.", {
@@ -159,15 +167,16 @@ export function TellerLinkPanel({
           {reusingCached ? "Reusing fixture..." : "Reuse cached Teller fixture"}
         </button>
       </div>
-      {!enabled ? <p className="muted">Set `TELLER_APP_ID` to enable Teller Connect.</p> : null}
+      {!enabled ? <p className="muted">Save a Teller application ID in settings to enable Teller Connect.</p> : null}
       {enabled && !mtlsConfigured && config?.environment !== "sandbox" ? (
-        <p className="muted">Development and production Teller API calls require `TELLER_CERT_FILE` and `TELLER_KEY_FILE`.</p>
+        <p className="muted">Development and production Teller API calls require client certificate and key PEM values in settings.</p>
       ) : null}
       {config?.environment === "sandbox" ? (
         <p className="muted">Sandbox tools can seed a Teller test enrollment directly without opening the Connect iframe.</p>
       ) : null}
       <p className="muted">When provider fixture caching is enabled, you can reuse the most recent Teller enrollment without opening Connect again.</p>
       {error ? <p className="error-text">{error}</p> : null}
+      {message ? <p className="success-text">{message}</p> : null}
     </section>
   );
 }

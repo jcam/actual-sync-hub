@@ -1,9 +1,8 @@
-import { screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { CategoryMappingsPage } from "./CategoryMappingsPage";
-import { render } from "@testing-library/react";
 
 const { listAccounts, updateAccountLink } = vi.hoisted(() => ({
   listAccounts: vi.fn(),

@@ -25,11 +25,24 @@ describe("simplefin service", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
+            connections: [
+              {
+                conn_id: "conn-1",
+                name: "SimpleFIN Credit Union - Household",
+                org_id: "org-1",
+                org_name: "SimpleFIN Credit Union",
+                org_url: "https://credit-union.example",
+                sfin_url: "https://sfin.credit-union.example"
+              }
+            ],
             accounts: [
               {
                 id: "acct-1",
+                conn_id: "conn-1",
+                conn_name: "SimpleFIN Credit Union - Household",
                 name: "Checking",
                 balance: "123.45",
+                "available-balance": "120.10",
                 org: {
                   id: "org-1",
                   name: "SimpleFIN Credit Union",
@@ -57,14 +70,14 @@ describe("simplefin service", () => {
       now: () => new Date("2026-05-05T00:00:00.000Z")
     });
 
-    const connectionId = await service.connectSetupToken({
+    const result = await service.connectSetupToken({
       setupToken,
       label: "Household SimpleFIN"
     });
 
     const connection = await prisma.connection.findUniqueOrThrow({
       where: {
-        id: connectionId
+        id: result.connectionId
       },
       include: {
         accounts: true
@@ -80,9 +93,11 @@ describe("simplefin service", () => {
         name: "Checking",
         officialName: "Checking",
         currentBalance: 123.45,
+        availableBalance: 120.1,
         type: "bank"
       })
     ]);
+    expect(connection.accounts[0]?.rawJson).toContain("\"connId\":\"conn-1\"");
     expect(fetchImpl).toHaveBeenNthCalledWith(
       1,
       "https://setup.simplefin.test/token",
@@ -93,6 +108,88 @@ describe("simplefin service", () => {
     expect(String(fetchImpl.mock.calls[1]?.[0])).toContain("/accounts?balances-only=1");
   });
 
+  it("persists a SimpleFIN connection even when upstream institutions need attention", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const setupToken = Buffer.from("https://setup.simplefin.test/token").toString("base64");
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response("https://alice:secret@bridge.simplefin.test", {
+          status: 200
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            connections: [
+              {
+                conn_id: "conn-1",
+                name: "SimpleFIN Credit Union - Household",
+                org_id: "org-1",
+                org_name: "SimpleFIN Credit Union"
+              }
+            ],
+            accounts: [
+              {
+                id: "acct-1",
+                conn_id: "conn-1",
+                conn_name: "SimpleFIN Credit Union - Household",
+                name: "Checking",
+                balance: "123.45",
+                org: {
+                  id: "org-1",
+                  name: "SimpleFIN Credit Union",
+                  domain: "credit-union.example"
+                }
+              }
+            ],
+            errors: ["Connection to Capital One may need attention."]
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json"
+            }
+          }
+        )
+      );
+
+    const service = createSimpleFinService({
+      prisma,
+      fetchImpl,
+      config: {
+        defaultLookbackDays: 90,
+        overlapDays: 10
+      },
+      now: () => new Date("2026-05-05T00:00:00.000Z")
+    });
+
+    const result = await service.connectSetupToken({
+      setupToken,
+      label: "Household SimpleFIN"
+    });
+
+    expect(result).toEqual({
+      connectionId: expect.any(String),
+      warning: "Connection to Capital One may need attention."
+    });
+
+    const connection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: result.connectionId
+      },
+      include: {
+        accounts: true
+      }
+    });
+
+    expect(connection.status).toBe("ERROR");
+    expect(connection.accounts).toHaveLength(1);
+    expect(connection.metadataJson).toContain("ATTENTION_REQUIRED");
+  });
+
   it("syncs SimpleFIN transactions over a 90-day review window", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
@@ -100,9 +197,19 @@ describe("simplefin service", () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
+          connections: [
+            {
+              conn_id: "conn-1",
+              name: "SimpleFIN Credit Union - Household",
+              org_id: "org-1",
+              org_name: "SimpleFIN Credit Union"
+            }
+          ],
           accounts: [
             {
               id: "acct-1",
+              conn_id: "conn-1",
+              conn_name: "SimpleFIN Credit Union - Household",
               name: "Checking",
               balance: "123.45",
               org: {
@@ -116,6 +223,7 @@ describe("simplefin service", () => {
                   amount: "-12.34",
                   payee: "Coffee Shop",
                   description: "Coffee Shop Downtown",
+                  memo: "",
                   posted: 1777804800,
                   extra: {
                     category: "dining"
@@ -126,7 +234,16 @@ describe("simplefin service", () => {
                   amount: "250.00",
                   payee: "Payroll",
                   description: "Payroll Deposit",
+                  memo: "April Payroll",
                   transacted_at: 1777891200
+                },
+                {
+                  id: "txn-3",
+                  amount: "-5.00",
+                  payee: "Amazon",
+                  description: "AMAZON",
+                  memo: "",
+                  posted: 1777971200
                 }
               ]
             }
@@ -192,15 +309,26 @@ describe("simplefin service", () => {
     expect(result.removedImportedIds).toEqual([]);
     expect(result.transactions).toEqual([
       {
+        amount: -5,
+        categoryNames: [],
+        cleared: true,
+        date: "2026-05-05",
+        importedId: "txn-3",
+        importedPayee: "Amazon",
+        notes: undefined,
+        payeeName: "Amazon",
+        searchText: ["Amazon", "AMAZON"]
+      },
+      {
         amount: 250,
         categoryNames: [],
         cleared: false,
         date: "2026-05-04",
         importedId: "txn-2",
         importedPayee: "Payroll",
-        notes: "Payroll Deposit",
+        notes: "Deposit\nApril Payroll",
         payeeName: "Payroll",
-        searchText: ["Payroll", "Payroll Deposit"]
+        searchText: ["Payroll", "Payroll Deposit", "April Payroll"]
       },
       {
         amount: -12.34,
@@ -209,7 +337,7 @@ describe("simplefin service", () => {
         date: "2026-05-03",
         importedId: "txn-1",
         importedPayee: "Coffee Shop",
-        notes: "Coffee Shop Downtown",
+        notes: "Downtown",
         payeeName: "Coffee Shop",
         searchText: ["Coffee Shop", "Coffee Shop Downtown"]
       }
@@ -368,14 +496,14 @@ describe("simplefin service", () => {
       now: () => new Date("2026-05-05T00:00:00.000Z")
     });
 
-    const connectionId = await service.connectSetupToken({
+    const result = await service.connectSetupToken({
       setupToken,
       label: "Fixture SimpleFIN"
     });
 
     const connection = await prisma.connection.findUniqueOrThrow({
       where: {
-        id: connectionId
+        id: result.connectionId
       },
       include: {
         accounts: true
@@ -397,8 +525,8 @@ describe("simplefin service", () => {
       }
     });
 
-    const result = await service.syncAccountLink(link.id);
-    expect(result.transactions).toEqual([
+    const syncResult = await service.syncAccountLink(link.id);
+    expect(syncResult.transactions).toEqual([
       expect.objectContaining({
         importedId: "txn-fixture-1",
         payeeName: "Bookstore",
@@ -407,7 +535,7 @@ describe("simplefin service", () => {
     ]);
   });
 
-  it("marks a SimpleFIN connection as disconnected and disables its links", async () => {
+  it("provides a no-op disconnect hook for app-level teardown", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
 
@@ -441,21 +569,15 @@ describe("simplefin service", () => {
       }
     });
 
-    await service.disconnectConnection(connection.id);
+    await service.disconnectConnection?.(connection.id);
 
     const updatedConnection = await prisma.connection.findUniqueOrThrow({
       where: {
         id: connection.id
       }
     });
-    const updatedLinks = await prisma.accountLink.findMany({
-      where: {
-        connectionId: connection.id
-      }
-    });
 
-    expect(updatedConnection.status).toBe("DISCONNECTED");
-    expect(updatedLinks.every(link => link.isEnabled === false)).toBe(true);
+    expect(updatedConnection.status).toBe("ACTIVE");
   });
 
   it("classifies invalid SimpleFIN access tokens as manual reconnect failures", async () => {
@@ -682,10 +804,10 @@ describe("simplefin service", () => {
       now: () => new Date("2026-05-05T00:00:00.000Z")
     });
 
-    const connectionId = await service.reuseCachedConnection("Cached SimpleFIN");
+    const result = await service.reuseCachedConnection("Cached SimpleFIN");
     const connection = await prisma.connection.findUniqueOrThrow({
       where: {
-        id: connectionId
+        id: result.connectionId
       }
     });
 

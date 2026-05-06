@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type * as ActualApi from "@actual-app/api";
 import type { ActualBankSyncSource } from "@actual-sync/shared";
 import type { APIAccountEntity, APICategoryEntity } from "@actual-app/api/models";
 import { env } from "../env.js";
@@ -10,16 +12,17 @@ const READ_CACHE_TTL_MS = 10_000;
 const RETRY_DELAY_MS = 2_000;
 const MAX_WORKER_ATTEMPTS = 2;
 
-export interface ActualConfig {
+export type ActualConfig = {
   dataDir: string;
   serverURL: string;
   password: string;
   budgetSyncId: string;
   budgetEncryptionPassword?: string;
+  apiLocalEntry?: string;
   apiVersionMatchMode?: "off" | "auto" | "strict";
 }
 
-type ActualModule = typeof import("@actual-app/api");
+type ActualModule = typeof ActualApi;
 type ActualImportTransaction = Parameters<ActualModule["importTransactions"]>[1][number];
 type ActualTransaction = Awaited<ReturnType<ActualModule["getTransactions"]>>[number];
 
@@ -29,7 +32,7 @@ export type ActualAccountRecord = Pick<APIAccountEntity, "id" | "name" | "offbud
 
 export type ActualCategoryRecord = Pick<APICategoryEntity, "id" | "name">;
 
-export interface ActualBankSyncLinkRecord {
+export type ActualBankSyncLinkRecord = {
   actualAccountId: string;
   actualAccountName: string;
   actualOfficialName?: string | null;
@@ -47,6 +50,19 @@ export interface ActualBankSyncLinkRecord {
   lastSyncedAt?: string | null;
 }
 
+export type ActualExternalSyncMetadataInput = {
+  syncSource: "external";
+  providerAccountId: string;
+  institutionName: string;
+  institutionExternalId?: string | null;
+  mask?: string | null;
+  officialName?: string | null;
+  balanceCurrent?: number | null;
+  balanceAvailable?: number | null;
+  balanceLimit?: number | null;
+  lastSync?: string | null;
+}
+
 export type ActualTransactionRecord = Pick<
   ActualTransaction,
   "id" | "date" | "imported_id" | "category" | "imported_payee" | "notes" | "cleared"
@@ -55,7 +71,7 @@ export type ActualTransactionRecord = Pick<
   payee_name?: string | null;
 };
 
-export interface ImportTransactionInput {
+export type ImportTransactionInput = {
   date: ActualImportTransaction["date"];
   amount: number;
   payee_name: NonNullable<ActualImportTransaction["payee_name"]>;
@@ -68,7 +84,7 @@ export interface ImportTransactionInput {
   transfer_actual_account_id?: string;
 }
 
-export interface PreviewImportMatchRecord {
+export type PreviewImportMatchRecord = {
   transaction: {
     imported_id?: string | null;
     date: string;
@@ -90,7 +106,7 @@ export interface PreviewImportMatchRecord {
   tombstone?: boolean;
 }
 
-export interface ReconcileTransactionInput {
+export type ReconcileTransactionInput = {
   date: ActualImportTransaction["date"];
   amount: number;
   payee_name: string;
@@ -116,6 +132,15 @@ type WorkerCommandPayload =
     }
   | {
       operation: "listBankSyncLinks";
+    }
+  | {
+      operation: "linkExternalSyncAccount";
+      accountId: string;
+      metadata: ActualExternalSyncMetadataInput;
+    }
+  | {
+      operation: "unlinkExternalSyncAccount";
+      accountId: string;
     }
   | {
       operation: "listTransactionsByImportedIds";
@@ -202,11 +227,13 @@ function toError(error: unknown) {
   return new Error(String(error));
 }
 
-export interface ActualService {
+export type ActualService = {
   shutdown?(): Promise<void>;
   listAccounts(): Promise<ActualAccountRecord[]>;
   listCategories(): Promise<ActualCategoryRecord[]>;
   listBankSyncLinks(): Promise<ActualBankSyncLinkRecord[]>;
+  linkExternalSyncAccount(accountId: string, metadata: ActualExternalSyncMetadataInput): Promise<void>;
+  unlinkExternalSyncAccount(accountId: string): Promise<void>;
   listTransactionsByImportedIds(accountId: string, importedIds: string[]): Promise<ActualTransactionRecord[]>;
   importTransactions(accountId: string, transactions: ImportTransactionInput[]): Promise<{
     added: string[];
@@ -234,6 +261,7 @@ export function createActualService({
     password: env.ACTUAL_SERVER_PASSWORD,
     budgetSyncId: env.ACTUAL_BUDGET_SYNC_ID,
     budgetEncryptionPassword: env.ACTUAL_BUDGET_ENCRYPTION_PASSWORD,
+    apiLocalEntry: env.ACTUAL_API_LOCAL_ENTRY || undefined,
     apiVersionMatchMode: env.actualApiVersionMatchMode
   } satisfies ActualConfig
 }: {
@@ -465,6 +493,23 @@ export function createActualService({
       return runWorker<ActualBankSyncLinkRecord[]>({
         operation: "listBankSyncLinks"
       });
+    },
+
+    async linkExternalSyncAccount(accountId: string, metadata: ActualExternalSyncMetadataInput) {
+      await runWorker<void>({
+        operation: "linkExternalSyncAccount",
+        accountId,
+        metadata
+      });
+      clearReadCaches();
+    },
+
+    async unlinkExternalSyncAccount(accountId: string) {
+      await runWorker<void>({
+        operation: "unlinkExternalSyncAccount",
+        accountId
+      });
+      clearReadCaches();
     },
 
     async listTransactionsByImportedIds(accountId: string, importedIds: string[]): Promise<ActualTransactionRecord[]> {

@@ -93,16 +93,16 @@ describe.skipIf(!liveEnabled)("plaid service live sandbox", () => {
     });
 
     const publicToken = await createSandboxPublicToken();
-    const connectionId = await service.exchangePublicToken(publicToken, "Sandbox test connection");
+    const result = await service.exchangePublicToken(publicToken, "Sandbox test connection");
     const connectionWithToken = await prisma.connection.findUniqueOrThrow({
       where: {
-        id: connectionId
+        id: result.connectionId
       }
     });
 
     const connection = await prisma.connection.findUniqueOrThrow({
       where: {
-        id: connectionId
+        id: result.connectionId
       },
       include: {
         accounts: true
@@ -127,10 +127,10 @@ describe.skipIf(!liveEnabled)("plaid service live sandbox", () => {
       }
     });
 
-    const result = await service.syncAccountLink(link.id);
+    const syncResult = await service.syncAccountLink(link.id);
 
     expect(connection.accounts.length).toBeGreaterThan(0);
-    expect(result.transactions.length).toBeGreaterThan(0);
-    expect(result.transactions.every(transaction => transaction.importedId)).toBe(true);
+    expect(syncResult.transactions.length).toBeGreaterThan(0);
+    expect(syncResult.transactions.every(transaction => transaction.importedId)).toBe(true);
   }, 20_000);
 });

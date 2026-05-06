@@ -1,5 +1,5 @@
 export type Provider = "PLAID" | "TELLER" | "SIMPLEFIN";
-export type ActualBankSyncSource = "simpleFin" | "goCardless" | "pluggyai";
+export type ActualBankSyncSource = "simpleFin" | "goCardless" | "pluggyai" | "external";
 export type ConnectionStatus = "ACTIVE" | "ERROR" | "DISCONNECTED";
 export type SyncFrequency = "MANUAL" | "HOURLY" | "DAILY" | "WEEKLY";
 export type AssetType = "BANK";

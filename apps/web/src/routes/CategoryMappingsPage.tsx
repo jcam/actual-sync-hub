@@ -97,7 +97,7 @@ export function CategoryMappingsPage() {
             isEnabled: account.link.isEnabled,
             categoryMappings
           });
-          navigate("/accounts");
+          void navigate("/accounts");
         }}
       />
     </div>

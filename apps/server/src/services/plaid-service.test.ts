@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { encryptString } from "../lib/crypto.js";
 import { createTestDatabase } from "../test/test-db.js";
+import { createPlaidService } from "./plaid-service.js";
+import type { PlaidConfig } from "./plaid-service.js";
 
 const mockPlaidClient = vi.hoisted(() => ({
   linkTokenCreate: vi.fn(),
+  itemRemove: vi.fn(),
   accountsGet: vi.fn(),
   transactionsSync: vi.fn()
 }));
@@ -24,8 +27,6 @@ vi.mock("plaid", () => ({
   }
 }));
 
-import { createPlaidService, type PlaidConfig } from "./plaid-service.js";
-
 const testConfig: PlaidConfig = {
   clientId: "plaid-client-id",
   secret: "plaid-secret",
@@ -36,11 +37,33 @@ const testConfig: PlaidConfig = {
   personalFinanceCategoryVersion: "v2"
 };
 
-describe("plaid service request options", () => {
+function createProviderSettingsMock() {
+  return {
+    get: vi.fn().mockResolvedValue({
+      environment: testConfig.environment,
+      sandbox: {
+        clientId: testConfig.environment === "sandbox" ? testConfig.clientId : "",
+        secret: testConfig.environment === "sandbox" ? testConfig.secret : ""
+      },
+      production: {
+        clientId: testConfig.environment === "production" ? testConfig.clientId : "",
+        secret: testConfig.environment === "production" ? testConfig.secret : ""
+      },
+      countryCodes: testConfig.countryCodes,
+      products: testConfig.products,
+      transactionsDaysRequested: testConfig.transactionsDaysRequested,
+      personalFinanceCategoryVersion: testConfig.personalFinanceCategoryVersion,
+      automaticSyncConcurrency: 2
+    })
+  } as never;
+}
+
+describe.sequential("plaid service request options", () => {
   const cleanups: Array<() => Promise<void>> = [];
 
   afterEach(async () => {
     mockPlaidClient.linkTokenCreate.mockReset();
+    mockPlaidClient.itemRemove.mockReset();
     mockPlaidClient.accountsGet.mockReset();
     mockPlaidClient.transactionsSync.mockReset();
     await Promise.all(cleanups.splice(0).map(cleanup => cleanup()));
@@ -54,7 +77,25 @@ describe("plaid service request options", () => {
     });
 
     const service = createPlaidService({
-      config: testConfig
+      config: testConfig,
+      providerSettings: {
+        get: vi.fn().mockResolvedValue({
+          environment: testConfig.environment,
+          sandbox: {
+            clientId: testConfig.environment === "sandbox" ? testConfig.clientId : "",
+            secret: testConfig.environment === "sandbox" ? testConfig.secret : ""
+          },
+          production: {
+            clientId: testConfig.environment === "production" ? testConfig.clientId : "",
+            secret: testConfig.environment === "production" ? testConfig.secret : ""
+          },
+          countryCodes: testConfig.countryCodes,
+          products: testConfig.products,
+          transactionsDaysRequested: testConfig.transactionsDaysRequested,
+          personalFinanceCategoryVersion: testConfig.personalFinanceCategoryVersion,
+          automaticSyncConcurrency: 2
+        })
+      } as never
     });
 
     const token = await service.createLinkToken("user-123");
@@ -126,7 +167,8 @@ describe("plaid service request options", () => {
 
     const service = createPlaidService({
       prisma,
-      config: testConfig
+      config: testConfig,
+      providerSettings: createProviderSettingsMock()
     });
 
     const result = await service.syncAccountLink(link.id);
@@ -143,9 +185,117 @@ describe("plaid service request options", () => {
       cursor: "cursor-123",
       options: {
         days_requested: 365,
+        include_original_description: true,
         personal_finance_category_version: "v2"
       }
     });
+  });
+
+  it("derives notes from Plaid transaction names when they contain useful detail", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-123",
+        accessTokenCiphertext: encryptString("access-token-123")
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "account-ext-1",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    const link = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Sandbox Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "MANUAL",
+        isEnabled: true
+      }
+    });
+
+    mockPlaidClient.transactionsSync.mockResolvedValue({
+      data: {
+        added: [
+          {
+            account_id: "account-ext-1",
+            transaction_id: "txn-1",
+            date: "2026-05-03",
+            amount: 12.34,
+            name: "Coffee Shop Downtown",
+            original_description: "Coffee Shop Downtown Terminal 4",
+            merchant_name: "Coffee Shop",
+            pending: false,
+            personal_finance_category: {
+              primary: "FOOD_AND_DRINK",
+              detailed: "FOOD_AND_DRINK_COFFEE"
+            },
+            counterparties: []
+          },
+          {
+            account_id: "account-ext-1",
+            transaction_id: "txn-2",
+            date: "2026-05-04",
+            amount: 5,
+            name: "AMAZON",
+            original_description: "AMAZON",
+            merchant_name: "Amazon",
+            pending: false,
+            personal_finance_category: null,
+            counterparties: []
+          }
+        ],
+        modified: [],
+        removed: [],
+        next_cursor: "cursor-456",
+        has_more: false
+      }
+    });
+
+    const service = createPlaidService({
+      prisma,
+      config: testConfig,
+      providerSettings: createProviderSettingsMock()
+    });
+
+    const result = await service.syncAccountLink(link.id);
+
+    expect(result.transactions).toEqual([
+      {
+        amount: -12.34,
+        categoryNames: ["Food And Drink Coffee", "Coffee", "Food And Drink"],
+        cleared: true,
+        date: "2026-05-03",
+        importedId: "txn-1",
+        importedPayee: "Coffee Shop Downtown",
+        notes: "Downtown Terminal 4",
+        payeeName: "Coffee Shop",
+        searchText: ["Coffee Shop Downtown", "Coffee Shop Downtown Terminal 4", "Coffee Shop"]
+      },
+      {
+        amount: -5,
+        categoryNames: [],
+        cleared: true,
+        date: "2026-05-04",
+        importedId: "txn-2",
+        importedPayee: "AMAZON",
+        notes: undefined,
+        payeeName: "Amazon",
+        searchText: ["AMAZON", "Amazon"]
+      }
+    ]);
   });
 
   it("classifies invalid Plaid access tokens as provider connection reauth failures", async () => {
@@ -173,7 +323,8 @@ describe("plaid service request options", () => {
 
     const service = createPlaidService({
       prisma,
-      config: testConfig
+      config: testConfig,
+      providerSettings: createProviderSettingsMock()
     });
 
     await expect(service.refreshConnection(connection.id)).rejects.toMatchObject({
@@ -246,7 +397,8 @@ describe("plaid service request options", () => {
 
     const service = createPlaidService({
       prisma,
-      config: testConfig
+      config: testConfig,
+      providerSettings: createProviderSettingsMock()
     });
 
     await expect(service.syncAccountLink(link.id)).rejects.toMatchObject({
@@ -284,7 +436,8 @@ describe("plaid service request options", () => {
 
     const service = createPlaidService({
       prisma,
-      config: testConfig
+      config: testConfig,
+      providerSettings: createProviderSettingsMock()
     });
 
     await expect(service.refreshConnection(connection.id)).rejects.toMatchObject({
@@ -294,5 +447,67 @@ describe("plaid service request options", () => {
       healthScope: "SYNC_PIPELINE",
       healthAction: "RETRY"
     });
+  });
+
+  it("removes the Plaid item when disconnecting a connection", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-123",
+        accessTokenCiphertext: encryptString("access-token-123")
+      }
+    });
+
+    mockPlaidClient.itemRemove.mockResolvedValue({
+      data: {
+        request_id: "req-123"
+      }
+    });
+
+    const service = createPlaidService({
+      prisma,
+      config: testConfig,
+      providerSettings: createProviderSettingsMock()
+    });
+
+    await expect(service.disconnectConnection?.(connection.id)).resolves.toBeUndefined();
+    expect(mockPlaidClient.itemRemove).toHaveBeenCalledWith({
+      access_token: "access-token-123"
+    });
+  });
+
+  it("treats already-removed Plaid items as disconnected during cleanup", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-123",
+        accessTokenCiphertext: encryptString("access-token-123")
+      }
+    });
+
+    mockPlaidClient.itemRemove.mockRejectedValue({
+      message: "Item not found",
+      response: {
+        data: {
+          error_code: "ITEM_NOT_FOUND"
+        }
+      }
+    });
+
+    const service = createPlaidService({
+      prisma,
+      config: testConfig,
+      providerSettings: createProviderSettingsMock()
+    });
+
+    await expect(service.disconnectConnection?.(connection.id)).resolves.toBeUndefined();
   });
 });

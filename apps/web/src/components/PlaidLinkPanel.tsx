@@ -17,6 +17,7 @@ export function PlaidLinkPanel({
   const [seeding, setSeeding] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     void api
@@ -36,23 +37,27 @@ export function PlaidLinkPanel({
 
   const plaid = usePlaidLink({
     token,
-    onSuccess: async publicToken => {
-      setBusy(true);
-      setError(null);
-      try {
-        await api.exchangePlaidPublicToken(publicToken);
-        await onConnected();
-        const nextToken = await api.createPlaidLinkToken();
-        setToken(nextToken.linkToken);
-      } catch (exchangeError) {
-        setError(
-          getDisplayErrorMessage(exchangeError, "Failed to finish the Plaid connection.", {
-            serverUnavailableMessage: "Could not reach the API server to finish the Plaid connection."
-          })
-        );
-      } finally {
-        setBusy(false);
-      }
+    onSuccess: publicToken => {
+      void (async () => {
+        setBusy(true);
+        setError(null);
+        setMessage(null);
+        try {
+          const result = await api.exchangePlaidPublicToken(publicToken);
+          await onConnected();
+          const nextToken = await api.createPlaidLinkToken();
+          setToken(nextToken.linkToken);
+          setMessage(result.warning ? `Plaid connection saved. ${result.warning}` : null);
+        } catch (exchangeError) {
+          setError(
+            getDisplayErrorMessage(exchangeError, "Failed to finish the Plaid connection.", {
+              serverUnavailableMessage: "Could not reach the API server to finish the Plaid connection."
+            })
+          );
+        } finally {
+          setBusy(false);
+        }
+      })();
     }
   });
 
@@ -72,6 +77,7 @@ export function PlaidLinkPanel({
           onClick={async () => {
             setRefreshing(true);
             setError(null);
+            setMessage(null);
             try {
               await api.refreshAllConnections();
               await onRefreshAll();
@@ -96,8 +102,9 @@ export function PlaidLinkPanel({
               setSeeding(true);
               setError(null);
               try {
-                await api.seedPlaidSandboxConnection();
+                const result = await api.seedPlaidSandboxConnection();
                 await onConnected();
+                setMessage(result.warning ? `Plaid connection saved. ${result.warning}` : null);
               } catch (seedError) {
                 setError(
                   getDisplayErrorMessage(seedError, "Failed to seed a Plaid sandbox connection.", {
@@ -118,6 +125,7 @@ export function PlaidLinkPanel({
         <p className="muted">Sandbox tools can create Plaid test institutions and seed transactions without opening Link.</p>
       ) : null}
       {error ? <p className="error-text">{error}</p> : null}
+      {message ? <p className="success-text">{message}</p> : null}
     </section>
   );
 }

@@ -1,4 +1,4 @@
-export interface SessionDto {
+export type SessionDto = {
   authenticated: boolean;
   username?: string;
 }

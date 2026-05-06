@@ -2,12 +2,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { env } from "../env.js";
 
-export interface CachedSimpleFinFixture {
+export type CachedSimpleFinFixture = {
   accessKey: string;
   updatedAt: string;
 }
 
-export interface CachedTellerFixture {
+export type CachedTellerFixture = {
   accessToken: string;
   enrollmentId: string;
   userId?: string | null;
@@ -15,12 +15,12 @@ export interface CachedTellerFixture {
   updatedAt: string;
 }
 
-interface ProviderFixtureCacheFile {
+type ProviderFixtureCacheFile = {
   simplefin?: CachedSimpleFinFixture | null;
   teller?: CachedTellerFixture | null;
 }
 
-export interface ProviderFixtureCache {
+export type ProviderFixtureCache = {
   isEnabled(): boolean;
   getSimpleFin(): Promise<CachedSimpleFinFixture | null>;
   setSimpleFin(fixture: CachedSimpleFinFixture): Promise<void>;

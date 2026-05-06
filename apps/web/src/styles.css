@@ -270,6 +270,36 @@ button {
   margin: 18px 0;
 }
 
+.provider-settings-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.provider-settings-header {
+  display: grid;
+  gap: 8px;
+}
+
+.provider-settings-header p:last-child {
+  margin: 0;
+}
+
+.provider-settings-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.provider-settings-actions {
+  margin-bottom: 0;
+}
+
+.provider-settings-textarea {
+  grid-column: 1 / -1;
+}
+
+.provider-settings-textarea textarea {
+  min-height: 120px;
+}
+
 .wide-field {
   grid-column: 1 / -1;
 }
@@ -301,12 +331,47 @@ button {
   color: var(--ink);
 }
 
+.success-tag {
+  background: rgba(30, 123, 103, 0.14);
+}
+
+.warning-tag {
+  background: rgba(217, 109, 44, 0.18);
+}
+
 .muted-pill {
   background: rgba(24, 33, 38, 0.08);
 }
 
 .success-text {
   color: var(--accent);
+}
+
+.warning-text {
+  color: var(--accent-2);
+}
+
+.simplefin-provider-row {
+  gap: 14px;
+}
+
+.simplefin-provider-accounts {
+  display: grid;
+  gap: 10px;
+}
+
+.simplefin-provider-account {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.simplefin-provider-account:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .recent-transactions ul,

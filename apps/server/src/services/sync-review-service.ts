@@ -123,7 +123,7 @@ export function createSyncReviewService<TSiblingLinks>({
   }
 
   return {
-    async previewAccountSyncReview(actualAccountId: string): Promise<MigrationPreviewDto> {
+    previewAccountSyncReview: async (actualAccountId: string): Promise<MigrationPreviewDto> => {
       const link = await loadCurrentReviewableLink(actualAccountId);
       const adapter = getProviderAdapter(link.provider);
       if (!adapter) {
@@ -150,21 +150,6 @@ export function createSyncReviewService<TSiblingLinks>({
         if (previewResult.errors.length > 0) {
           throw new Error(previewResult.errors[0]?.message || "Actual migration preview failed");
         }
-
-        await database.accountLink.update({
-          where: {
-            id: link.id
-          },
-          data: {
-            configJson: serializeLinkConfig({
-              ...linkConfig,
-              health: clearSyncHealth(),
-              ...syncResult.configPatch,
-              categoryMappings: linkConfig.categoryMappings || [],
-              seenCategoryNames: linkConfig.seenCategoryNames || []
-            })
-          }
-        });
 
         const previewByImportedId = mapPreviewItemByImportedId(previewResult.updatedPreview);
 
@@ -207,7 +192,7 @@ export function createSyncReviewService<TSiblingLinks>({
       }
     },
 
-    async commitAccountSyncReview(actualAccountId: string, payload: CommitMigrationPayload) {
+    commitAccountSyncReview: async (actualAccountId: string, payload: CommitMigrationPayload) => {
       const link = await loadCurrentReviewableLink(actualAccountId);
       const adapter = getProviderAdapter(link.provider);
       if (!adapter) {
@@ -253,54 +238,25 @@ export function createSyncReviewService<TSiblingLinks>({
           ? await actual.reconcileTransactions(actualAccountId, reconcileTransactions, removedImportedIds)
           : null;
 
-        const refreshedTransactions =
-          reconcileTransactions.length > 0
-            ? await actual.listTransactionsByImportedIds(
-                actualAccountId,
-                reconcileTransactions.map(transaction => transaction.imported_id)
-              )
-            : [];
-        const actualTransactionIdByImportedId = new Map(
-          refreshedTransactions
-            .filter(transaction => transaction.imported_id)
-            .map(transaction => [transaction.imported_id as string, transaction.id])
-        );
-
         if (reconcileTransactions.length > 0) {
           await Promise.all(
             reconcileTransactions.map((transaction, index) =>
               database.importedTransaction.upsert({
                 where: {
-                  accountLinkId_providerImportedId: {
+                  accountLinkId_importedId: {
                     accountLinkId: link.id,
-                    providerImportedId: transaction.imported_id
+                    importedId: transaction.imported_id
                   }
                 },
                 update: {
-                  providerImportedId: transaction.imported_id,
-                  actualAccountId,
-                  actualTransactionId: actualTransactionIdByImportedId.get(transaction.imported_id) ?? null,
-                  transactionDate: transaction.date,
-                  amount: transaction.amount,
-                  payeeName: transaction.payee_name,
-                  importedPayee: transaction.imported_payee,
                   primarySourceCategory: getPrimarySourceCategory(selectedTransactions[index]!),
-                  sourceCategoryNamesJson: JSON.stringify(selectedTransactions[index]?.categoryNames || []),
                   appliedCategoryId: transaction.resolved_category_id ?? null,
                   lastSeenAt: now()
                 },
                 create: {
                   accountLinkId: link.id,
                   importedId: transaction.imported_id,
-                  providerImportedId: transaction.imported_id,
-                  actualAccountId,
-                  actualTransactionId: actualTransactionIdByImportedId.get(transaction.imported_id) ?? null,
-                  transactionDate: transaction.date,
-                  amount: transaction.amount,
-                  payeeName: transaction.payee_name,
-                  importedPayee: transaction.imported_payee,
                   primarySourceCategory: getPrimarySourceCategory(selectedTransactions[index]!),
-                  sourceCategoryNamesJson: JSON.stringify(selectedTransactions[index]?.categoryNames || []),
                   appliedCategoryId: transaction.resolved_category_id ?? null,
                   observedCategoryId: transaction.resolved_category_id ?? null,
                   lastSeenAt: now()

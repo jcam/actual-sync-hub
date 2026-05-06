@@ -15,6 +15,7 @@ export function PlaidConnectionCard({
   sandboxToolsEnabled: boolean;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   return (
     <article className="connection-card">
@@ -47,6 +48,28 @@ export function PlaidConnectionCard({
           }}
         >
           Refresh accounts
+        </button>
+        <button
+          className="ghost-button"
+          disabled={disconnecting}
+          onClick={async () => {
+            setDisconnecting(true);
+            setError(null);
+            try {
+              await api.disconnectConnection(connection.id);
+              await onRefresh();
+            } catch (disconnectError) {
+              setError(
+                getDisplayErrorMessage(disconnectError, "Failed to disconnect this Plaid connection.", {
+                  serverUnavailableMessage: "Could not reach the API server to disconnect this Plaid connection."
+                })
+              );
+            } finally {
+              setDisconnecting(false);
+            }
+          }}
+        >
+          {disconnecting ? "Disconnecting..." : "Disconnect"}
         </button>
       </div>
       {connection.health ? (

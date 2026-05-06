@@ -8,18 +8,18 @@ import type {
 } from "./core.js";
 import type { SyncHealthDto } from "./health.js";
 
-export interface ProviderSyncStateDto {
+export type ProviderSyncStateDto = {
   cursor?: string | null;
   windowStartDate?: string | null;
   windowEndDate?: string | null;
 }
 
-export interface CategoryMappingDto {
+export type CategoryMappingDto = {
   sourceCategory: string;
   actualCategoryId: string;
 }
 
-export interface LinkConfigDto {
+export type LinkConfigDto = {
   linkId?: string | null;
   status: AccountLinkStatus;
   actualAccountId: string;
@@ -45,12 +45,12 @@ export interface LinkConfigDto {
   seenCategoryNames: string[];
 }
 
-export interface ActualCategoryDto {
+export type ActualCategoryDto = {
   id: string;
   name: string;
 }
 
-export interface ConnectionAccountOptionDto {
+export type ConnectionAccountOptionDto = {
   connectionId: string;
   connectionLabel: string;
   connectionStatus: ConnectionStatus;
@@ -63,9 +63,12 @@ export interface ConnectionAccountOptionDto {
   mask?: string | null;
   type: string;
   subtype?: string | null;
+  providerConnectionId?: string | null;
+  providerConnectionName?: string | null;
+  providerInstitutionName?: string | null;
 }
 
-export interface ActualAccountDto {
+export type ActualAccountDto = {
   id: string;
   name: string;
   balance: number;
@@ -76,7 +79,7 @@ export interface ActualAccountDto {
   actualCategories: ActualCategoryDto[];
 }
 
-export interface ActualBankSyncLinkDto {
+export type ActualBankSyncLinkDto = {
   actualAccountId: string;
   actualAccountName: string;
   actualOfficialName?: string | null;
@@ -97,7 +100,40 @@ export interface ActualBankSyncLinkDto {
   currentLinkStatus?: AccountLinkStatus | null;
 }
 
-export interface UpdateAccountLinkPayload {
+export type ActualExternalSyncStatusDto = {
+  configured: boolean;
+  state: "ok" | "syncing" | "error" | "reauth_required" | "not_configured";
+  message?: string | null;
+  lastSync?: string | null;
+  canSync: boolean;
+  needsReauth: boolean;
+}
+
+export type ActualExternalSyncResultDto = {
+  errors: Array<{
+    accountId: string;
+    message: string;
+    type?: "SyncError";
+    category?: string;
+    code?: string;
+    internal?: string;
+  }>;
+  newTransactions: string[];
+  matchedTransactions: string[];
+  updatedAccounts: string[];
+}
+
+export type ExternalSyncBridgeSyncResponseDto = {
+  error_code?: string;
+  error_type?: string;
+  message?: string | null;
+  lastSync?: string | null;
+  newTransactions: string[];
+  matchedTransactions: string[];
+  updatedAccounts: string[];
+}
+
+export type UpdateAccountLinkPayload = {
   actualAccountName: string;
   assetType: AssetType;
   provider?: Provider | null;

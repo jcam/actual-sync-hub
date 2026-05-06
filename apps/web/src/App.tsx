@@ -126,7 +126,7 @@ export function App() {
         onLogin={async (username, password) => {
           const nextSession = await api.login(username, password);
           setSession(nextSession);
-          navigate("/accounts");
+          void navigate("/accounts");
         }}
       />
     );

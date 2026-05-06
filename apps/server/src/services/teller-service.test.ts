@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { encryptString } from "../lib/crypto.js";
 import { createTestDatabase } from "../test/test-db.js";
-import { createTellerService, type TellerConfig } from "./teller-service.js";
+import { createTellerService } from './teller-service.js';
+import type { TellerConfig } from './teller-service.js';
 
-describe("teller service", () => {
+describe.sequential("teller service", () => {
   const cleanups: Array<() => Promise<void>> = [];
 
   afterEach(async () => {
@@ -129,6 +130,7 @@ describe("teller service", () => {
         date: "2026-05-03",
         importedId: "txn-1",
         importedPayee: "Coffee Shop",
+        notes: undefined,
         payeeName: "Coffee Shop",
         searchText: ["Coffee Shop", "Coffee Shop", "card_payment"]
       },
@@ -139,6 +141,7 @@ describe("teller service", () => {
         date: "2026-05-04",
         importedId: "txn-2",
         importedPayee: "Transfer to Savings",
+        notes: "Transfer to Savings",
         payeeName: "My Savings",
         searchText: ["Transfer to Savings", "My Savings", "transfer"]
       }
@@ -162,6 +165,32 @@ describe("teller service", () => {
       .digest("hex");
 
     const service = createTellerService({
+      providerSettings: {
+        get: vi.fn().mockResolvedValue({
+          environment: "sandbox",
+          sandbox: {
+            appId: "teller-app-id",
+            sandboxAccessToken: "",
+            webhookSigningSecrets: ["secret-1"]
+          },
+          development: {
+            appId: "",
+            certificatePem: "",
+            keyPem: "",
+            webhookSigningSecrets: []
+          },
+          production: {
+            appId: "",
+            certificatePem: "",
+            keyPem: "",
+            webhookSigningSecrets: []
+          },
+          transactionsInitialDays: 90,
+          transactionsOverlapDays: 10,
+          automaticSyncConcurrency: 1,
+          webhookSyncDebounceSeconds: 30
+        })
+      } as never,
       config: {
         appId: "teller-app-id",
         environment: "sandbox",
@@ -176,9 +205,9 @@ describe("teller service", () => {
       request: vi.fn()
     });
 
-    expect(service.webhooksConfigured()).toBe(true);
-    expect(service.verifyWebhookSignature(rawBody, `t=${signedTimestamp},v1=${signature}`)).toBe(true);
-    expect(service.verifyWebhookSignature(rawBody, `t=${signedTimestamp},v1=deadbeef`)).toBe(false);
+    await expect(service.webhooksConfigured()).resolves.toBe(true);
+    await expect(service.verifyWebhookSignature(rawBody, `t=${signedTimestamp},v1=${signature}`)).resolves.toBe(true);
+    await expect(service.verifyWebhookSignature(rawBody, `t=${signedTimestamp},v1=deadbeef`)).resolves.toBe(false);
   });
 
   it("classifies Teller token failures as provider connection reauth failures", async () => {
@@ -352,6 +381,79 @@ describe("teller service", () => {
     });
   });
 
+  it("revokes Teller enrollment access when disconnecting a connection", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "TELLER",
+        label: "Primary Teller",
+        providerItemId: "enr-123",
+        accessTokenCiphertext: encryptString("teller-token")
+      }
+    });
+
+    const request = vi.fn().mockResolvedValue(null);
+
+    const service = createTellerService({
+      prisma,
+      config: {
+        appId: "teller-app-id",
+        environment: "sandbox",
+        certificateFile: "",
+        keyFile: "",
+        sandboxAccessToken: "",
+        transactionsInitialDays: 90,
+        transactionsOverlapDays: 10,
+        webhookSigningSecrets: [],
+        webhookToleranceSeconds: 180
+      } satisfies TellerConfig,
+      request
+    });
+
+    await expect(service.disconnectConnection?.(connection.id)).resolves.toBeUndefined();
+    expect(request).toHaveBeenCalledWith({
+      accessToken: "teller-token",
+      path: "/accounts",
+      method: "DELETE"
+    });
+  });
+
+  it("treats already-invalid Teller enrollments as disconnected during cleanup", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "TELLER",
+        label: "Primary Teller",
+        providerItemId: "enr-123",
+        accessTokenCiphertext: encryptString("teller-token")
+      }
+    });
+
+    const request = vi.fn().mockRejectedValue(new Error("authentication token expired"));
+
+    const service = createTellerService({
+      prisma,
+      config: {
+        appId: "teller-app-id",
+        environment: "sandbox",
+        certificateFile: "",
+        keyFile: "",
+        sandboxAccessToken: "",
+        transactionsInitialDays: 90,
+        transactionsOverlapDays: 10,
+        webhookSigningSecrets: [],
+        webhookToleranceSeconds: 180
+      } satisfies TellerConfig,
+      request
+    });
+
+    await expect(service.disconnectConnection?.(connection.id)).resolves.toBeUndefined();
+  });
+
   it("reuses a cached Teller fixture when available", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
@@ -413,10 +515,10 @@ describe("teller service", () => {
       request
     });
 
-    const connectionId = await service.reuseCachedConnection("Cached Teller");
+    const result = await service.reuseCachedConnection("Cached Teller");
     const connection = await prisma.connection.findUniqueOrThrow({
       where: {
-        id: connectionId
+        id: result.connectionId
       },
       include: {
         accounts: true

@@ -1,4 +1,7 @@
 import type { ConnectionDto } from "@actual-sync/shared";
+import { useState } from "react";
+import { api } from "../api";
+import { getDisplayErrorMessage } from "../lib/errors";
 import { SyncHealthPanel } from "./SyncHealthPanel";
 import { SyncHealthBadge } from "./SyncHealthBadge";
 
@@ -9,6 +12,10 @@ export function TellerConnectionCard({
   connection: ConnectionDto;
   onRefresh: () => Promise<void>;
 }) {
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+
   return (
     <article className="connection-card">
       <div className="connection-head">
@@ -22,6 +29,52 @@ export function TellerConnectionCard({
           {connection.health ? <SyncHealthBadge health={connection.health} compact /> : null}
         </div>
       </div>
+      <div className="button-row">
+        <button
+          className="ghost-button"
+          disabled={refreshing}
+          onClick={async () => {
+            setRefreshing(true);
+            setError(null);
+            try {
+              await api.refreshConnection(connection.id);
+              await onRefresh();
+            } catch (refreshError) {
+              setError(
+                getDisplayErrorMessage(refreshError, "Failed to refresh this Teller connection.", {
+                  serverUnavailableMessage: "Could not reach the API server to refresh this Teller connection."
+                })
+              );
+            } finally {
+              setRefreshing(false);
+            }
+          }}
+        >
+          {refreshing ? "Refreshing..." : "Refresh accounts"}
+        </button>
+        <button
+          className="ghost-button"
+          disabled={disconnecting}
+          onClick={async () => {
+            setDisconnecting(true);
+            setError(null);
+            try {
+              await api.disconnectConnection(connection.id);
+              await onRefresh();
+            } catch (disconnectError) {
+              setError(
+                getDisplayErrorMessage(disconnectError, "Failed to disconnect this Teller connection.", {
+                  serverUnavailableMessage: "Could not reach the API server to disconnect this Teller connection."
+                })
+              );
+            } finally {
+              setDisconnecting(false);
+            }
+          }}
+        >
+          {disconnecting ? "Disconnecting..." : "Disconnect"}
+        </button>
+      </div>
       {connection.health ? (
         <SyncHealthPanel
           eyebrow="Connection status"
@@ -32,6 +85,7 @@ export function TellerConnectionCard({
           onReauthenticated={onRefresh}
         />
       ) : null}
+      {error ? <p className="error-text">{error}</p> : null}
       <div className="account-option-list">
         {connection.accounts.map(account => (
           <div key={account.id} className="account-option">

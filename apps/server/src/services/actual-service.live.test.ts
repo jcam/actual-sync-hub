@@ -1,12 +1,13 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type * as ActualApi from "@actual-app/api";
 import { afterEach, describe, expect, it } from "vitest";
 import { createActualService } from "./actual-service.js";
 import { startActualTestContainer } from "../test/actual-container.js";
 
 const liveEnabled = process.env.ACTUAL_TEST_RUN_LIVE === "1";
-type ActualApiModule = typeof import("@actual-app/api");
+type ActualApiModule = typeof ActualApi;
 
 async function seedBudget({
   serverURL,

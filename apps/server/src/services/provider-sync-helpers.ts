@@ -7,6 +7,55 @@ function normalizeMatchText(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function normalizeImportedDescription(description: string | null | undefined, payeeName: string) {
+  const trimmed = description?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.localeCompare(payeeName, undefined, { sensitivity: "accent" }) === 0) {
+    return null;
+  }
+
+  const payeePrefix = new RegExp(`^${escapeRegExp(payeeName)}(?:\\s*[-:*#/\\\\|]+\\s*|\\s+)`, "i");
+  const stripped = trimmed.replace(payeePrefix, "").trim();
+  return stripped.length > 0 ? stripped : null;
+}
+
+export function buildImportedTransactionNotes({
+  payeeName,
+  description,
+  memo
+}: {
+  payeeName: string;
+  description?: string | null;
+  memo?: string | null;
+}) {
+  const descriptionNote = normalizeImportedDescription(description, payeeName);
+  const memoNote = memo?.trim() || null;
+  const seen = new Set<string>();
+
+  const parts = [descriptionNote, memoNote].flatMap(part => {
+    if (!part) {
+      return [];
+    }
+
+    const key = part.toLowerCase();
+    if (seen.has(key)) {
+      return [];
+    }
+
+    seen.add(key);
+    return [part];
+  });
+
+  return parts.length > 0 ? parts.join("\n") : undefined;
+}
+
 export function getPrimarySourceCategory(transaction: ProviderSyncTransaction) {
   return transaction.categoryNames?.find(name => !name.toUpperCase().startsWith("TRANSFER")) || transaction.categoryNames?.[0];
 }

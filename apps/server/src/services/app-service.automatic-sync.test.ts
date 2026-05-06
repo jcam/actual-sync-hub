@@ -95,6 +95,35 @@ describe.sequential("app service automatic sync", () => {
 
     const service = createAppService({
       prisma,
+      providerSettingsService: {
+        getAll: vi.fn().mockResolvedValue({
+          PLAID: {
+            clientId: "",
+            secret: "",
+            countryCodes: ["US"],
+            products: ["transactions"],
+            transactionsDaysRequested: 365,
+            personalFinanceCategoryVersion: "v2",
+            automaticSyncConcurrency: 2
+          },
+          TELLER: {
+            appId: "",
+            environment: "sandbox",
+            sandboxAccessToken: "",
+            certificatePem: "",
+            keyPem: "",
+            webhookSigningSecrets: [],
+            transactionsInitialDays: 90,
+            transactionsOverlapDays: 10,
+            automaticSyncConcurrency: 1,
+            webhookSyncDebounceSeconds: 30
+          },
+          SIMPLEFIN: {
+            transactionsInitialDays: 45,
+            automaticSyncConcurrency: 1
+          }
+        })
+      } as never,
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
@@ -504,6 +533,59 @@ describe.sequential("app service automatic sync", () => {
 
     const service = createAppService({
       prisma,
+      providerSettingsService: {
+        getAll: vi.fn().mockResolvedValue({
+          PLAID: {
+            environment: "sandbox",
+            sandbox: {
+              clientId: "",
+              secret: ""
+            },
+            production: {
+              clientId: "",
+              secret: ""
+            },
+            countryCodes: ["US"],
+            products: ["transactions"],
+            transactionsDaysRequested: 365,
+            personalFinanceCategoryVersion: "v2",
+            automaticSyncConcurrency: 2
+          },
+          TELLER: {
+            environment: "sandbox",
+            sandbox: {
+              appId: "",
+              sandboxAccessToken: "",
+              webhookSigningSecrets: []
+            },
+            development: {
+              appId: "",
+              certificatePem: "",
+              keyPem: "",
+              webhookSigningSecrets: []
+            },
+            production: {
+              appId: "",
+              certificatePem: "",
+              keyPem: "",
+              webhookSigningSecrets: []
+            },
+            transactionsInitialDays: 90,
+            transactionsOverlapDays: 10,
+            automaticSyncConcurrency: 1,
+            webhookSyncDebounceSeconds: 30,
+            webhookToleranceSeconds: 180
+          },
+          SIMPLEFIN: {
+            mode: "sandbox",
+            development: {
+              serverUrl: ""
+            },
+            transactionsInitialDays: 45,
+            automaticSyncConcurrency: 1
+          }
+        })
+      } as never,
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
@@ -528,16 +610,7 @@ describe.sequential("app service automatic sync", () => {
         liveSandboxMode: false,
         actualServerUrl: "http://127.0.0.1:5006",
         actualBudgetSyncIdConfigured: true,
-        plaidEnabled: true,
-        plaidEnvironment: "sandbox",
-        plaidSandboxToolsEnabled: true,
-        plaidAutomaticSyncConcurrency: 2,
-        tellerEnabled: true,
-        tellerEnvironment: "sandbox",
-        tellerMtlsConfigured: false,
-        tellerWebhookSyncDebounceSeconds: 30,
-        tellerAutomaticSyncConcurrency: 1,
-        simplefinAutomaticSyncConcurrency: 1,
+        actualExternalSyncWritebackEnabled: false,
         automaticSyncBackoffBaseMinutes: 5,
         automaticSyncBackoffMaxMinutes: 60
       }

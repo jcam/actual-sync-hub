@@ -1,7 +1,7 @@
 import type { ConnectionReauthSessionDto, Provider } from "@actual-sync/shared";
 import type { LinkConfigData } from "./link-config.js";
 
-export interface ProviderSyncTransaction {
+export type ProviderSyncTransaction = {
   date: string;
   amount: number;
   payeeName: string;
@@ -13,22 +13,23 @@ export interface ProviderSyncTransaction {
   searchText?: string[];
 }
 
-export interface ProviderSyncResult {
+export type ProviderSyncResult = {
   imported: number;
   transactions: ProviderSyncTransaction[];
   removedImportedIds: string[];
   configPatch?: Partial<LinkConfigData>;
 }
 
-export interface ProviderSyncOutcome {
+export type ProviderSyncOutcome = {
   result?: ProviderSyncResult;
   error?: unknown;
 }
 
-export interface ProviderAdapter {
+export type ProviderAdapter = {
   provider: Provider;
   isConfigured(): boolean;
   createReauthSession?(args: { connectionId: string; userId: string }): Promise<ConnectionReauthSessionDto>;
+  disconnectConnection?(connectionId: string): Promise<void>;
   refreshConnection(connectionId: string): Promise<void>;
   syncAccountLink(linkId: string): Promise<ProviderSyncResult>;
   syncAccountLinks?(linkIds: string[]): Promise<Map<string, ProviderSyncOutcome>>;

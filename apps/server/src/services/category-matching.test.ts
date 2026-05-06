@@ -35,6 +35,30 @@ describe("category matching", () => {
     ).toBe("eating-out");
   });
 
+  it("maps detailed Plaid fast-food categories to Eating Out", () => {
+    expect(
+      resolveActualCategoryId({
+        categoryNames: ["Food And Drink Fast Food", "Fast Food", "Food And Drink"],
+        actualCategories: [
+          { id: "groceries", name: "Groceries" },
+          { id: "eating-out", name: "Eating Out" }
+        ]
+      })
+    ).toBe("eating-out");
+  });
+
+  it("maps detailed Plaid income categories onto common Actual income categories", () => {
+    expect(
+      resolveActualCategoryId({
+        categoryNames: ["Income Interest Earned", "Interest Earned", "Income"],
+        actualCategories: [
+          { id: "interest", name: "Interest" },
+          { id: "paycheck", name: "Paycheck" }
+        ]
+      })
+    ).toBe("interest");
+  });
+
   it("maps Teller-style category names to common Actual categories", () => {
     expect(
       resolveActualCategoryId({

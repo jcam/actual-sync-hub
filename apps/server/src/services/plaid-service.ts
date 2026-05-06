@@ -1,22 +1,25 @@
-import type { ConnectionReauthSessionDto } from "@actual-sync/shared";
+import type { ConnectionReauthSessionDto, ProviderConnectResult } from "@actual-sync/shared";
+import { getActivePlaidEnvironmentSettings } from "@actual-sync/shared";
 import {
   Configuration,
-  CountryCode,
+  type CountryCode,
+  type PersonalFinanceCategoryVersion,
   PlaidApi,
   PlaidEnvironments,
   Products
 } from "plaid";
-import type { PersonalFinanceCategoryVersion } from "plaid";
 import { prisma } from "../db.js";
-import { env } from "../env.js";
 import { decryptString, encryptString } from "../lib/crypto.js";
 import { buildPlaidCategoryNames } from "./category-matching.js";
 import { parseLinkConfig } from "./link-config.js";
+import { createProviderSettingsService, providerSettingsService } from "./provider-settings-service.js";
+import type { ProviderSettingsService } from "./provider-settings-service.js";
 import type { ProviderAdapter, ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
+import { buildImportedTransactionNotes } from "./provider-sync-helpers.js";
 import { clearSyncHealth, ProviderOperationError, toSyncHealth } from "./sync-health.js";
 type DatabaseClient = typeof prisma;
 
-export interface PlaidConfig {
+export type PlaidConfig = {
   clientId: string;
   secret: string;
   environment: "sandbox" | "production";
@@ -56,13 +59,15 @@ function parseConnectionMetadata(json: string | null | undefined) {
   }
 }
 
+function getPlaidErrorCode(error: unknown) {
+  return typeof error === "object" && error && "response" in error
+    ? ((error as { response?: { data?: { error_code?: string } } }).response?.data?.error_code ?? undefined)
+    : undefined;
+}
+
 function classifyPlaidError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unknown Plaid error";
-  const errorCode =
-    typeof error === "object" && error && "response" in error
-      ? ((error as { response?: { data?: { error_code?: string; error_message?: string } } }).response?.data?.error_code ??
-        undefined)
-      : undefined;
+  const errorCode = getPlaidErrorCode(error);
   const status =
     typeof error === "object" && error && "response" in error
       ? ((error as { response?: { status?: number } }).response?.status ?? undefined)
@@ -94,20 +99,20 @@ function classifyPlaidError(error: unknown) {
   });
 }
 
-export interface PlaidSyncTransaction extends ProviderSyncTransaction {}
+export type PlaidSyncTransaction = {} & ProviderSyncTransaction
 
-interface PlaidSyncResult extends ProviderSyncResult {}
+type PlaidSyncResult = {} & ProviderSyncResult
 
-export interface PlaidService extends ProviderAdapter {
+export type PlaidService = {
   createLinkToken(userId: string): Promise<string>;
   createUpdateLinkToken(connectionId: string, userId: string): Promise<string>;
-  exchangePublicToken(publicToken: string, label?: string): Promise<string>;
-  seedSandboxConnection(label?: string): Promise<string>;
+  exchangePublicToken(publicToken: string, label?: string): Promise<ProviderConnectResult>;
+  seedSandboxConnection(label?: string): Promise<ProviderConnectResult>;
   seedSandboxTransactions(connectionId: string, count?: number): Promise<{ added: number }>;
-}
+} & ProviderAdapter
 
 function assertSandboxToolsEnabled(config: PlaidConfig) {
-  if (config.environment !== "sandbox" || !env.plaidSandboxToolsEnabled) {
+  if (config.environment !== "sandbox") {
     throw new Error("Plaid sandbox tools are not enabled");
   }
 }
@@ -160,36 +165,55 @@ function getPlaidTransactionsConfig(config: PlaidConfig) {
 
 export function createPlaidService({
   prisma: database = prisma,
+  providerSettings = createProviderSettingsService({ prisma: database }),
   config = {
-    clientId: env.PLAID_CLIENT_ID,
-    secret: env.PLAID_SECRET,
-    environment: env.PLAID_ENV,
-    countryCodes: env.PLAID_COUNTRY_CODES.split(",").map(code => code.trim()).filter(Boolean),
-    products: env.PLAID_PRODUCTS.split(",").map(product => product.trim()).filter(Boolean),
-    transactionsDaysRequested: env.PLAID_TRANSACTIONS_DAYS_REQUESTED,
-    personalFinanceCategoryVersion: env.PLAID_PERSONAL_FINANCE_CATEGORY_VERSION
+    clientId: "",
+    secret: "",
+    environment: "sandbox",
+    countryCodes: ["US"],
+    products: ["transactions"],
+    transactionsDaysRequested: 365,
+    personalFinanceCategoryVersion: "v2"
   } satisfies PlaidConfig
 }: {
   prisma?: DatabaseClient;
+  providerSettings?: ProviderSettingsService;
   config?: PlaidConfig;
 } = {}): PlaidService {
+  const getEffectiveConfig = async (): Promise<PlaidConfig> => {
+    const settings = await providerSettings.get("PLAID");
+    const activeSettings = getActivePlaidEnvironmentSettings(settings);
+    return {
+      ...config,
+      clientId: activeSettings.clientId,
+      secret: activeSettings.secret,
+      environment: settings.environment,
+      countryCodes: settings.countryCodes,
+      products: settings.products,
+      transactionsDaysRequested: settings.transactionsDaysRequested,
+      personalFinanceCategoryVersion: settings.personalFinanceCategoryVersion
+    };
+  };
+
   const createLinkTokenPayload = ({
     userId,
-    accessToken
+    accessToken,
+    effectiveConfig
   }: {
     userId: string;
     accessToken?: string;
+    effectiveConfig: PlaidConfig;
   }) => ({
     client_name: "Actual Sync Hub",
-    country_codes: config.countryCodes as CountryCode[],
+    country_codes: effectiveConfig.countryCodes as CountryCode[],
     language: "en",
     ...(accessToken
       ? {
           access_token: accessToken
         }
       : {
-          products: config.products as Products[],
-          transactions: getPlaidTransactionsConfig(config)
+          products: effectiveConfig.products as Products[],
+          transactions: getPlaidTransactionsConfig(effectiveConfig)
         }),
     user: {
       client_user_id: userId
@@ -199,14 +223,16 @@ export function createPlaidService({
   return {
     provider: "PLAID",
     isConfigured() {
-      return Boolean(config.clientId && config.secret);
+      return false;
     },
 
     async createLinkToken(userId: string) {
-      const client = getPlaidClient(config);
+      const effectiveConfig = await getEffectiveConfig();
+      const client = getPlaidClient(effectiveConfig);
       const response = await client.linkTokenCreate({
         ...createLinkTokenPayload({
-          userId
+          userId,
+          effectiveConfig
         })
       });
 
@@ -224,12 +250,14 @@ export function createPlaidService({
         throw new Error("Connection is not a Plaid item");
       }
 
-      const client = getPlaidClient(config);
+      const effectiveConfig = await getEffectiveConfig();
+      const client = getPlaidClient(effectiveConfig);
       const accessToken = decryptString(connection.accessTokenCiphertext);
       const response = await client.linkTokenCreate({
         ...createLinkTokenPayload({
           userId,
-          accessToken
+          accessToken,
+          effectiveConfig
         })
       });
 
@@ -251,8 +279,35 @@ export function createPlaidService({
       };
     },
 
+    async disconnectConnection(connectionId: string) {
+      const connection = await database.connection.findUniqueOrThrow({
+        where: {
+          id: connectionId
+        }
+      });
+
+      if (connection.provider !== "PLAID") {
+        throw new Error("Connection is not a Plaid item");
+      }
+
+      try {
+        const client = getPlaidClient(await getEffectiveConfig());
+        await client.itemRemove({
+          access_token: decryptString(connection.accessTokenCiphertext)
+        });
+      } catch (error) {
+        const errorCode = getPlaidErrorCode(error);
+        if (errorCode === "ITEM_NOT_FOUND" || errorCode === "INVALID_ACCESS_TOKEN") {
+          return;
+        }
+
+        throw classifyPlaidError(error);
+      }
+    },
+
     async exchangePublicToken(publicToken: string, label?: string) {
-      const client = getPlaidClient(config);
+      const effectiveConfig = await getEffectiveConfig();
+      const client = getPlaidClient(effectiveConfig);
       const exchange = await client.itemPublicTokenExchange({
       public_token: publicToken
     });
@@ -269,7 +324,7 @@ export function createPlaidService({
       const institutionName = item.data.item.institution_id
         ? (await client.institutionsGetById({
           institution_id: item.data.item.institution_id,
-          country_codes: config.countryCodes as CountryCode[]
+          country_codes: effectiveConfig.countryCodes as CountryCode[]
         })).data.institution.name
         : null;
 
@@ -329,10 +384,13 @@ export function createPlaidService({
       }))
     });
 
-      return connection.id;
+      return {
+        connectionId: connection.id
+      };
     },
 
     async refreshConnection(connectionId: string) {
+      const effectiveConfig = await getEffectiveConfig();
       const connection = await database.connection.findUniqueOrThrow({
       where: {
         id: connectionId
@@ -340,7 +398,7 @@ export function createPlaidService({
     });
 
       try {
-        const client = getPlaidClient(config);
+        const client = getPlaidClient(effectiveConfig);
         const accessToken = decryptString(connection.accessTokenCiphertext);
         const accounts = await client.accountsGet({
           access_token: accessToken
@@ -401,6 +459,7 @@ export function createPlaidService({
     },
 
     async syncAccountLink(linkId: string): Promise<PlaidSyncResult> {
+      const effectiveConfig = await getEffectiveConfig();
       const link = await database.accountLink.findUniqueOrThrow({
       where: {
         id: linkId
@@ -420,7 +479,7 @@ export function createPlaidService({
       };
     }
 
-      const client = getPlaidClient(config);
+      const client = getPlaidClient(effectiveConfig);
       const accessToken = decryptString(link.connection.accessTokenCiphertext);
       const existingConfig = parseLinkConfig(link.configJson);
       const startingCursor = existingConfig.providerSyncState?.cursor ?? undefined;
@@ -436,35 +495,46 @@ export function createPlaidService({
           cursor,
           options: {
             days_requested: config.transactionsDaysRequested,
+            include_original_description: true,
             personal_finance_category_version:
-              config.personalFinanceCategoryVersion as PersonalFinanceCategoryVersion
+              effectiveConfig.personalFinanceCategoryVersion as PersonalFinanceCategoryVersion
           }
         });
 
           const page = response.data;
           const transactions = [...page.added, ...page.modified]
-          .filter(transaction => transaction.account_id === link.connectionAccount?.externalAccountId)
-          .map(transaction => ({
-            date: transaction.authorized_date || transaction.date,
-            amount: transaction.amount * -1,
-            payeeName:
-              transaction.merchant_name ||
-              transaction.counterparties?.[0]?.name ||
-              transaction.name,
-            importedPayee: transaction.name,
-            notes: undefined,
-            importedId: transaction.pending_transaction_id || transaction.transaction_id,
-            cleared: !transaction.pending,
-            categoryNames: buildPlaidCategoryNames({
-              detailed: transaction.personal_finance_category?.detailed,
-              primary: transaction.personal_finance_category?.primary
-            }),
-            searchText: [
-              transaction.name,
-              transaction.merchant_name || undefined,
-              ...((transaction.counterparties || []).map(counterparty => counterparty.name))
-            ].filter((value): value is string => Boolean(value))
-          }));
+            .filter(transaction => transaction.account_id === link.connectionAccount?.externalAccountId)
+            .map(transaction => {
+              const payeeName =
+                transaction.merchant_name ||
+                transaction.counterparties?.[0]?.name ||
+                transaction.name;
+
+              return {
+                date: transaction.authorized_date || transaction.date,
+                amount: transaction.amount * -1,
+                payeeName,
+                importedPayee: transaction.name,
+                notes: buildImportedTransactionNotes({
+                  payeeName,
+                  description: transaction.original_description || transaction.name
+                }),
+                importedId: transaction.pending_transaction_id || transaction.transaction_id,
+                cleared: !transaction.pending,
+                categoryNames: buildPlaidCategoryNames({
+                  detailed: transaction.personal_finance_category?.detailed,
+                  primary: transaction.personal_finance_category?.primary
+                }),
+                searchText: [...new Set(
+                  [
+                    transaction.name,
+                    transaction.original_description || undefined,
+                    transaction.merchant_name || undefined,
+                    ...((transaction.counterparties || []).map(counterparty => counterparty.name))
+                  ].filter((value): value is string => Boolean(value))
+                )]
+              };
+            });
 
           for (const transaction of page.removed.filter(
             transaction => transaction.account_id === link.connectionAccount?.externalAccountId
@@ -523,13 +593,14 @@ export function createPlaidService({
     },
 
     async seedSandboxConnection(label?: string) {
-      assertSandboxToolsEnabled(config);
-      const client = getPlaidClient(config);
+      const effectiveConfig = await getEffectiveConfig();
+      assertSandboxToolsEnabled(effectiveConfig);
+      const client = getPlaidClient(effectiveConfig);
       const response = await client.sandboxPublicTokenCreate({
         institution_id: "ins_109508",
         initial_products: [Products.Transactions],
         options: {
-          transactions: getPlaidTransactionsConfig(config),
+          transactions: getPlaidTransactionsConfig(effectiveConfig),
           webhook: "https://example.com/webhooks/plaid",
           override_username: "user_transactions_dynamic",
           override_password: "test-password"
@@ -543,7 +614,8 @@ export function createPlaidService({
     },
 
     async seedSandboxTransactions(connectionId: string, count = 3) {
-      assertSandboxToolsEnabled(config);
+      const effectiveConfig = await getEffectiveConfig();
+      assertSandboxToolsEnabled(effectiveConfig);
       const connection = await database.connection.findUniqueOrThrow({
         where: {
           id: connectionId
@@ -551,7 +623,7 @@ export function createPlaidService({
       });
 
       await createSandboxTransactions({
-        config,
+        config: effectiveConfig,
         accessToken: decryptString(connection.accessTokenCiphertext),
         count
       });

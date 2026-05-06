@@ -3,24 +3,32 @@ import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ActualBankSyncSource } from "@actual-sync/shared";
+import type * as ActualApi from "@actual-app/api";
+import type {
+  ActualBankSyncSource,
+} from "@actual-sync/shared";
 import type { APIAccountEntity, APICategoryEntity, APICategoryGroupEntity, APIPayeeEntity } from "@actual-app/api/models";
 import { resolveActualCategoryId } from "./category-matching.js";
 
-type ActualModule = typeof import("@actual-app/api");
+type ActualModule = typeof ActualApi;
 type ActualImportTransaction = Parameters<ActualModule["importTransactions"]>[1][number];
 type ActualTransaction = Awaited<ReturnType<ActualModule["getTransactions"]>>[number];
+type ActualModuleWithExternalSync = ActualModule & {
+  linkExternalSyncAccount?: (accountId: string, metadata: ActualExternalSyncMetadataInput) => Promise<unknown>;
+  unlinkExternalSyncAccount?: (accountId: string) => Promise<unknown>;
+};
 
-interface ActualConfig {
+type ActualConfig = {
   dataDir: string;
   serverURL: string;
   password: string;
   budgetSyncId: string;
   budgetEncryptionPassword?: string;
+  apiLocalEntry?: string;
   apiVersionMatchMode?: "off" | "auto" | "strict";
 }
 
-interface ImportTransactionInput {
+type ImportTransactionInput = {
   date: string;
   amount: number;
   payee_name: string;
@@ -33,7 +41,20 @@ interface ImportTransactionInput {
   transfer_actual_account_id?: string;
 }
 
-interface ReconcileTransactionInput {
+type ActualExternalSyncMetadataInput = {
+  syncSource: "external";
+  providerAccountId: string;
+  institutionName: string;
+  institutionExternalId?: string | null;
+  mask?: string | null;
+  officialName?: string | null;
+  balanceCurrent?: number | null;
+  balanceAvailable?: number | null;
+  balanceLimit?: number | null;
+  lastSync?: string | null;
+}
+
+type ReconcileTransactionInput = {
   date: string;
   amount: number;
   payee_name: string;
@@ -61,6 +82,17 @@ type WorkerCommand =
   | {
       id: string;
       operation: "listBankSyncLinks";
+    }
+  | {
+      id: string;
+      operation: "linkExternalSyncAccount";
+      accountId: string;
+      metadata: ActualExternalSyncMetadataInput;
+    }
+  | {
+      id: string;
+      operation: "unlinkExternalSyncAccount";
+      accountId: string;
     }
   | {
       id: string;
@@ -120,7 +152,31 @@ function isActualCategory(entity: APICategoryEntity | APICategoryGroupEntity): e
 }
 
 function isActualBankSyncSource(value: string | null | undefined): value is ActualBankSyncSource {
-  return value === "simpleFin" || value === "goCardless" || value === "pluggyai";
+  return value === "simpleFin" || value === "goCardless" || value === "pluggyai" || value === "external";
+}
+
+function tryGetActualInternalApi(actual: ActualModule) {
+  const internal = (actual as ActualModule & {
+    internal?: {
+      send?: (name: string, args?: unknown) => Promise<unknown>;
+    };
+  }).internal;
+
+  if (!internal?.send) {
+    return null;
+  }
+
+  return internal;
+}
+
+function getActualExternalSyncApi(actual: ActualModule) {
+  const api = actual as ActualModuleWithExternalSync;
+
+  if (!api.linkExternalSyncAccount || !api.unlinkExternalSyncAccount) {
+    throw new Error("Installed Actual API runtime does not expose external-sync account link methods.");
+  }
+
+  return api;
 }
 
 function isMissingBanksTableError(error: unknown) {
@@ -196,6 +252,10 @@ async function readActualPackageVersionFromEntry(entryPath: string) {
 }
 
 async function loadActualModule(config: ActualConfig): Promise<ActualModule> {
+  if (config.apiLocalEntry) {
+    return import(pathToFileURL(config.apiLocalEntry).href) as Promise<ActualModule>;
+  }
+
   const bundledActual = await import("@actual-app/api");
   const bundledEntryPath = require.resolve("@actual-app/api");
   const bundledVersion = await readActualPackageVersionFromEntry(bundledEntryPath);
@@ -348,24 +408,57 @@ async function main() {
 
         case "listBankSyncLinks": {
           await syncIfNeeded();
-          const accounts = (await actual.getAccounts()) as Array<{
-            id: string;
-            name: string;
-            official_name?: string | null;
-            account_id?: string | null;
-            account_sync_source?: string | null;
-            last_sync?: string | null;
-            closed?: boolean;
-            offbudget?: boolean;
-            tombstone?: boolean;
-            bank?: string | null;
-            bankName?: string | null;
-            bankId?: string | null;
-            mask?: string | null;
-            balance_current?: number | null;
-            balance_available?: number | null;
-            balance_limit?: number | null;
-          }>;
+          const internal = tryGetActualInternalApi(actual);
+          const publicAccounts = await actual.getAccounts();
+          const publicAccountsById = new Map(publicAccounts.map(account => [account.id, account]));
+          const accounts = internal
+            ? ((await internal.send("accounts-get")) as unknown as Array<{
+                id: string;
+                name: string;
+                official_name?: string | null;
+                account_id?: string | null;
+                account_sync_source?: string | null;
+                last_sync?: string | null;
+                closed?: boolean | 0 | 1;
+                offbudget?: boolean | 0 | 1;
+                tombstone?: boolean | 0 | 1;
+                bank?: string | null;
+                bankName?: string | null;
+                bankId?: string | null;
+                mask?: string | null;
+                balance_current?: number | null;
+                balance_available?: number | null;
+                balance_limit?: number | null;
+              }>)
+            : (
+                (await actual.aqlQuery(
+                  actual
+                    .q("accounts")
+                    .select([
+                      "id",
+                      "name",
+                      "official_name",
+                      "account_id",
+                      "account_sync_source",
+                      "last_sync",
+                      "closed",
+                      "offbudget"
+                    ])
+                    .withDead() as unknown as Parameters<ActualModule["aqlQuery"]>[0]
+                )) as {
+                  data: Array<{
+                    id: string;
+                    name: string;
+                    official_name?: string | null;
+                    account_id?: string | null;
+                    account_sync_source?: string | null;
+                    last_sync?: string | null;
+                    closed?: boolean | 0 | 1;
+                    offbudget?: boolean | 0 | 1;
+                    tombstone?: boolean;
+                  }>;
+                }
+              ).data;
           const bankRows = (await (async () => {
             try {
               return (await actual.aqlQuery(
@@ -407,25 +500,76 @@ async function main() {
             result: accounts
               .filter(account => !account.tombstone)
               .filter(account => Boolean(account.account_id) && isActualBankSyncSource(account.account_sync_source))
-              .map(account => ({
-                actualAccountId: account.id,
-                actualAccountName: account.name,
-                actualOfficialName: account.official_name ?? null,
-                accountSyncSource: account.account_sync_source as ActualBankSyncSource,
-                externalAccountId: account.account_id as string,
-                actualBankId: account.bank ?? null,
-                actualBankName: account.bankName ?? bankById.get(account.bank ?? "")?.name ?? null,
-                actualBankExternalId: bankById.get(account.bank ?? "")?.bank_id ?? null,
-                mask: account.mask ?? null,
-                balanceCurrent: integerToAmount(account.balance_current),
-                balanceAvailable:
-                  typeof account.balance_available === "number" ? integerToAmount(account.balance_available) : null,
-                balanceLimit:
-                  typeof account.balance_limit === "number" ? integerToAmount(account.balance_limit) : null,
-                closed: Boolean(account.closed),
-                offbudget: Boolean(account.offbudget),
-                lastSyncedAt: account.last_sync ?? null
-              }))
+              .map(account => {
+                const bankId = "bank" in account ? account.bank ?? null : null;
+                const bankName = "bankName" in account ? account.bankName ?? null : null;
+                const balanceCurrent =
+                  "balance_current" in account && typeof account.balance_current === "number"
+                    ? account.balance_current
+                    : publicAccountsById.get(account.id)?.balance_current ?? null;
+
+                return {
+                  actualAccountId: account.id,
+                  actualAccountName: account.name,
+                  actualOfficialName: account.official_name ?? null,
+                  accountSyncSource: account.account_sync_source as ActualBankSyncSource,
+                  externalAccountId: account.account_id as string,
+                  actualBankId: bankId,
+                  actualBankName: bankName ?? (bankId ? bankById.get(bankId)?.name ?? null : null),
+                  actualBankExternalId: bankId ? bankById.get(bankId)?.bank_id ?? null : null,
+                  mask: "mask" in account ? account.mask ?? null : null,
+                  balanceCurrent: integerToAmount(balanceCurrent),
+                  balanceAvailable:
+                    "balance_available" in account && typeof account.balance_available === "number"
+                      ? integerToAmount(account.balance_available)
+                      : null,
+                  balanceLimit:
+                    "balance_limit" in account && typeof account.balance_limit === "number"
+                      ? integerToAmount(account.balance_limit)
+                      : null,
+                  closed: Boolean(account.closed),
+                  offbudget: Boolean(account.offbudget),
+                  lastSyncedAt: account.last_sync ?? null
+                };
+              })
+          };
+        }
+
+        case "linkExternalSyncAccount": {
+          await syncIfNeeded();
+          await getActualExternalSyncApi(actual).linkExternalSyncAccount!(command.accountId, {
+            syncSource: "external",
+            providerAccountId: command.metadata.providerAccountId,
+            institutionName: command.metadata.institutionName,
+            institutionExternalId: command.metadata.institutionExternalId ?? null,
+            mask: command.metadata.mask ?? null,
+            officialName: command.metadata.officialName ?? null,
+            balanceCurrent:
+              typeof command.metadata.balanceCurrent === "number" ? command.metadata.balanceCurrent : null,
+            balanceAvailable:
+              typeof command.metadata.balanceAvailable === "number" ? command.metadata.balanceAvailable : null,
+            balanceLimit:
+              typeof command.metadata.balanceLimit === "number" ? command.metadata.balanceLimit : null,
+            lastSync: command.metadata.lastSync ?? null
+          });
+          await syncIfNeeded(true);
+
+          return {
+            id: command.id,
+            ok: true,
+            result: undefined
+          };
+        }
+
+        case "unlinkExternalSyncAccount": {
+          await syncIfNeeded();
+          await getActualExternalSyncApi(actual).unlinkExternalSyncAccount!(command.accountId);
+          await syncIfNeeded(true);
+
+          return {
+            id: command.id,
+            ok: true,
+            result: undefined
           };
         }
 

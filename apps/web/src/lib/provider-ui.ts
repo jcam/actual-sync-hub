@@ -1,6 +1,10 @@
 import type { LinkConfigDto, Provider, SyncHealthDto } from "@actual-sync/shared";
 
 export function getProviderConnectionsPath(provider: Provider | null | undefined) {
+  if (!provider) {
+    return "/accounts";
+  }
+
   switch (provider) {
     case "PLAID":
       return "/plaid-connections";
@@ -14,6 +18,10 @@ export function getProviderConnectionsPath(provider: Provider | null | undefined
 }
 
 export function getProviderConnectionsLabel(provider: Provider | null | undefined) {
+  if (!provider) {
+    return "Connections";
+  }
+
   switch (provider) {
     case "PLAID":
       return "Plaid Connections";
@@ -79,11 +87,23 @@ export function getConnectionHealthSummary(health: SyncHealthDto) {
 }
 
 export function getSyncHealthActionLabel(health: SyncHealthDto) {
+  if (!health.action) {
+    return "Reconnect";
+  }
+
   switch (health.action) {
     case "REAUTH_BANK":
       return "Repair bank connection";
     case "REAUTH_CONNECTION":
       return "Reconnect provider";
+    case "CHECK_PROVIDER":
+      return "Review provider connection";
+    case "MANUAL_RECONNECT":
+      return "Reconnect manually";
+    case "NONE":
+      return "No action required";
+    case "RETRY":
+      return "Retry sync";
     default:
       return "Reconnect";
   }
@@ -98,6 +118,13 @@ export function supportsInlineReauth(health: SyncHealthDto, provider: Provider |
 }
 
 export function getSyncHealthBadge(health: SyncHealthDto) {
+  if (!health.scope) {
+    return {
+      label: "Sync issue",
+      tone: "neutral"
+    } as const;
+  }
+
   switch (health.scope) {
     case "BANK_AUTH":
       return {
