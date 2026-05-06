@@ -8,7 +8,7 @@ import { providerFixtureCache } from './provider-fixture-cache.js';
 import type { ProviderFixtureCache } from './provider-fixture-cache.js';
 import type { ProviderAdapter, ProviderSyncOutcome, ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
 import { buildImportedTransactionNotes } from "./provider-sync-helpers.js";
-import { createProviderSettingsService, providerSettingsService } from './provider-settings-service.js';
+import { createProviderSettingsService } from './provider-settings-service.js';
 import type { ProviderSettingsService } from './provider-settings-service.js';
 import { clearSyncHealth, ProviderOperationError, toSyncHealth } from "./sync-health.js";
 

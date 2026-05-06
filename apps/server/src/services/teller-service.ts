@@ -9,7 +9,7 @@ import { decryptString, encryptString } from "../lib/crypto.js";
 import { buildProviderCategoryNames } from "./category-matching.js";
 import { providerFixtureCache } from './provider-fixture-cache.js';
 import type { ProviderFixtureCache } from './provider-fixture-cache.js';
-import { createProviderSettingsService, providerSettingsService } from './provider-settings-service.js';
+import { createProviderSettingsService } from './provider-settings-service.js';
 import type { ProviderSettingsService } from './provider-settings-service.js';
 import type { ProviderAdapter, ProviderSyncResult } from "./provider-adapter.js";
 import { buildImportedTransactionNotes } from "./provider-sync-helpers.js";

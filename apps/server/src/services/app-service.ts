@@ -36,7 +36,7 @@ import {
   resolveTransactionCategoryId,
   resolveTransferActualAccountId
 } from "./provider-sync-helpers.js";
-import { createProviderSettingsService, providerSettingsService } from "./provider-settings-service.js";
+import { createProviderSettingsService } from "./provider-settings-service.js";
 import type { ProviderSettingsService } from "./provider-settings-service.js";
 import { parseSimpleFinAccountRawJson } from "./simplefin-native-metadata.js";
 import { simplefinService } from "./simplefin-service.js";

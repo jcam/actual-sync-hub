@@ -12,7 +12,7 @@ import { prisma } from "../db.js";
 import { decryptString, encryptString } from "../lib/crypto.js";
 import { buildPlaidCategoryNames } from "./category-matching.js";
 import { parseLinkConfig } from "./link-config.js";
-import { createProviderSettingsService, providerSettingsService } from "./provider-settings-service.js";
+import { createProviderSettingsService } from "./provider-settings-service.js";
 import type { ProviderSettingsService } from "./provider-settings-service.js";
 import type { ProviderAdapter, ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
 import { buildImportedTransactionNotes } from "./provider-sync-helpers.js";

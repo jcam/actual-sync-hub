@@ -18,14 +18,14 @@ import { ApiError } from "./lib/errors";
 
 async function request<T>(input: RequestInfo, init?: RequestInit) {
   const hasBody = init?.body !== undefined && init?.body !== null;
+  const headers = new Headers(init?.headers);
+  if (hasBody && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   const response = await fetch(input, {
     credentials: "include",
-    headers: hasBody
-      ? {
-          "Content-Type": "application/json",
-          ...(init?.headers || {})
-        }
-      : init?.headers,
+    headers,
     ...init
   });
 

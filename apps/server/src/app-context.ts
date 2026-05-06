@@ -8,7 +8,7 @@ import { createAuthService } from './services/auth.js';
 import type { AuthService } from './services/auth.js';
 import { plaidService } from './services/plaid-service.js';
 import type { PlaidService } from './services/plaid-service.js';
-import { createProviderSettingsService, providerSettingsService } from './services/provider-settings-service.js';
+import { createProviderSettingsService } from './services/provider-settings-service.js';
 import type { ProviderSettingsService } from './services/provider-settings-service.js';
 import { simplefinService } from './services/simplefin-service.js';
 import type { SimpleFinService } from './services/simplefin-service.js';
