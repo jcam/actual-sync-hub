@@ -15,6 +15,12 @@ async function initializeSchema(prisma: PrismaClient) {
       "updatedAt" DATETIME NOT NULL
     );`,
     `CREATE UNIQUE INDEX "User_username_key" ON "User"("username");`,
+    `CREATE TABLE "ProviderSetting" (
+      "provider" TEXT NOT NULL PRIMARY KEY,
+      "settingsJson" TEXT NOT NULL,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" DATETIME NOT NULL
+    );`,
     `CREATE TABLE "Connection" (
       "id" TEXT NOT NULL PRIMARY KEY,
       "provider" TEXT NOT NULL,
@@ -41,6 +47,10 @@ async function initializeSchema(prisma: PrismaClient) {
       "subtype" TEXT,
       "currentBalance" REAL,
       "availableBalance" REAL,
+      "providerConnectionId" TEXT,
+      "providerConnectionName" TEXT,
+      "providerInstitutionId" TEXT,
+      "providerInstitutionDomain" TEXT,
       "rawJson" TEXT,
       "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" DATETIME NOT NULL,
@@ -89,15 +99,7 @@ async function initializeSchema(prisma: PrismaClient) {
       "id" TEXT NOT NULL PRIMARY KEY,
       "accountLinkId" TEXT NOT NULL,
       "importedId" TEXT NOT NULL,
-      "providerImportedId" TEXT NOT NULL,
-      "actualAccountId" TEXT NOT NULL,
-      "actualTransactionId" TEXT,
-      "transactionDate" TEXT NOT NULL,
-      "amount" REAL NOT NULL,
-      "payeeName" TEXT NOT NULL,
-      "importedPayee" TEXT,
       "primarySourceCategory" TEXT,
-      "sourceCategoryNamesJson" TEXT,
       "appliedCategoryId" TEXT,
       "observedCategoryId" TEXT,
       "lastSeenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -105,9 +107,8 @@ async function initializeSchema(prisma: PrismaClient) {
       "updatedAt" DATETIME NOT NULL,
       CONSTRAINT "ImportedTransaction_accountLinkId_fkey" FOREIGN KEY ("accountLinkId") REFERENCES "AccountLink" ("id") ON DELETE CASCADE ON UPDATE CASCADE
     );`,
-    `CREATE UNIQUE INDEX "ImportedTransaction_accountLinkId_providerImportedId_key" ON "ImportedTransaction"("accountLinkId", "providerImportedId");`,
-    `CREATE INDEX "ImportedTransaction_accountLinkId_lastSeenAt_idx" ON "ImportedTransaction"("accountLinkId", "lastSeenAt");`,
-    `CREATE INDEX "ImportedTransaction_actualAccountId_importedId_idx" ON "ImportedTransaction"("actualAccountId", "importedId");`
+    `CREATE UNIQUE INDEX "ImportedTransaction_accountLinkId_importedId_key" ON "ImportedTransaction"("accountLinkId", "importedId");`,
+    `CREATE INDEX "ImportedTransaction_accountLinkId_lastSeenAt_idx" ON "ImportedTransaction"("accountLinkId", "lastSeenAt");`
   ];
 
   for (const statement of statements) {
@@ -132,7 +133,7 @@ export async function createTestDatabase() {
 
   return {
     prisma,
-    async cleanup() {
+    cleanup: async () => {
       await prisma.$disconnect();
       await fs.rm(directory, { recursive: true, force: true });
     }

@@ -1,0 +1,77 @@
+import type { Provider } from "./core.js";
+
+export type PlaidProviderSettingsDto = {
+  environment: "sandbox" | "production";
+  sandbox: {
+    clientId: string;
+    secret: string;
+  };
+  production: {
+    clientId: string;
+    secret: string;
+  };
+  countryCodes: string[];
+  products: string[];
+  transactionsDaysRequested: number;
+  personalFinanceCategoryVersion: "v1" | "v2";
+  automaticSyncConcurrency: number;
+}
+
+export type TellerProviderSettingsDto = {
+  environment: "sandbox" | "development" | "production";
+  sandbox: {
+    appId: string;
+    sandboxAccessToken: string;
+    webhookSigningSecrets?: string[];
+  };
+  development: {
+    appId: string;
+    certificatePem: string;
+    keyPem: string;
+    webhookSigningSecrets: string[];
+  };
+  production: {
+    appId: string;
+    certificatePem: string;
+    keyPem: string;
+    webhookSigningSecrets: string[];
+  };
+  transactionsInitialDays: number;
+  transactionsOverlapDays: number;
+  automaticSyncConcurrency: number;
+  webhookSyncDebounceSeconds: number;
+  webhookToleranceSeconds: number;
+}
+
+export type SimpleFinProviderSettingsDto = {
+  mode: "sandbox" | "development" | "production";
+  development: {
+    serverUrl: string;
+  };
+  transactionsInitialDays: number;
+  automaticSyncConcurrency: number;
+}
+
+export type ProviderSettingsDto = {
+  PLAID: PlaidProviderSettingsDto;
+  TELLER: TellerProviderSettingsDto;
+  SIMPLEFIN: SimpleFinProviderSettingsDto;
+}
+
+export type ProviderSettingsByProviderDto<T extends Provider = Provider> = T extends "PLAID"
+  ? PlaidProviderSettingsDto
+  : T extends "TELLER"
+    ? TellerProviderSettingsDto
+    : SimpleFinProviderSettingsDto;
+
+export function getActivePlaidEnvironmentSettings(settings: PlaidProviderSettingsDto) {
+  return settings[settings.environment];
+}
+
+export function getActiveTellerEnvironmentSettings(settings: TellerProviderSettingsDto) {
+  return settings[settings.environment];
+}
+
+export function getActiveSimpleFinModeSettings(settings: SimpleFinProviderSettingsDto) {
+  return settings.mode === "development" ? settings.development : null;
+}

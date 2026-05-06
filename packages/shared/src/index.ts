@@ -5,4 +5,5 @@ export * from "./core.js";
 export * from "./health.js";
 export * from "./review.js";
 export * from "./runtime.js";
+export * from "./settings.js";
 export * from "./sync-runs.js";

@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { ConnectionDto, RuntimeInfoDto } from "@actual-sync/shared";
 import { api } from "../api";
 import { PlaidConnectionCard } from "../components/PlaidConnectionCard";
+import { ProviderReadinessPanel } from "../components/ProviderReadinessPanel";
 import { getDisplayErrorMessage } from "../lib/errors";
 import { PlaidLinkPanel } from "../components/PlaidLinkPanel";
+import { ProviderSettingsPanel } from "../components/ProviderSettingsPanel";
 
 export function PlaidConnectionsPage() {
   const [connections, setConnections] = useState<ConnectionDto[]>([]);
@@ -36,9 +38,19 @@ export function PlaidConnectionsPage() {
     () => connections.filter(connection => connection.provider === "PLAID"),
     [connections]
   );
+  const plaidRuntime = runtime?.providers.find(provider => provider.provider === "PLAID") ?? null;
 
   return (
     <div className="page-stack">
+      {plaidRuntime ? <ProviderReadinessPanel provider={plaidRuntime} /> : null}
+      {runtime ? (
+        <ProviderSettingsPanel
+          provider="PLAID"
+          label="Plaid"
+          settings={runtime.settings.PLAID}
+          onSaved={load}
+        />
+      ) : null}
       <PlaidLinkPanel
         sandboxToolsEnabled={Boolean(runtime?.plaid.sandboxToolsEnabled)}
         onConnected={load}
@@ -50,7 +62,7 @@ export function PlaidConnectionsPage() {
         {runtime ? (
           <p className="muted">
             {runtime.instanceLabel} · Plaid {runtime.plaid.environment}
-            {runtime.liveSandboxMode ? " · sandbox tools enabled" : ""}
+            {runtime.plaid.sandboxToolsEnabled ? " · sandbox tools enabled" : ""}
           </p>
         ) : null}
         {loading ? <p>Loading Plaid connections…</p> : null}

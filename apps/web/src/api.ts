@@ -5,6 +5,9 @@ import type {
   ConnectionReauthSessionDto,
   ConnectionDto,
   MigrationPreviewDto,
+  Provider,
+  ProviderConnectResult,
+  ProviderSettingsByProviderDto,
   RuntimeInfoDto,
   SessionDto,
   SyncRunDto,
@@ -54,6 +57,15 @@ export const api = {
   getRuntimeInfo() {
     return request<RuntimeInfoDto>("/api/runtime");
   },
+  getProviderSettings<T extends Provider>(provider: T) {
+    return request<ProviderSettingsByProviderDto<T>>(`/api/provider-settings/${provider}`);
+  },
+  updateProviderSettings<T extends Provider>(provider: T, settings: ProviderSettingsByProviderDto<T>) {
+    return request<ProviderSettingsByProviderDto<T>>(`/api/provider-settings/${provider}`, {
+      method: "PUT",
+      body: JSON.stringify(settings)
+    });
+  },
   login(username: string, password: string) {
     return request<SessionDto>("/api/auth/login", {
       method: "POST",
@@ -80,13 +92,13 @@ export const api = {
     });
   },
   exchangePlaidPublicToken(publicToken: string, label?: string) {
-    return request<{ connectionId: string }>("/api/connections/plaid/exchange", {
+    return request<ProviderConnectResult>("/api/connections/plaid/exchange", {
       method: "POST",
       body: JSON.stringify({ publicToken, label })
     });
   },
   connectSimpleFin(setupToken: string, label?: string) {
-    return request<{ connectionId: string }>("/api/connections/simplefin/connect", {
+    return request<ProviderConnectResult>("/api/connections/simplefin/connect", {
       method: "POST",
       body: JSON.stringify({
         setupToken,
@@ -95,7 +107,7 @@ export const api = {
     });
   },
   reuseCachedSimpleFinConnection(label?: string) {
-    return request<{ connectionId: string }>("/api/connections/simplefin/reuse-cached", {
+    return request<ProviderConnectResult>("/api/connections/simplefin/reuse-cached", {
       method: "POST",
       body: JSON.stringify(label ? { label } : {})
     });
@@ -119,19 +131,19 @@ export const api = {
     institutionName?: string | null;
     label?: string | null;
   }) {
-    return request<{ connectionId: string }>("/api/connections/teller/enroll", {
+    return request<ProviderConnectResult>("/api/connections/teller/enroll", {
       method: "POST",
       body: JSON.stringify(payload)
     });
   },
   reuseCachedTellerConnection(label?: string) {
-    return request<{ connectionId: string }>("/api/connections/teller/reuse-cached", {
+    return request<ProviderConnectResult>("/api/connections/teller/reuse-cached", {
       method: "POST",
       body: JSON.stringify(label ? { label } : {})
     });
   },
   seedTellerSandboxConnection(label?: string) {
-    return request<{ connectionId: string }>("/api/connections/teller/sandbox/seed-connection", {
+    return request<ProviderConnectResult>("/api/connections/teller/sandbox/seed-connection", {
       method: "POST",
       body: JSON.stringify(label ? { label } : {})
     });
@@ -157,7 +169,7 @@ export const api = {
     });
   },
   seedPlaidSandboxConnection(label?: string) {
-    return request<{ connectionId: string }>("/api/connections/plaid/sandbox/seed-connection", {
+    return request<ProviderConnectResult>("/api/connections/plaid/sandbox/seed-connection", {
       method: "POST",
       body: JSON.stringify(label ? { label } : {})
     });

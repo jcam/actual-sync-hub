@@ -1,7 +1,6 @@
 import { prisma } from "../db.js";
 import { env } from "../env.js";
-import { hashPassword } from "../lib/password.js";
-import { verifyPassword } from "../lib/password.js";
+import { hashPassword, verifyPassword } from "../lib/password.js";
 
 export async function bootstrapAdminUser() {
   const existing = await prisma.user.findUnique({

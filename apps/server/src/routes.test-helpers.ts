@@ -1,18 +1,104 @@
 import { vi } from "vitest";
-import { createServer } from "./server.js";
+import { type createServer } from "./server.js";
 
 type AppUnderTest = Awaited<ReturnType<typeof createServer>>;
 
 export function makeContext(overrides: Record<string, unknown> = {}) {
   return {
     prisma: {} as never,
-    actualService: {} as never,
+    actualService: {
+      shutdown: vi.fn(),
+      listAccounts: vi.fn(),
+      listCategories: vi.fn(),
+      listBankSyncLinks: vi.fn(),
+      linkExternalSyncAccount: vi.fn(),
+      unlinkExternalSyncAccount: vi.fn(),
+      listTransactionsByImportedIds: vi.fn(),
+      importTransactions: vi.fn(),
+      previewImportTransactions: vi.fn(),
+      reconcileTransactions: vi.fn(),
+      ...(overrides.actualService as object | undefined)
+    },
     authService: {
       authenticateUser: vi.fn(),
+      validateActualToken: vi.fn().mockResolvedValue(true),
       ...(overrides.authService as object | undefined)
     },
     appService: {
-      getRuntimeInfo: vi.fn(),
+      getRuntimeInfo: vi.fn().mockResolvedValue({
+        instanceLabel: "Test",
+        liveSandboxMode: false,
+        providers: [],
+        settings: {
+          PLAID: {
+            environment: "sandbox",
+            sandbox: {
+              clientId: "",
+              secret: ""
+            },
+            production: {
+              clientId: "",
+              secret: ""
+            },
+            countryCodes: ["US"],
+            products: ["transactions"],
+            transactionsDaysRequested: 365,
+            personalFinanceCategoryVersion: "v2",
+            automaticSyncConcurrency: 2
+          },
+          TELLER: {
+            environment: "sandbox",
+            sandbox: {
+              appId: "",
+              sandboxAccessToken: ""
+            },
+            development: {
+              appId: "",
+              certificatePem: "",
+              keyPem: "",
+              webhookSigningSecrets: []
+            },
+            production: {
+              appId: "",
+              certificatePem: "",
+              keyPem: "",
+              webhookSigningSecrets: []
+            },
+            transactionsInitialDays: 90,
+            transactionsOverlapDays: 10,
+            automaticSyncConcurrency: 2,
+            webhookSyncDebounceSeconds: 30
+          },
+          SIMPLEFIN: {
+            mode: "sandbox",
+            development: {
+              serverUrl: ""
+            },
+            transactionsInitialDays: 45,
+            automaticSyncConcurrency: 1
+          }
+        },
+        plaid: {
+          enabled: true,
+          environment: "sandbox",
+          sandboxToolsEnabled: false
+        },
+        teller: {
+          enabled: false,
+          environment: "sandbox",
+          mtlsConfigured: false
+        },
+        simplefin: {
+          enabled: true,
+          mode: "sandbox",
+          requiresSetupToken: true
+        },
+        actual: {
+          serverUrl: "http://localhost:5006",
+          budgetSyncIdConfigured: true,
+          externalSyncWritebackEnabled: false
+        }
+      }),
       listConnections: vi.fn(),
       listActualAccounts: vi.fn(),
       listActualBankSyncLinks: vi.fn(),
@@ -28,7 +114,63 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       previewAccountSyncReview: vi.fn(),
       commitAccountSyncReview: vi.fn(),
       listSyncRuns: vi.fn(),
+      getExternalSyncBridgeStatus: vi.fn(),
+      runExternalSyncBridgeSync: vi.fn(),
       ...(overrides.appService as object | undefined)
+    },
+    providerSettingsService: {
+      getAll: vi.fn().mockResolvedValue({
+        PLAID: {
+          environment: "sandbox",
+          sandbox: {
+            clientId: "",
+            secret: ""
+          },
+          production: {
+            clientId: "",
+            secret: ""
+          },
+          countryCodes: ["US"],
+          products: ["transactions"],
+          transactionsDaysRequested: 365,
+          personalFinanceCategoryVersion: "v2",
+          automaticSyncConcurrency: 2
+        },
+        TELLER: {
+          environment: "sandbox",
+          sandbox: {
+            appId: "",
+            sandboxAccessToken: ""
+          },
+          development: {
+            appId: "",
+            certificatePem: "",
+            keyPem: "",
+            webhookSigningSecrets: []
+          },
+          production: {
+            appId: "",
+            certificatePem: "",
+            keyPem: "",
+            webhookSigningSecrets: []
+          },
+          transactionsInitialDays: 90,
+          transactionsOverlapDays: 10,
+          automaticSyncConcurrency: 2,
+          webhookSyncDebounceSeconds: 30
+        },
+        SIMPLEFIN: {
+          mode: "sandbox",
+          development: {
+            serverUrl: ""
+          },
+          transactionsInitialDays: 45,
+          automaticSyncConcurrency: 1
+        }
+      }),
+      get: vi.fn(),
+      update: vi.fn(),
+      ...(overrides.providerSettingsService as object | undefined)
     },
     plaidService: {
       provider: "PLAID" as const,
@@ -36,6 +178,7 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       createLinkToken: vi.fn(),
       createUpdateLinkToken: vi.fn(),
       exchangePublicToken: vi.fn(),
+      disconnectConnection: vi.fn(),
       refreshConnection: vi.fn(),
       syncAccountLink: vi.fn(),
       seedSandboxConnection: vi.fn(),
@@ -52,6 +195,7 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       enrollConnection: vi.fn(),
       reuseCachedConnection: vi.fn(),
       seedSandboxConnection: vi.fn(),
+      disconnectConnection: vi.fn(),
       refreshConnection: vi.fn(),
       syncAccountLink: vi.fn(),
       ...(overrides.tellerService as object | undefined)

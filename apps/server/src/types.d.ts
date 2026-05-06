@@ -1,7 +1,7 @@
-import "fastify";
+import "@fastify/session";
 
-declare module "fastify" {
-  interface Session {
+declare module "@fastify/session" {
+  interface FastifySessionObject {
     user?: {
       id: string;
       username: string;

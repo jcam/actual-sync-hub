@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "./app-context.js";
+import { providerSchemas } from "./services/provider-settings-service.js";
 import type { TellerWebhookEvent } from "./services/teller-service.js";
 
 const actualAccountIdParamsSchema = z.object({
@@ -13,6 +14,18 @@ const reviewCommitBodySchema = z.object({
 
 const connectionIdParamsSchema = z.object({
   id: z.string().min(1)
+});
+
+const providerParamsSchema = z.object({
+  provider: z.enum(["PLAID", "TELLER", "SIMPLEFIN"])
+});
+
+const externalSyncStatusQuerySchema = z.object({
+  accountId: z.string().min(1).optional()
+});
+
+const externalSyncBodySchema = z.object({
+  accountId: z.string().min(1)
 });
 
 const tellerWebhookBodySchema = z.object({
@@ -46,9 +59,35 @@ function assertAuthenticated(request: FastifyRequest, reply: FastifyReply) {
   return true;
 }
 
+async function assertActualBridgeAuthenticated(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  context: Pick<AppContext, "authService">
+) {
+  const header = request.headers["x-actual-token"];
+  const token = Array.isArray(header) ? header[0] : header;
+
+  if (!token || !(await context.authService.validateActualToken(token))) {
+    reply.status(401).send({
+      error: "Unauthorized",
+      reason: "Unauthorized"
+    });
+    return false;
+  }
+
+  return true;
+}
+
+function wrapActualBridgeResponse<T>(data: T) {
+  return {
+    status: "ok" as const,
+    data
+  };
+}
+
 export async function registerRoutes(
   app: FastifyInstance,
-  context: Pick<AppContext, "authService" | "appService" | "plaidService" | "simplefinService" | "tellerService">
+  context: Pick<AppContext, "authService" | "appService" | "plaidService" | "providerSettingsService" | "simplefinService" | "tellerService">
 ) {
   const registerReviewRoutes = (prefix: "migration" | "sync-review") => {
     app.get(`/api/account-links/:actualAccountId/${prefix}/preview`, async (request, reply) => {
@@ -80,17 +119,57 @@ export async function registerRoutes(
     ok: true
   }));
 
+  const registerExternalSyncBridgeRoutes = (prefix: "/external-sync" | "/actual/external-sync") => {
+    const handleStatus = async (request: FastifyRequest, reply: FastifyReply) => {
+      if (!(await assertActualBridgeAuthenticated(request, reply, context))) {
+        return;
+      }
+
+      const accountId =
+        typeof request.body === "object" &&
+        request.body &&
+        "accountId" in request.body &&
+        typeof request.body.accountId === "string"
+          ? request.body.accountId
+          : undefined;
+      const query = externalSyncStatusQuerySchema.parse({
+        ...(request.query ?? {}),
+        ...(accountId ? { accountId } : {})
+      });
+      return wrapActualBridgeResponse(
+        await context.appService.getExternalSyncBridgeStatus(query.accountId)
+      );
+    };
+
+    app.get(`${prefix}/status`, handleStatus);
+    app.post(`${prefix}/status`, handleStatus);
+
+    app.post(`${prefix}/sync`, async (request, reply) => {
+      if (!(await assertActualBridgeAuthenticated(request, reply, context))) {
+        return;
+      }
+
+      const body = externalSyncBodySchema.parse(request.body ?? {});
+      return wrapActualBridgeResponse(
+        await context.appService.runExternalSyncBridgeSync(body.accountId)
+      );
+    });
+  };
+
+  registerExternalSyncBridgeRoutes("/external-sync");
+  registerExternalSyncBridgeRoutes("/actual/external-sync");
+
   app.post("/api/webhooks/teller", async (request, reply) => {
     const body = tellerWebhookBodySchema.parse(request.body ?? {});
     const rawBody = JSON.stringify(request.body ?? {});
 
-    if (!context.tellerService.webhooksConfigured()) {
+    if (!(await context.tellerService.webhooksConfigured())) {
       return reply.status(503).send({
         error: "Teller webhooks are not configured"
       });
     }
 
-    if (!context.tellerService.verifyWebhookSignature(rawBody, request.headers["teller-signature"])) {
+    if (!(await context.tellerService.verifyWebhookSignature(rawBody, request.headers["teller-signature"]))) {
       return reply.status(401).send({
         error: "Invalid Teller webhook signature"
       });
@@ -152,6 +231,28 @@ export async function registerRoutes(
     return context.appService.getRuntimeInfo();
   });
 
+  app.get("/api/provider-settings/:provider", async (request, reply) => {
+    if (!assertAuthenticated(request, reply)) {
+      return;
+    }
+
+    const params = providerParamsSchema.parse(request.params);
+
+    return context.providerSettingsService.get(params.provider);
+  });
+
+  app.put("/api/provider-settings/:provider", async (request, reply) => {
+    if (!assertAuthenticated(request, reply)) {
+      return;
+    }
+
+    const params = providerParamsSchema.parse(request.params);
+    const schema = providerSchemas[params.provider];
+    const body = schema.parse(request.body ?? {});
+
+    return context.providerSettingsService.update(params.provider, body as never);
+  });
+
   app.get("/api/actual/bank-sync-links", async (request, reply) => {
     if (!assertAuthenticated(request, reply)) {
       return;
@@ -182,10 +283,7 @@ export async function registerRoutes(
       })
       .parse(request.body);
 
-    const connectionId = await context.plaidService.exchangePublicToken(body.publicToken, body.label);
-    return {
-      connectionId
-    };
+    return await context.plaidService.exchangePublicToken(body.publicToken, body.label);
   });
 
   app.post("/api/connections/simplefin/connect", async (request, reply) => {
@@ -200,9 +298,7 @@ export async function registerRoutes(
       })
       .parse(request.body);
 
-    return {
-      connectionId: await context.simplefinService.connectSetupToken(body)
-    };
+    return await context.simplefinService.connectSetupToken(body);
   });
 
   app.post("/api/connections/simplefin/reuse-cached", async (request, reply) => {
@@ -216,9 +312,7 @@ export async function registerRoutes(
       })
       .parse(request.body ?? {});
 
-    return {
-      connectionId: await context.simplefinService.reuseCachedConnection(body.label)
-    };
+    return await context.simplefinService.reuseCachedConnection(body.label);
   });
 
   app.post("/api/connections/simplefin/import-existing", async (request, reply) => {
@@ -240,7 +334,7 @@ export async function registerRoutes(
       return;
     }
 
-    return context.tellerService.getConnectConfig();
+    return await context.tellerService.getConnectConfig();
   });
 
   app.post("/api/connections/teller/enroll", async (request, reply) => {
@@ -258,10 +352,7 @@ export async function registerRoutes(
       })
       .parse(request.body);
 
-    const connectionId = await context.tellerService.enrollConnection(body);
-    return {
-      connectionId
-    };
+    return await context.tellerService.enrollConnection(body);
   });
 
   app.post("/api/connections/teller/reuse-cached", async (request, reply) => {
@@ -275,9 +366,7 @@ export async function registerRoutes(
       })
       .parse(request.body ?? {});
 
-    return {
-      connectionId: await context.tellerService.reuseCachedConnection(body.label)
-    };
+    return await context.tellerService.reuseCachedConnection(body.label);
   });
 
   app.post("/api/connections/teller/sandbox/seed-connection", async (request, reply) => {
@@ -291,9 +380,7 @@ export async function registerRoutes(
       })
       .parse(request.body ?? {});
 
-    return {
-      connectionId: await context.tellerService.seedSandboxConnection(body.label)
-    };
+    return await context.tellerService.seedSandboxConnection(body.label);
   });
 
   app.post("/api/connections/refresh-all", async (request, reply) => {
@@ -318,9 +405,7 @@ export async function registerRoutes(
       })
       .parse(request.body ?? {});
 
-    return {
-      connectionId: await context.plaidService.seedSandboxConnection(body.label)
-    };
+    return await context.plaidService.seedSandboxConnection(body.label);
   });
 
   app.post("/api/connections/:id/refresh", async (request, reply) => {

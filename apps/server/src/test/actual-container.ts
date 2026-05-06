@@ -71,27 +71,32 @@ async function bootstrapActualPassword(serverURL: string, password: string) {
 
 export async function startActualTestContainer({
   image = process.env.ACTUAL_TEST_IMAGE || "ghcr.io/actualbudget/actual:26.5.0-alpine",
-  port: requestedPort
+  port: requestedPort,
+  network
 }: {
   image?: string;
   port?: number;
+  network?: string;
 } = {}) {
   const port = requestedPort ?? (await getFreePort());
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "actual-live-data-"));
   const containerName = `actual-sync-test-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
-  await execFileAsync("docker", [
+  const runArgs = [
     "run",
     "--rm",
     "-d",
     "--name",
     containerName,
+    ...(network ? ["--network", network] : []),
     "-p",
     `${port}:5006`,
     "-v",
     `${dataDir}:/data`,
     image
-  ]);
+  ];
+
+  await execFileAsync("docker", runArgs);
 
   const serverURL = `http://127.0.0.1:${port}`;
 

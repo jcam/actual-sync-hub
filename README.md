@@ -18,6 +18,14 @@
 
 The scheduler runs inside a single Node process that polls for due links and executes sync jobs. This keeps deployment to one container while still allowing account-level schedules.
 
+## Actual integration
+
+- The app syncs transactions into Actual through `@actual-app/api`.
+- Native Actual external-sync metadata writeback is optional and disabled by default.
+- Enable it with `ACTUAL_EXTERNAL_SYNC_WRITEBACK_ENABLED=1` only when the connected Actual runtime exposes the external-sync account APIs, such as the `external-sync` branch currently checked out in the sibling `actual/` repo.
+- When enabled, linked provider accounts are written back into Actual as native `external` sync links so Actual can reflect that ownership in its own account metadata.
+- The app also exposes `/external-sync/status` and `/external-sync/sync` for an external-sync-capable Actual runtime to call when it wants native status or manual sync execution from this bridge.
+
 ## Live sandbox mode
 
 For interactive exploration against a real Actual server and real Plaid Sandbox Items, run:
@@ -36,7 +44,11 @@ What you get in this mode:
 - Extra Plaid sandbox buttons to seed additional test transactions on a connection
 - Separate Teller.io Connections page for enrollment, account discovery, and connection management
 
-The launcher prefers `PLAID_CLIENT_ID` and `PLAID_SECRET`, but will fall back to `PLAID_TEST_CLIENT_ID` and `PLAID_TEST_SECRET` if needed.
+## Configuration model
+
+- Core runtime wiring stays in `.env`.
+- Provider credentials and sync tuning live in the web UI on each provider page.
+- The optional provider env vars in `.env.example` are only for live-sandbox and live-test injection helpers.
 
 ## Plaid
 
@@ -47,6 +59,7 @@ The launcher prefers `PLAID_CLIENT_ID` and `PLAID_SECRET`, but will fall back to
 - Sync imports posted transactions into Actual through `importTransactions`.
 - Pending transaction handling follows Plaid's `pending_transaction_id` model, and removed Plaid transactions are reconciled back out of Actual by `imported_id`.
 - In sandbox-enabled development mode, Plaid connections can also be created directly through `/sandbox/public_token/create`, and custom test transactions can be added through `/sandbox/transactions/create`.
+- Plaid API credentials are saved in the app settings UI rather than read from runtime env.
 
 ## Teller.io
 
@@ -54,9 +67,9 @@ The launcher prefers `PLAID_CLIENT_ID` and `PLAID_SECRET`, but will fall back to
 - Teller Connect enrollment is wired end to end through the app.
 - Successful Teller enrollments are persisted as reusable provider connections and hydrated from Teller `/accounts` plus per-account `/balances`.
 - Teller transaction sync uses a date-window model with a configurable initial lookback plus overlap on later syncs.
-- Runtime config supports `TELLER_APP_ID`, `TELLER_ENV`, `TELLER_CERT_FILE`, `TELLER_KEY_FILE`, `TELLER_TRANSACTIONS_INITIAL_DAYS`, and `TELLER_TRANSACTIONS_OVERLAP_DAYS`.
+- Teller application credentials, environment, and mTLS PEM values are saved in the app settings UI.
 - Development and production Teller API access use mTLS credentials; sandbox does not require them.
-- Teller webhook consumption is supported at `POST /api/webhooks/teller` when `TELLER_WEBHOOK_SIGNING_SECRETS` is configured.
+- Teller webhook consumption is supported at `POST /api/webhooks/teller` when webhook signing secrets are saved in settings.
 - `transactions.processed` webhooks refresh Teller connections and auto-sync only enabled non-manual Teller links.
 - `enrollment.disconnected` webhooks mark the connection as disconnected and disable current links tied to that enrollment.
 - Optional local provider-fixture caching can persist the last successful Teller enrollment and SimpleFIN credentials for reuse in manual dev/live workflows.
@@ -65,8 +78,9 @@ The launcher prefers `PLAID_CLIENT_ID` and `PLAID_SECRET`, but will fall back to
 
 - SimpleFIN connections are created from one-time setup tokens.
 - Imported existing Actual `simpleFin` links can be matched against app-managed SimpleFIN connections.
-- SimpleFIN account refresh and transaction sync use a provider-managed date window.
+- SimpleFIN account refresh and transaction sync use a provider-managed date window with a configurable initial lookback.
 - Connection health distinguishes reconnect problems, upstream bank issues, and downstream sync failures.
+- SimpleFIN initial-window and concurrency settings are managed in the web UI.
 
 ## Cached dev fixtures
 
@@ -90,7 +104,7 @@ This cache is intended for manual dev/live workflows, not deterministic automate
 
 ## Getting started
 
-1. Copy `.env.example` to `.env` and fill in Actual and Plaid credentials.
+1. Copy `.env.example` to `.env` and fill in the required runtime wiring values.
 2. Install dependencies:
 
    ```bash

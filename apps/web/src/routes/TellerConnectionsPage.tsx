@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ConnectionDto, RuntimeInfoDto } from "@actual-sync/shared";
 import { api } from "../api";
+import { ProviderReadinessPanel } from "../components/ProviderReadinessPanel";
 import { TellerConnectionCard } from "../components/TellerConnectionCard";
 import { TellerLinkPanel } from "../components/TellerLinkPanel";
 import { getDisplayErrorMessage } from "../lib/errors";
+import { ProviderSettingsPanel } from "../components/ProviderSettingsPanel";
 
 export function TellerConnectionsPage() {
   const [connections, setConnections] = useState<ConnectionDto[]>([]);
@@ -36,32 +38,25 @@ export function TellerConnectionsPage() {
     () => connections.filter(connection => connection.provider === "TELLER"),
     [connections]
   );
+  const tellerRuntime = runtime?.providers.find(provider => provider.provider === "TELLER") ?? null;
 
   return (
     <div className="page-stack">
+      {tellerRuntime ? <ProviderReadinessPanel provider={tellerRuntime} /> : null}
+      {runtime ? (
+        <ProviderSettingsPanel
+          provider="TELLER"
+          label="Teller.io"
+          settings={runtime.settings.TELLER}
+          onSaved={load}
+        />
+      ) : null}
       <TellerLinkPanel
         enabled={Boolean(runtime?.teller.enabled)}
         mtlsConfigured={Boolean(runtime?.teller.mtlsConfigured)}
         onConnected={load}
         onRefreshAll={load}
       />
-
-      <section className="panel">
-        <p className="eyebrow">Environment</p>
-        <div className="status-copy">
-          <p className="muted">
-            Use this page to manage Teller connections, inspect discovered accounts, and check the runtime needed for
-            live Teller access.
-          </p>
-          {runtime ? (
-            <p className="muted">
-              Teller {runtime.teller.environment} ·{" "}
-              {runtime.teller.enabled ? "application configured" : "application not configured"} ·{" "}
-              {runtime.teller.mtlsConfigured ? "mTLS material present" : "mTLS material missing"}
-            </p>
-          ) : null}
-        </div>
-      </section>
 
       <section className="panel">
         <p className="eyebrow">Teller provider accounts</p>

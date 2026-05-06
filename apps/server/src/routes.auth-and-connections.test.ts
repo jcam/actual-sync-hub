@@ -214,7 +214,9 @@ describe("server auth and connection routes", () => {
   });
 
   it("reuses a cached SimpleFIN fixture for authenticated users", async () => {
-    const reuseCachedConnection = vi.fn().mockResolvedValue("conn-simplefin-cached");
+    const reuseCachedConnection = vi.fn().mockResolvedValue({
+      connectionId: "conn-simplefin-cached"
+    });
 
     const app = trackedApps.track(
       await createServer({
@@ -252,7 +254,9 @@ describe("server auth and connection routes", () => {
   });
 
   it("reuses a cached Teller fixture for authenticated users", async () => {
-    const reuseCachedConnection = vi.fn().mockResolvedValue("conn-teller-cached");
+    const reuseCachedConnection = vi.fn().mockResolvedValue({
+      connectionId: "conn-teller-cached"
+    });
 
     const app = trackedApps.track(
       await createServer({
@@ -290,7 +294,9 @@ describe("server auth and connection routes", () => {
   });
 
   it("exchanges a Plaid public token for an authenticated user", async () => {
-    const exchangePublicToken = vi.fn().mockResolvedValue("connection-99");
+    const exchangePublicToken = vi.fn().mockResolvedValue({
+      connectionId: "connection-99"
+    });
 
     const app = trackedApps.track(
       await createServer({
@@ -329,7 +335,10 @@ describe("server auth and connection routes", () => {
   });
 
   it("connects SimpleFIN and imports matching native Actual links", async () => {
-    const connectSetupToken = vi.fn().mockResolvedValue("connection-simplefin-1");
+    const connectSetupToken = vi.fn().mockResolvedValue({
+      connectionId: "connection-simplefin-1",
+      warning: "Connection saved, but some upstream institutions need attention."
+    });
     const importExistingSimpleFinLinks = vi.fn().mockResolvedValue({
       imported: 3,
       updated: 1,
@@ -373,7 +382,8 @@ describe("server auth and connection routes", () => {
 
     expect(connectResponse.statusCode).toBe(200);
     expect(connectResponse.json()).toEqual({
-      connectionId: "connection-simplefin-1"
+      connectionId: "connection-simplefin-1",
+      warning: "Connection saved, but some upstream institutions need attention."
     });
     expect(connectSetupToken).toHaveBeenCalledWith({
       setupToken: "c2V0dXAtdG9rZW4=",
@@ -439,7 +449,9 @@ describe("server auth and connection routes", () => {
       products: ["transactions", "balance"],
       selectAccount: "multiple"
     });
-    const enrollConnection = vi.fn().mockResolvedValue("connection-teller-1");
+    const enrollConnection = vi.fn().mockResolvedValue({
+      connectionId: "connection-teller-1"
+    });
 
     const app = trackedApps.track(
       await createServer({
@@ -496,7 +508,9 @@ describe("server auth and connection routes", () => {
   });
 
   it("seeds a Teller sandbox connection for authenticated users", async () => {
-    const seedSandboxConnection = vi.fn().mockResolvedValue("connection-teller-seeded");
+    const seedSandboxConnection = vi.fn().mockResolvedValue({
+      connectionId: "connection-teller-seeded"
+    });
 
     const app = trackedApps.track(
       await createServer({
@@ -573,6 +587,56 @@ describe("server auth and connection routes", () => {
     const getRuntimeInfo = vi.fn().mockResolvedValue({
       instanceLabel: "Live Sandbox",
       liveSandboxMode: true,
+      providers: [],
+      settings: {
+        PLAID: {
+          environment: "sandbox",
+          sandbox: {
+            clientId: "",
+            secret: ""
+          },
+          production: {
+            clientId: "",
+            secret: ""
+          },
+          countryCodes: ["US"],
+          products: ["transactions"],
+          transactionsDaysRequested: 365,
+          personalFinanceCategoryVersion: "v2",
+          automaticSyncConcurrency: 2
+        },
+        TELLER: {
+          environment: "sandbox",
+          sandbox: {
+            appId: "",
+            sandboxAccessToken: ""
+          },
+          development: {
+            appId: "",
+            certificatePem: "",
+            keyPem: "",
+            webhookSigningSecrets: []
+          },
+          production: {
+            appId: "",
+            certificatePem: "",
+            keyPem: "",
+            webhookSigningSecrets: []
+          },
+          transactionsInitialDays: 90,
+          transactionsOverlapDays: 10,
+          automaticSyncConcurrency: 2,
+          webhookSyncDebounceSeconds: 30
+        },
+        SIMPLEFIN: {
+          mode: "sandbox",
+          development: {
+            serverUrl: ""
+          },
+          transactionsInitialDays: 45,
+          automaticSyncConcurrency: 1
+        }
+      },
       plaid: {
         enabled: true,
         environment: "sandbox",
@@ -583,13 +647,21 @@ describe("server auth and connection routes", () => {
         environment: "sandbox",
         mtlsConfigured: false
       },
+      simplefin: {
+        enabled: true,
+        mode: "sandbox",
+        requiresSetupToken: true
+      },
       actual: {
         serverUrl: "http://127.0.0.1:5006",
-        budgetSyncIdConfigured: true
+        budgetSyncIdConfigured: true,
+        externalSyncWritebackEnabled: false
       }
     });
     const refreshAllConnections = vi.fn().mockResolvedValue(undefined);
-    const seedSandboxConnection = vi.fn().mockResolvedValue("conn-seeded");
+    const seedSandboxConnection = vi.fn().mockResolvedValue({
+      connectionId: "conn-seeded"
+    });
     const seedSandboxTransactions = vi.fn().mockResolvedValue({
       added: 3
     });
@@ -657,5 +729,197 @@ describe("server auth and connection routes", () => {
     });
     expect(seedTransactionsResponse.statusCode).toBe(200);
     expect(seedSandboxTransactions).toHaveBeenCalledWith("conn-seeded", 3);
+  });
+
+  it("reads and updates provider settings for authenticated users", async () => {
+    const get = vi.fn().mockResolvedValue({
+      environment: "sandbox",
+      sandbox: {
+        appId: "teller-app-id",
+        sandboxAccessToken: "",
+        webhookSigningSecrets: []
+      },
+      development: {
+        appId: "",
+        certificatePem: "",
+        keyPem: "",
+        webhookSigningSecrets: []
+      },
+      production: {
+        appId: "",
+        certificatePem: "",
+        keyPem: "",
+        webhookSigningSecrets: []
+      },
+      transactionsInitialDays: 90,
+      transactionsOverlapDays: 10,
+      automaticSyncConcurrency: 2,
+      webhookSyncDebounceSeconds: 30,
+      webhookToleranceSeconds: 180
+    });
+    const update = vi.fn().mockResolvedValue({
+      environment: "development",
+      sandbox: {
+        appId: "teller-app-id",
+        sandboxAccessToken: "sandbox-token",
+        webhookSigningSecrets: []
+      },
+      development: {
+        appId: "teller-app-id-updated",
+        certificatePem: "CERT",
+        keyPem: "KEY",
+        webhookSigningSecrets: ["secret-a", "secret-b"]
+      },
+      production: {
+        appId: "",
+        certificatePem: "",
+        keyPem: "",
+        webhookSigningSecrets: []
+      },
+      transactionsInitialDays: 60,
+      transactionsOverlapDays: 7,
+      automaticSyncConcurrency: 3,
+      webhookSyncDebounceSeconds: 45,
+      webhookToleranceSeconds: 180
+    });
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-settings",
+              username: "admin"
+            })
+          },
+          providerSettingsService: {
+            get,
+            update
+          }
+        })
+      })
+    );
+
+    const cookies = await loginAsAdmin(app);
+
+    const getResponse = await app.inject({
+      method: "GET",
+      url: "/api/provider-settings/TELLER",
+      cookies
+    });
+
+    expect(getResponse.statusCode).toBe(200);
+    expect(getResponse.json()).toEqual({
+      environment: "sandbox",
+      sandbox: {
+        appId: "teller-app-id",
+        sandboxAccessToken: "",
+        webhookSigningSecrets: []
+      },
+      development: {
+        appId: "",
+        certificatePem: "",
+        keyPem: "",
+        webhookSigningSecrets: []
+      },
+      production: {
+        appId: "",
+        certificatePem: "",
+        keyPem: "",
+        webhookSigningSecrets: []
+      },
+      transactionsInitialDays: 90,
+      transactionsOverlapDays: 10,
+      automaticSyncConcurrency: 2,
+      webhookSyncDebounceSeconds: 30,
+      webhookToleranceSeconds: 180
+    });
+    expect(get).toHaveBeenCalledWith("TELLER");
+
+    const updateResponse = await app.inject({
+      method: "PUT",
+      url: "/api/provider-settings/TELLER",
+      cookies,
+      payload: {
+        environment: "development",
+        sandbox: {
+          appId: "teller-app-id",
+          sandboxAccessToken: "sandbox-token",
+          webhookSigningSecrets: []
+        },
+        development: {
+          appId: "teller-app-id-updated",
+          certificatePem: "CERT",
+          keyPem: "KEY",
+          webhookSigningSecrets: ["secret-a", "secret-b"]
+        },
+        production: {
+          appId: "",
+          certificatePem: "",
+          keyPem: "",
+          webhookSigningSecrets: []
+        },
+        transactionsInitialDays: 60,
+        transactionsOverlapDays: 7,
+        automaticSyncConcurrency: 3,
+        webhookSyncDebounceSeconds: 45,
+        webhookToleranceSeconds: 180
+      }
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateResponse.json()).toEqual({
+      environment: "development",
+      sandbox: {
+        appId: "teller-app-id",
+        sandboxAccessToken: "sandbox-token",
+        webhookSigningSecrets: []
+      },
+      development: {
+        appId: "teller-app-id-updated",
+        certificatePem: "CERT",
+        keyPem: "KEY",
+        webhookSigningSecrets: ["secret-a", "secret-b"]
+      },
+      production: {
+        appId: "",
+        certificatePem: "",
+        keyPem: "",
+        webhookSigningSecrets: []
+      },
+      transactionsInitialDays: 60,
+      transactionsOverlapDays: 7,
+      automaticSyncConcurrency: 3,
+      webhookSyncDebounceSeconds: 45,
+      webhookToleranceSeconds: 180
+    });
+    expect(update).toHaveBeenCalledWith("TELLER", {
+      environment: "development",
+      sandbox: {
+        appId: "teller-app-id",
+        sandboxAccessToken: "sandbox-token",
+        webhookSigningSecrets: []
+      },
+      development: {
+        appId: "teller-app-id-updated",
+        certificatePem: "CERT",
+        keyPem: "KEY",
+        webhookSigningSecrets: ["secret-a", "secret-b"]
+      },
+      production: {
+        appId: "",
+        certificatePem: "",
+        keyPem: "",
+        webhookSigningSecrets: []
+      },
+      transactionsInitialDays: 60,
+      transactionsOverlapDays: 7,
+      automaticSyncConcurrency: 3,
+      webhookSyncDebounceSeconds: 45,
+      webhookToleranceSeconds: 180
+    });
   });
 });

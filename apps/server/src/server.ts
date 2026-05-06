@@ -5,7 +5,8 @@ import fastifySession from "@fastify/session";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import { ZodError } from "zod";
-import { createAppContext, type AppContext } from "./app-context.js";
+import { createAppContext } from './app-context.js';
+import type { AppContext } from './app-context.js';
 import { registerRoutes } from "./routes.js";
 
 export async function createServer({

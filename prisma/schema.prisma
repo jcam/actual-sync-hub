@@ -52,6 +52,13 @@ model User {
   updatedAt    DateTime @updatedAt
 }
 
+model ProviderSetting {
+  provider   Provider @id
+  settingsJson String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
 model Connection {
   id                    String              @id @default(cuid())
   provider              Provider
@@ -83,6 +90,10 @@ model ConnectionAccount {
   subtype          String?
   currentBalance   Float?
   availableBalance Float?
+  providerConnectionId String?
+  providerConnectionName String?
+  providerInstitutionId String?
+  providerInstitutionDomain String?
   rawJson          String?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
@@ -139,15 +150,7 @@ model ImportedTransaction {
   id                    String      @id @default(cuid())
   accountLinkId         String
   importedId            String
-  providerImportedId    String
-  actualAccountId       String
-  actualTransactionId   String?
-  transactionDate       String
-  amount                Float
-  payeeName             String
-  importedPayee         String?
   primarySourceCategory String?
-  sourceCategoryNamesJson String?
   appliedCategoryId     String?
   observedCategoryId    String?
   lastSeenAt            DateTime    @default(now())
@@ -155,7 +158,6 @@ model ImportedTransaction {
   updatedAt             DateTime    @updatedAt
   accountLink           AccountLink @relation(fields: [accountLinkId], references: [id], onDelete: Cascade)
 
-  @@unique([accountLinkId, providerImportedId])
+  @@unique([accountLinkId, importedId])
   @@index([accountLinkId, lastSeenAt])
-  @@index([actualAccountId, importedId])
 }

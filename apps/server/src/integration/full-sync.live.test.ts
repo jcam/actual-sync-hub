@@ -6,6 +6,7 @@ import { createAppService } from "../services/app-service.js";
 import { createAuthService } from "../services/auth.js";
 import { createActualService } from "../services/actual-service.js";
 import { createPlaidService } from "../services/plaid-service.js";
+import { createProviderSettingsService } from "../services/provider-settings-service.js";
 import { simplefinService } from "../services/simplefin-service.js";
 import { createTellerService } from "../services/teller-service.js";
 import { seedActualSandboxBudget } from "../dev/actual-fixture.js";
@@ -22,8 +23,8 @@ const liveEnabled =
   Boolean(process.env.PLAID_TEST_SECRET);
 
 const plaidTestConfig = {
-  clientId: process.env.PLAID_TEST_CLIENT_ID || "",
-  secret: process.env.PLAID_TEST_SECRET || "",
+  clientId: "",
+  secret: "",
   environment: (process.env.PLAID_TEST_ENV || "sandbox") as "sandbox" | "production",
   countryCodes: ["US"],
   products: ["transactions"],
@@ -99,19 +100,13 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
         liveSandboxMode: true,
         actualServerUrl: container.serverURL,
         actualBudgetSyncIdConfigured: true,
-        plaidEnabled: true,
-        plaidEnvironment: "sandbox",
-        plaidSandboxToolsEnabled: true,
-        plaidAutomaticSyncConcurrency: 2,
-        tellerEnabled: false,
-        tellerEnvironment: "sandbox",
-        tellerMtlsConfigured: false,
-        tellerWebhookSyncDebounceSeconds: 30,
-        tellerAutomaticSyncConcurrency: 1,
-        simplefinAutomaticSyncConcurrency: 2,
+        actualExternalSyncWritebackEnabled: false,
         automaticSyncBackoffBaseMinutes: 5,
         automaticSyncBackoffMaxMinutes: 60
       }
+    });
+    const providerSettingsService = createProviderSettingsService({
+      prisma
     });
     const authService = createAuthService({
       prisma
@@ -125,6 +120,7 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
         prisma,
         actualService,
         plaidService,
+        providerSettingsService,
         simplefinService,
         tellerService,
         appService,
@@ -144,6 +140,29 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
     expect(login.statusCode).toBe(200);
     const sessionCookie = login.cookies.find(cookie => cookie.name.startsWith("sessionId"));
     const cookies = sessionCookie ? { [sessionCookie.name]: sessionCookie.value } : {};
+
+    const updatePlaidSettingsResponse = await app.inject({
+      method: "PUT",
+      url: "/api/provider-settings/PLAID",
+      cookies,
+      payload: {
+        environment: plaidTestConfig.environment,
+        sandbox: {
+          clientId: plaidTestConfig.environment === "sandbox" ? process.env.PLAID_TEST_CLIENT_ID || "" : "",
+          secret: plaidTestConfig.environment === "sandbox" ? process.env.PLAID_TEST_SECRET || "" : ""
+        },
+        production: {
+          clientId: plaidTestConfig.environment === "production" ? process.env.PLAID_TEST_CLIENT_ID || "" : "",
+          secret: plaidTestConfig.environment === "production" ? process.env.PLAID_TEST_SECRET || "" : ""
+        },
+        countryCodes: plaidTestConfig.countryCodes,
+        products: plaidTestConfig.products,
+        transactionsDaysRequested: plaidTestConfig.transactionsDaysRequested,
+        personalFinanceCategoryVersion: plaidTestConfig.personalFinanceCategoryVersion,
+        automaticSyncConcurrency: 2
+      }
+    });
+    expect(updatePlaidSettingsResponse.statusCode).toBe(200);
 
     const seedConnectionResponse = await app.inject({
       method: "POST",
