@@ -1,0 +1,145 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "import", "jsx-a11y"],
+  "jsPlugins": ["./tools/eslint-plugin-actual-sync/index.cjs"],
+  "env": {
+    "browser": true,
+    "node": true,
+    "vitest": true
+  },
+  "globals": {
+    "vi": "readonly"
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/generated/**",
+    "**/coverage/**"
+  ],
+  "overrides": [
+    {
+      "files": ["*.config.ts", "prisma.config.ts", "vitest.config.ts", "apps/web/vite.config.ts"],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    },
+    {
+      "files": ["**/*.d.ts", "apps/web/src/lib/teller-connect.ts"],
+      "rules": {
+        "typescript/consistent-type-definitions": "off"
+      }
+    }
+  ],
+  "rules": {
+    "actual-sync/enforce-boundaries": "error",
+    "actual-sync/no-extraneous-dependencies": "error",
+    "actual-sync/no-react-default-import": "error",
+
+    "jsx-a11y/alt-text": "error",
+    "jsx-a11y/anchor-has-content": "error",
+    "jsx-a11y/anchor-is-valid": ["error", { "aspects": ["noHref", "invalidHref"] }],
+    "jsx-a11y/aria-activedescendant-has-tabindex": "error",
+    "jsx-a11y/aria-props": "error",
+    "jsx-a11y/aria-proptypes": "error",
+    "jsx-a11y/aria-role": ["error", { "ignoreNonDOM": true }],
+    "jsx-a11y/aria-unsupported-elements": "error",
+    "jsx-a11y/heading-has-content": "error",
+    "jsx-a11y/iframe-has-title": "error",
+    "jsx-a11y/img-redundant-alt": "error",
+    "jsx-a11y/no-access-key": "error",
+    "jsx-a11y/no-autofocus": ["error", { "ignoreNonDOM": true }],
+    "jsx-a11y/no-distracting-elements": "error",
+    "jsx-a11y/no-redundant-roles": "error",
+    "jsx-a11y/role-has-required-aria-props": "error",
+    "jsx-a11y/role-supports-aria-props": "error",
+    "jsx-a11y/scope": "error",
+
+    "typescript/await-thenable": "error",
+    "typescript/ban-ts-comment": "error",
+    "typescript/consistent-type-definitions": ["error", "type"],
+    "typescript/consistent-type-imports": [
+      "error",
+      {
+        "prefer": "type-imports",
+        "fixStyle": "inline-type-imports"
+      }
+    ],
+    "typescript/no-explicit-any": "error",
+    "typescript/no-for-in-array": "error",
+    "typescript/no-implied-eval": "error",
+    "typescript/no-misused-promises": [
+      "error",
+      {
+        "checksVoidReturn": {
+          "attributes": false
+        }
+      }
+    ],
+    "typescript/no-floating-promises": "error",
+    "typescript/no-restricted-types": [
+      "error",
+      {
+        "types": {
+          "FunctionComponent": {
+            "message": "Type the props argument directly and let TypeScript infer the component return type."
+          },
+          "FC": {
+            "message": "Type the props argument directly and let TypeScript infer the component return type."
+          }
+        }
+      }
+    ],
+    "typescript/no-var-requires": "error",
+    "typescript/require-array-sort-compare": "error",
+    "typescript/restrict-template-expressions": "error",
+    "typescript/switch-exhaustiveness-check": "error",
+    "typescript/unbound-method": "error",
+
+    "import/first": "error",
+    "import/no-amd": "error",
+    "import/no-default-export": "error",
+    "import/no-duplicates": ["error", { "prefer-inline": false }],
+    "import/no-webpack-loader-syntax": "error",
+
+    "react/exhaustive-deps": "error",
+    "react/jsx-boolean-value": "error",
+    "react/jsx-curly-brace-presence": "error",
+    "react/jsx-filename-extension": [
+      "error",
+      {
+        "extensions": [".jsx", ".tsx"],
+        "allow": "as-needed"
+      }
+    ],
+    "react/jsx-no-comment-textnodes": "error",
+    "react/jsx-no-duplicate-props": "error",
+    "react/jsx-no-target-blank": "error",
+    "react/jsx-no-undef": "error",
+    "react/jsx-no-useless-fragment": "error",
+    "react/jsx-pascal-case": ["error", { "allowAllCaps": true }],
+    "react/rules-of-hooks": "error",
+    "react/self-closing-comp": "error",
+    "react/style-prop-object": "error",
+
+    "eslint/array-callback-return": "error",
+    "eslint/curly": ["error", "multi-line", "consistent"],
+    "eslint/eqeqeq": ["error", "smart"],
+    "eslint/no-array-constructor": "error",
+    "eslint/no-empty-function": "error",
+    "eslint/no-eval": "error",
+    "eslint/no-extra-bind": "error",
+    "eslint/no-fallthrough": "error",
+    "eslint/no-template-curly-in-string": "error",
+    "eslint/no-useless-concat": "error",
+    "eslint/no-useless-escape": "error",
+    "eslint/no-useless-rename": [
+      "error",
+      {
+        "ignoreDestructuring": false,
+        "ignoreImport": false,
+        "ignoreExport": false
+      }
+    ],
+    "eslint/no-var": "error",
+    "eslint/unicode-bom": ["error", "never"]
+  }
+}

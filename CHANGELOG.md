@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- No unreleased changes yet.
+
+## [0.13.0] - 2026-05-06
+
+### Added
+- Type-aware `oxlint` plus `oxfmt` as first-class repo linting and formatting tools.
+- Local `actual-sync` lint rules for dependency hygiene, React default-import avoidance, and architectural boundary enforcement.
+
+### Changed
+- Upgraded root lint scripts so `npm run lint` now performs a real code-quality pass before workspace typechecks.
+- Brought the repo into compliance with stricter type, promise, import, and boundary rules modeled after the main Actual repo.
+- Rewrote [AGENTS.md](actual-sync/AGENTS.md) so its build, test, and workflow guidance matches this repo instead of the main Actual monorepo.
+
+## [0.12.0] - 2026-05-06
+
+### Added
+- Explicit SimpleFIN provider-subconnection and institution metadata in the app model, including institution-grouped managed-connection UI.
+- Live SimpleFIN account-management links from the managed-connections view back to the provider's own `/my-account` page.
+- Provider-common notes normalization that intelligently carries bank description and memo text into Actual notes without duplicating the chosen payee.
+
+### Changed
+- Saved valid SimpleFIN credentials even when upstream institutions report attention/auth problems, returning warnings instead of rejecting the whole connect flow.
+- Fixed sync-review preview so it no longer advances provider sync state ahead of commit.
+- Improved live SimpleFIN, Teller, and Plaid transaction handling by:
+  - using Plaid `original_description`
+  - mapping Teller and SimpleFIN notes through the shared normalization helper
+  - grouping SimpleFIN connection health by institution instead of a single undifferentiated warning block
+- Reduced the local imported-transaction store to the minimum metadata needed for sync/category learning instead of keeping a duplicate transaction ledger.
+
+## [0.11.0] - 2026-05-06
+
+### Added
+- Provider settings as a persisted in-app configuration surface, with dedicated settings panels and readiness panels on the Plaid, Teller.io, and SimpleFIN pages.
+- Mode-specific provider settings for Plaid, Teller, and SimpleFIN, including sandbox/development/production selection where applicable.
+- Containerized `dev:live-sandbox` support via [Dockerfile.dev](actual-sync/Dockerfile.dev), with scripted startup of Actual, the dev app container, and sandbox seeding.
+
+### Changed
+- Moved provider credentials and provider tuning out of runtime `.env` fallbacks and into the app-managed provider settings model.
+- Updated the live sandbox launcher and live integration harnesses to inject provider settings through the API instead of configuring the app process directly through env vars.
+- Shifted provider setup defaults and docs so `.env` is now primarily for app/runtime wiring, while provider behavior and credentials are managed through the web UI.
+
+## [0.10.0] - 2026-05-05
+
+### Added
+- Optional native Actual external-sync metadata writeback behind `ACTUAL_EXTERNAL_SYNC_WRITEBACK_ENABLED`, using the external-sync account APIs exposed by the checked-out Actual `external-sync` branch.
+- External-sync bridge endpoints that expose app-managed status and manual sync execution for Actual to call through the checked-out `external-sync` branch.
+- Unified provider readiness surfacing across Plaid, Teller.io, and SimpleFIN, including shared readiness DTOs and frontend status panels.
+- Explicit provider disconnect actions for Plaid and Teller alongside the existing SimpleFIN disconnect flow.
+
+### Changed
+- Updated provider disconnect handling so connections are retired consistently, active links are disabled, and reconnect-required health is persisted without conflating provider teardown with sync failure.
+- Wired external-sync writeback into account-link save, provider refresh, sync completion, and imported SimpleFIN-link activation flows so native Actual metadata stays aligned when the feature gate is enabled.
+- Documented the external-sync writeback gate and its runtime requirements in the environment template and README.
+
 ## [0.9.0] - 2026-05-05
 
 ### Added
@@ -106,7 +162,3 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Initial monorepo scaffold with a Fastify server, React web app, shared TypeScript package, Prisma schema, and Docker support.
 - Local username/password auth, SQLite persistence, and basic protected web UI.
 - Repository hygiene files, including `.gitignore`, `.dockerignore`, `LICENSE`, `CHANGELOG.md`, and `THIRD_PARTY_NOTICES.md`.
-
-## [Unreleased]
-
-- No unreleased changes yet.

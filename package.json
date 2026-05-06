@@ -1,6 +1,6 @@
 {
   "name": "actual-sync-hub",
-  "version": "0.9.0",
+  "version": "0.13.0",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -14,10 +14,15 @@
     "dev": "concurrently -n server,web -c blue,magenta \"npm run dev -w apps/server\" \"npm run dev -w apps/web\"",
     "dev:live-sandbox": "tsx scripts/dev-live-sandbox.ts",
     "build": "npm run build -w packages/shared && npm run build -w apps/web && npm run build -w apps/server",
-    "lint": "npm run build -w packages/shared && npm run lint -w apps/server && npm run lint -w apps/web",
+    "format:check": "oxfmt --check .",
+    "format:fix": "oxfmt .",
+    "lint:code": "oxlint --type-aware --quiet",
+    "lint:fix": "oxlint --fix --type-aware --quiet",
+    "lint:types": "npm run build -w packages/shared && npm run lint -w apps/server && npm run lint -w apps/web",
+    "lint": "npm run lint:code && npm run lint:types",
     "test": "ACTUAL_TEST_RUN_LIVE=0 PLAID_TEST_RUN_LIVE=0 FULL_SYNC_TEST_RUN_LIVE=0 vitest run",
     "test:actual-live": "vitest run apps/server/src/services/actual-service.live.test.ts",
-    "test:full-live": "FULL_SYNC_TEST_RUN_LIVE=1 PLAID_SANDBOX_TOOLS_ENABLED=1 LIVE_SANDBOX_MODE=1 vitest run apps/server/src/integration/full-sync.live.test.ts",
+    "test:full-live": "FULL_SYNC_TEST_RUN_LIVE=1 LIVE_SANDBOX_MODE=1 vitest run apps/server/src/integration/full-sync.live.test.ts",
     "test:plaid-live": "vitest run apps/server/src/services/plaid-service.live.test.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -26,6 +31,7 @@
     "postinstall": "prisma generate && npm run build -w packages/shared"
   },
   "devDependencies": {
+    "@oxlint/plugins": "^1.60.0",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
@@ -33,7 +39,11 @@
     "@vitejs/plugin-react": "^6.0.1",
     "@vitest/coverage-v8": "^4.1.5",
     "concurrently": "^9.2.1",
+    "dotenv": "^17.4.2",
     "jsdom": "^29.1.1",
+    "oxfmt": "^0.44.0",
+    "oxlint": "^1.59.0",
+    "oxlint-tsgolint": "^0.22.1",
     "prisma": "^7.8.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
