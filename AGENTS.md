@@ -12,7 +12,7 @@ This repo is a small TypeScript monorepo, not the main Actual repo.
   - `apps/web` - React + Vite frontend
   - `packages/shared` - shared DTOs/types
 - Database: SQLite via Prisma
-- Providers: Plaid, Teller, SimpleFIN
+- Providers: Plaid, Teller, SimpleFIN, Home Values
 
 Do not assume `yarn`, `lage`, Playwright, Electron, i18n generation, or the main Actual repo’s package structure. Those do not apply here.
 
@@ -129,6 +129,56 @@ Current model:
 
 Do not reintroduce provider runtime env fallbacks unless explicitly asked.
 
+## Current provider notes
+
+### Home Values
+
+Home Values is a non-transaction provider implemented via synthetic valuation transactions in Actual.
+
+- It does not rely on a native non-transaction account type in Actual.
+- It is intended primarily for off-budget asset tracking and net worth calculations.
+- Supported sources:
+  - `REDFIN`
+  - `MOVOTO`
+  - `HOMES_COM`
+  - `TRULIA`
+- `Zillow` was removed from the Home Values flow and should not be reintroduced casually.
+
+Current fetch-method model:
+
+- Fetch method is configured per site in provider settings.
+- Supported methods:
+  - `curl`
+  - `wget`
+  - `node_fetch`
+  - `disabled`
+- Current practical defaults:
+  - `Redfin: curl`
+  - `Movoto: curl`
+  - `Homes.com: wget`
+  - `Trulia: wget`
+
+Important runtime caveat:
+
+- Anti-bot behavior differs materially by HTTP client.
+- `node fetch`, `curl`, and `wget` do not behave the same against property sites.
+- If Home Values fetching behaves differently in sandbox vs local shell, check client choice before assuming the parser is wrong.
+- The dev sandbox image must include `ca-certificates` for `curl` HTTPS fetches to work.
+
+Scheduling rules:
+
+- Home Values links only meaningfully use `MANUAL` or `WEEKLY`.
+- Weekly refreshes are spread automatically across the week.
+- Scheduled fetches should avoid polling the same site more than about once an hour across properties.
+- Average-mode properties may continue using cached source values after scheduled fetch failures, and stale/failure state should remain visible.
+
+## Actual compatibility notes
+
+- External-sync support is capability-detected against the installed `@actual-app/api`.
+- Do not assume every Actual runtime has the newest external-sync APIs.
+- Older Actual builds may fall back for account metadata reads.
+- Prefer public Actual API surfaces where available; avoid reintroducing brittle internal query paths unless explicitly necessary.
+
 ## Build and frontend notes
 
 - Server build: `tsc -p apps/server/tsconfig.json`
@@ -158,6 +208,41 @@ There is no React Native, Electron desktop app, or main-Actual component library
   - prefer `import type` where appropriate
   - no React default-import member usage like `React.useState`
   - no default exports in normal source files
+
+## Validation and error handling
+
+- Prefer local validation for obvious user-input mistakes before submit.
+- Shared API validation errors should flow through:
+  - [apps/web/src/lib/errors.ts](actual-sync/apps/web/src/lib/errors.ts)
+- Server-side Zod failures are intentionally surfaced as human-readable field messages rather than a raw generic `Invalid request`.
+- When tightening validation, update both:
+  - the relevant page/component tests
+  - the route/service tests if request parsing or server-side normalization changed
+
+## Where to look first
+
+- Main orchestration and account-link behavior:
+  - [apps/server/src/services/app-service.ts](actual-sync/apps/server/src/services/app-service.ts)
+- Actual runtime bridge:
+  - [apps/server/src/services/actual-worker.ts](actual-sync/apps/server/src/services/actual-worker.ts)
+- Home Values fetch and sync logic:
+  - [apps/server/src/services/home-values-service.ts](actual-sync/apps/server/src/services/home-values-service.ts)
+- Provider settings schemas/defaults:
+  - [apps/server/src/services/provider-settings-service.ts](actual-sync/apps/server/src/services/provider-settings-service.ts)
+- Home Values UI:
+  - [apps/web/src/routes/HomeValuesConnectionsPage.tsx](actual-sync/apps/web/src/routes/HomeValuesConnectionsPage.tsx)
+- Shared DTOs/settings:
+  - [packages/shared/src/connections.ts](actual-sync/packages/shared/src/connections.ts)
+  - [packages/shared/src/settings.ts](actual-sync/packages/shared/src/settings.ts)
+
+## Release hygiene
+
+- For user-visible changes, update:
+  - `CHANGELOG.md`
+  - root `package.json`
+  - workspace `package.json` files
+  - `package-lock.json`
+- When changing shared DTOs, rebuild `packages/shared` before trusting downstream typecheck results.
 
 ## Recommended validation before finishing
 
