@@ -54,6 +54,17 @@ export type SimpleFinProviderSettingsDto = {
   automaticSyncConcurrency: number;
 }
 
+export type SaltEdgeEnvironment = "sandbox" | "test" | "production";
+
+export type SaltEdgeProviderSettingsDto = {
+  environment: SaltEdgeEnvironment;
+  appId: string;
+  secret: string;
+  consentDays: number;
+  transactionsFetchDays: number;
+  automaticSyncConcurrency: number;
+};
+
 export type HomeValuesProviderSettingsDto = {
   automaticSyncConcurrency: number;
   redfinFetchMethod: HomeValuesFetchMethod;
@@ -66,6 +77,7 @@ export type ProviderSettingsDto = {
   PLAID: PlaidProviderSettingsDto;
   TELLER: TellerProviderSettingsDto;
   SIMPLEFIN: SimpleFinProviderSettingsDto;
+  SALT_EDGE: SaltEdgeProviderSettingsDto;
   HOME_VALUES?: HomeValuesProviderSettingsDto;
 };
 
@@ -75,6 +87,8 @@ export type ProviderSettingsByProviderDto<T extends Provider = Provider> = T ext
     ? TellerProviderSettingsDto
     : T extends "SIMPLEFIN"
       ? SimpleFinProviderSettingsDto
+      : T extends "SALT_EDGE"
+        ? SaltEdgeProviderSettingsDto
       : HomeValuesProviderSettingsDto;
 
 export function getActivePlaidEnvironmentSettings(settings: PlaidProviderSettingsDto) {
@@ -87,4 +101,8 @@ export function getActiveTellerEnvironmentSettings(settings: TellerProviderSetti
 
 export function getActiveSimpleFinModeSettings(settings: SimpleFinProviderSettingsDto) {
   return settings.mode === "development" ? settings.development : null;
+}
+
+export function getSaltEdgeIncludeSandboxes(settings: Pick<SaltEdgeProviderSettingsDto, "environment">) {
+  return settings.environment === "sandbox";
 }

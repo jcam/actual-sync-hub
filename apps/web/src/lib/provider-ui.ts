@@ -12,6 +12,8 @@ export function getProviderConnectionsPath(provider: Provider | null | undefined
       return "/teller-connections";
     case "SIMPLEFIN":
       return "/simplefin-connections";
+    case "SALT_EDGE":
+      return "/saltedge-connections";
     case "HOME_VALUES":
       return "/home-values-connections";
     default:
@@ -31,6 +33,8 @@ export function getProviderConnectionsLabel(provider: Provider | null | undefine
       return "Teller.io Connections";
     case "SIMPLEFIN":
       return "SimpleFIN Connections";
+    case "SALT_EDGE":
+      return "Salt Edge Connections";
     case "HOME_VALUES":
       return "Home Values";
     default:

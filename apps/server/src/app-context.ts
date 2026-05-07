@@ -14,6 +14,8 @@ import { createProviderSettingsService } from './services/provider-settings-serv
 import type { ProviderSettingsService } from './services/provider-settings-service.js';
 import { simplefinService } from './services/simplefin-service.js';
 import type { SimpleFinService } from './services/simplefin-service.js';
+import { saltEdgeService } from './services/saltedge-service.js';
+import type { SaltEdgeService } from './services/saltedge-service.js';
 import { tellerService } from './services/teller-service.js';
 import type { TellerService } from './services/teller-service.js';
 
@@ -25,6 +27,7 @@ export type AppContext = {
   plaidService: PlaidService;
   providerSettingsService: ProviderSettingsService;
   simplefinService: SimpleFinService;
+  saltEdgeService: SaltEdgeService;
   tellerService: TellerService;
   actualService: ActualService;
 }
@@ -35,6 +38,7 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
   const homeValues = overrides.homeValuesService ?? createHomeValuesService({ prisma: database, providerSettings: settings });
   const plaid = overrides.plaidService ?? plaidService;
   const simplefin = overrides.simplefinService ?? simplefinService;
+  const saltEdge = overrides.saltEdgeService ?? saltEdgeService;
   const teller = overrides.tellerService ?? tellerService;
 
   return {
@@ -44,6 +48,7 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
     plaidService: plaid,
     providerSettingsService: settings,
     simplefinService: simplefin,
+    saltEdgeService: saltEdge,
     tellerService: teller,
     authService: overrides.authService ?? createAuthService({ prisma: database }),
     appService:
@@ -55,6 +60,7 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
         plaidService: plaid,
         providerSettingsService: settings,
         simplefinService: simplefin,
+        saltEdgeService: saltEdge,
         tellerService: teller
       })
   };

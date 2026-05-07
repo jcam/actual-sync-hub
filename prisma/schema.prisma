@@ -11,6 +11,7 @@ enum Provider {
   PLAID
   TELLER
   SIMPLEFIN
+  SALT_EDGE
   HOME_VALUES
 }
 

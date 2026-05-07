@@ -105,7 +105,7 @@ describe("simplefin service", () => {
         method: "POST"
       })
     );
-    expect(String(fetchImpl.mock.calls[1]?.[0])).toContain("/accounts?balances-only=1");
+    expect(String(fetchImpl.mock.calls[1]?.[0])).toContain("/accounts?version=2&balances-only=1");
   });
 
   it("persists a SimpleFIN connection even when upstream institutions need attention", async () => {
@@ -145,7 +145,7 @@ describe("simplefin service", () => {
                 }
               }
             ],
-            errors: ["Connection to Capital One may need attention."]
+            errlist: [{ msg: "Connection to Capital One may need attention." }]
           }),
           {
             status: 200,
@@ -304,6 +304,7 @@ describe("simplefin service", () => {
     const result = await service.syncAccountLink(link.id);
 
     expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("/accounts?");
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("version=2");
     expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("account=acct-1");
     expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("pending=1");
     expect(result.removedImportedIds).toEqual([]);
@@ -460,6 +461,7 @@ describe("simplefin service", () => {
     const outcomes = await service.syncAccountLinks?.([link1.id, link2.id]);
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("version=2");
     expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("account=acct-1");
     expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("account=acct-2");
     expect(outcomes?.get(link1.id)?.result?.transactions).toEqual([

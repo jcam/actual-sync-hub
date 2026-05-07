@@ -70,7 +70,6 @@ type SimpleFinConnectionRecord = {
 type SimpleFinAccountsResponse = {
   accounts?: SimpleFinAccount[];
   connections?: SimpleFinConnectionRecord[];
-  errors?: string[];
   errlist?: Array<{
     msg?: string;
     message?: string;
@@ -163,6 +162,7 @@ async function fetchSimpleFinAccounts({
 }) {
   const { baseUrl, username, password } = parseAccessKey(accessKey);
   const params = new URLSearchParams();
+  params.set("version", "2");
 
   if (balancesOnly) {
     params.set("balances-only", "1");
@@ -231,14 +231,13 @@ function parseConnectionMetadata(json: string | null | undefined) {
 }
 
 function formatSimpleFinErrors(payload: SimpleFinAccountsResponse) {
-  const legacyErrors = Array.isArray(payload.errors) ? payload.errors.filter(Boolean) : [];
   const structuredErrors = Array.isArray(payload.errlist)
     ? payload.errlist
         .map(error => error.msg || error.message || error.code)
         .filter((value): value is string => Boolean(value))
     : [];
 
-  return [...new Set([...legacyErrors, ...structuredErrors])];
+  return [...new Set(structuredErrors)];
 }
 
 function buildConnectionAccountRows(connectionId: string, response: SimpleFinAccountsResponse) {

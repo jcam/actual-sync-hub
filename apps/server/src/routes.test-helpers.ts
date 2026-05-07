@@ -83,6 +83,14 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
             transactionsInitialDays: 45,
             automaticSyncConcurrency: 1
           },
+          SALT_EDGE: {
+            environment: "test",
+            appId: "",
+            secret: "",
+            consentDays: 90,
+            transactionsFetchDays: 90,
+            automaticSyncConcurrency: 2
+          },
           HOME_VALUES: {
             automaticSyncConcurrency: 1,
             redfinFetchMethod: "curl",
@@ -106,6 +114,11 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           mode: "sandbox",
           requiresSetupToken: true
         },
+        saltEdge: {
+          enabled: false,
+          environment: "test",
+          includeSandboxes: true
+        },
         actual: {
           serverUrl: "http://localhost:5006",
           budgetSyncIdConfigured: true,
@@ -116,6 +129,8 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       listActualAccounts: vi.fn(),
       listActualBankSyncLinks: vi.fn(),
       importExistingSimpleFinLinks: vi.fn(),
+      createSaltEdgeConnectSession: vi.fn(),
+      finalizeSaltEdgeConnection: vi.fn(),
       createConnectionReauthSession: vi.fn(),
       createHomeValueConnection: vi.fn(),
       updateHomeValueConnection: vi.fn(),
@@ -184,6 +199,14 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           transactionsInitialDays: 45,
           automaticSyncConcurrency: 1
         },
+        SALT_EDGE: {
+          environment: "test",
+          appId: "",
+          secret: "",
+          consentDays: 90,
+          transactionsFetchDays: 90,
+          automaticSyncConcurrency: 2
+        },
         HOME_VALUES: {
           automaticSyncConcurrency: 1,
           redfinFetchMethod: "curl",
@@ -233,6 +256,17 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       refreshConnection: vi.fn(),
       syncAccountLink: vi.fn(),
       ...(overrides.simplefinService as object | undefined)
+    },
+    saltEdgeService: {
+      provider: "SALT_EDGE" as const,
+      isConfigured: vi.fn().mockReturnValue(false),
+      createConnectSession: vi.fn(),
+      finalizeConnection: vi.fn(),
+      createReauthSession: vi.fn(),
+      disconnectConnection: vi.fn(),
+      refreshConnection: vi.fn(),
+      syncAccountLink: vi.fn(),
+      ...(overrides.saltEdgeService as object | undefined)
     },
     homeValuesService: {
       provider: "HOME_VALUES" as const,

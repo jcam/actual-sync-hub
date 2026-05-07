@@ -28,6 +28,10 @@ export function ConnectionReauthButton({
     ConnectionReauthSessionDto,
     { mode: "plaid_update" }
   > | null>(null);
+  const [saltEdgeSession, setSaltEdgeSession] = useState<Extract<
+    ConnectionReauthSessionDto,
+    { mode: "saltedge_connect" }
+  > | null>(null);
 
   const plaid = usePlaidLink({
     token: plaidSession?.linkToken ?? null,
@@ -63,6 +67,76 @@ export function ConnectionReauthButton({
       plaid.open();
     }
   }, [plaid.ready, plaid, plaidSession]);
+
+  useEffect(() => {
+    if (!saltEdgeSession) {
+      return;
+    }
+
+    const listener = (event: MessageEvent) => {
+      if (!event.origin.includes("saltedge.com")) {
+        return;
+      }
+
+      let payload: {
+        data?: {
+          stage?: string;
+          connection_id?: string;
+          secret?: string;
+          error_class?: string;
+          error_message?: string;
+        };
+      };
+
+      if (typeof event.data === "string") {
+        try {
+          payload = JSON.parse(event.data) as typeof payload;
+        } catch {
+          return;
+        }
+      } else if (typeof event.data === "object" && event.data) {
+        payload = event.data as typeof payload;
+      } else {
+        return;
+      }
+
+      const stage = payload.data?.stage;
+      if (!stage || stage === "fetching") {
+        return;
+      }
+
+      if (stage === "error") {
+        setError(payload.data?.error_message || payload.data?.error_class || "Salt Edge reauthentication failed.");
+        setSaltEdgeSession(null);
+        setBusy(false);
+        return;
+      }
+
+      if (stage !== "success" || !payload.data?.connection_id) {
+        return;
+      }
+
+      const completedConnectionId = payload.data.connection_id;
+
+      void (async () => {
+        try {
+          await api.finalizeSaltEdgeConnection({
+            connectionId: completedConnectionId,
+            connectionSecret: payload.data?.secret || undefined
+          });
+          await onCompleted?.();
+        } catch (refreshError) {
+          setError(getErrorMessage(refreshError));
+        } finally {
+          setSaltEdgeSession(null);
+          setBusy(false);
+        }
+      })();
+    };
+
+    window.addEventListener("message", listener);
+    return () => window.removeEventListener("message", listener);
+  }, [onCompleted, saltEdgeSession]);
 
   if (provider === "SIMPLEFIN" || provider === "HOME_VALUES") {
     return null;
@@ -107,6 +181,11 @@ export function ConnectionReauthButton({
               return;
             }
 
+            if (session.mode === "saltedge_connect") {
+              setSaltEdgeSession(session);
+              return;
+            }
+
             setError(session.message);
             setBusy(false);
           } catch (sessionError) {
@@ -117,6 +196,32 @@ export function ConnectionReauthButton({
       >
         {busy ? "Waiting on provider..." : label}
       </button>
+      {saltEdgeSession ? (
+        <>
+          <iframe
+            title="Salt Edge Reconnect"
+            src={saltEdgeSession.connectUrl}
+            style={{
+              width: "100%",
+              minHeight: 720,
+              border: 0,
+              borderRadius: 18,
+              marginTop: 12
+            }}
+          />
+          <div className="button-row">
+            <button
+              className="ghost-button"
+              onClick={() => {
+                setSaltEdgeSession(null);
+                setBusy(false);
+              }}
+            >
+              Close Salt Edge frame
+            </button>
+          </div>
+        </>
+      ) : null}
       {error ? <p className="error-text">{error}</p> : null}
     </>
   );

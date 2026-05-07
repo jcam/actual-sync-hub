@@ -502,6 +502,14 @@ describe.sequential("app service", () => {
             },
             transactionsInitialDays: 45,
             automaticSyncConcurrency: 2
+          },
+          SALT_EDGE: {
+            environment: "test",
+            appId: "",
+            secret: "",
+            consentDays: 90,
+            transactionsFetchDays: 90,
+            automaticSyncConcurrency: 2
           }
         })
       } as never,
@@ -597,6 +605,14 @@ describe.sequential("app service", () => {
             },
             transactionsInitialDays: 45,
             automaticSyncConcurrency: 1
+          },
+          SALT_EDGE: {
+            environment: "test",
+            appId: "",
+            secret: "",
+            consentDays: 90,
+            transactionsFetchDays: 90,
+            automaticSyncConcurrency: 2
           }
         })
       } as never

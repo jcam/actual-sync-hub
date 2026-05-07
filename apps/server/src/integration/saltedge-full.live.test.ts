@@ -6,11 +6,11 @@ import { createAppService } from "../services/app-service.js";
 import { createAuthService } from "../services/auth.js";
 import { createActualService } from "../services/actual-service.js";
 import { createHomeValuesService } from "../services/home-values-service.js";
-import { createPlaidService } from "../services/plaid-service.js";
 import { createProviderSettingsService } from "../services/provider-settings-service.js";
-import { saltEdgeService } from "../services/saltedge-service.js";
+import { createSaltEdgeService } from "../services/saltedge-service.js";
 import { simplefinService } from "../services/simplefin-service.js";
-import { createTellerService } from "../services/teller-service.js";
+import { tellerService } from "../services/teller-service.js";
+import { plaidService } from "../services/plaid-service.js";
 import { seedActualSandboxBudget } from "../dev/actual-fixture.js";
 import { hashPassword } from "../lib/password.js";
 import { createServer } from "../server.js";
@@ -18,30 +18,27 @@ import { startActualTestContainer } from "../test/actual-container.js";
 import { createTestDatabase } from "../test/test-db.js";
 
 const liveEnabled =
-  process.env.FULL_SYNC_TEST_RUN_LIVE === "1" &&
+  process.env.SALT_EDGE_TEST_RUN_LIVE === "1" &&
   process.env.ACTUAL_TEST_RUN_LIVE === "1" &&
-  process.env.PLAID_TEST_RUN_LIVE === "1" &&
-  Boolean(process.env.PLAID_TEST_CLIENT_ID) &&
-  Boolean(process.env.PLAID_TEST_SECRET);
+  Boolean(process.env.SALT_EDGE_TEST_APP_ID) &&
+  Boolean(process.env.SALT_EDGE_TEST_SECRET) &&
+  Boolean(process.env.SALT_EDGE_TEST_CONNECTION_ID);
 
-const plaidTestConfig = {
-  clientId: "",
-  secret: "",
-  environment: (process.env.PLAID_TEST_ENV || "sandbox") as "sandbox" | "production",
-  countryCodes: ["US"],
-  products: ["transactions"],
-  transactionsDaysRequested: 365,
-  personalFinanceCategoryVersion: "v2" as const
-};
+const saltEdgeTestEnvironment =
+  process.env.SALT_EDGE_TEST_ENVIRONMENT === "sandbox" ||
+  process.env.SALT_EDGE_TEST_ENVIRONMENT === "test" ||
+  process.env.SALT_EDGE_TEST_ENVIRONMENT === "production"
+    ? process.env.SALT_EDGE_TEST_ENVIRONMENT
+    : "sandbox";
 
-describe.skipIf(!liveEnabled)("full live sync integration", () => {
+describe.skipIf(!liveEnabled)("saltedge full live integration", () => {
   const cleanups: Array<() => Promise<void>> = [];
 
   afterEach(async () => {
     await Promise.all(cleanups.splice(0).map(cleanup => cleanup()));
   });
 
-  it("syncs Plaid sandbox transactions into a real Actual budget through the app routes", async () => {
+  it("syncs a live Salt Edge connection into a real Actual budget through the app routes", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
 
@@ -50,7 +47,7 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
     cleanups.push(() => container.stop());
     await container.setPassword(password);
 
-    const cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "actual-full-sync-live-"));
+    const cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "actual-saltedge-full-live-"));
     cleanups.push(() => fs.rm(cacheDir, { recursive: true, force: true }));
 
     const seed = await seedActualSandboxBudget({
@@ -75,39 +72,31 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
       }
     });
     cleanups.push(() => actualService.shutdown?.() ?? Promise.resolve());
-    const plaidService = createPlaidService({
-      prisma,
-      config: plaidTestConfig
+
+    const providerSettingsService = createProviderSettingsService({
+      prisma
     });
-    const tellerService = createTellerService({
-      config: {
-        appId: "",
-        environment: "sandbox",
-        certificateFile: "",
-        keyFile: "",
-        sandboxAccessToken: "",
-        transactionsInitialDays: 90,
-        transactionsOverlapDays: 10,
-        webhookSigningSecrets: [],
-        webhookToleranceSeconds: 180
-      }
+    const saltEdgeService = createSaltEdgeService({
+      prisma,
+      fetchImpl: fetch,
+      providerSettings: providerSettingsService
     });
     const appService = createAppService({
       prisma,
       actualService,
+      providerSettingsService,
+      saltEdgeService,
       plaidService,
+      simplefinService,
       tellerService,
       runtime: {
-        instanceLabel: "Live integration test",
-        liveSandboxMode: true,
+        instanceLabel: "Salt Edge live integration test",
+        liveSandboxMode: false,
         actualServerUrl: container.serverURL,
         actualBudgetSyncIdConfigured: true,
         automaticSyncBackoffBaseMinutes: 5,
         automaticSyncBackoffMaxMinutes: 60
       }
-    });
-    const providerSettingsService = createProviderSettingsService({
-      prisma
     });
     const homeValuesService = createHomeValuesService({
       prisma,
@@ -148,39 +137,61 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
     const sessionCookie = login.cookies.find(cookie => cookie.name.startsWith("sessionId"));
     const cookies = sessionCookie ? { [sessionCookie.name]: sessionCookie.value } : {};
 
-    const updatePlaidSettingsResponse = await app.inject({
+    const updateSaltEdgeSettingsResponse = await app.inject({
       method: "PUT",
-      url: "/api/provider-settings/PLAID",
+      url: "/api/provider-settings/SALT_EDGE",
       cookies,
       payload: {
-        environment: plaidTestConfig.environment,
-        sandbox: {
-          clientId: plaidTestConfig.environment === "sandbox" ? process.env.PLAID_TEST_CLIENT_ID || "" : "",
-          secret: plaidTestConfig.environment === "sandbox" ? process.env.PLAID_TEST_SECRET || "" : ""
-        },
-        production: {
-          clientId: plaidTestConfig.environment === "production" ? process.env.PLAID_TEST_CLIENT_ID || "" : "",
-          secret: plaidTestConfig.environment === "production" ? process.env.PLAID_TEST_SECRET || "" : ""
-        },
-        countryCodes: plaidTestConfig.countryCodes,
-        products: plaidTestConfig.products,
-        transactionsDaysRequested: plaidTestConfig.transactionsDaysRequested,
-        personalFinanceCategoryVersion: plaidTestConfig.personalFinanceCategoryVersion,
+        environment: saltEdgeTestEnvironment,
+        appId: process.env.SALT_EDGE_TEST_APP_ID || "",
+        secret: process.env.SALT_EDGE_TEST_SECRET || "",
+        consentDays: 90,
+        transactionsFetchDays: 90,
         automaticSyncConcurrency: 2
       }
     });
-    expect(updatePlaidSettingsResponse.statusCode).toBe(200);
+    expect(updateSaltEdgeSettingsResponse.statusCode).toBe(200);
 
-    const seedConnectionResponse = await app.inject({
+    const connectSessionResponse = await app.inject({
       method: "POST",
-      url: "/api/connections/plaid/sandbox/seed-connection",
+      url: "/api/connections/saltedge/connect-session",
       cookies,
       payload: {
-        label: "Integration Sandbox Bank"
+        label: "Codex Salt Edge Integration"
       }
     });
-    expect(seedConnectionResponse.statusCode).toBe(200);
-    const { connectionId } = seedConnectionResponse.json<{ connectionId: string }>();
+    expect(connectSessionResponse.statusCode).toBe(200);
+    const connectSession = connectSessionResponse.json<{
+      connectUrl: string;
+      expiresAt: string;
+      customerId: string;
+    }>();
+    expect(connectSession.connectUrl).toContain("saltedge.com");
+    expect(connectSession.customerId).toMatch(/\S/);
+
+    const finalizeConnectionResponse = await app.inject({
+      method: "POST",
+      url: "/api/connections/saltedge/finalize",
+      cookies,
+      payload: {
+        connectionId: process.env.SALT_EDGE_TEST_CONNECTION_ID || "",
+        connectionSecret: process.env.SALT_EDGE_TEST_CONNECTION_SECRET || undefined,
+        customerId: process.env.SALT_EDGE_TEST_CUSTOMER_ID || undefined,
+        label: "Salt Edge Integration Account"
+      }
+    });
+    expect(finalizeConnectionResponse.statusCode).toBe(200);
+    const { connectionId } = finalizeConnectionResponse.json<{ connectionId: string }>();
+
+    const reauthResponse = await app.inject({
+      method: "POST",
+      url: `/api/connections/${connectionId}/reauth-session`,
+      cookies
+    });
+    expect(reauthResponse.statusCode).toBe(200);
+    const reauth = reauthResponse.json<{ mode: string; connectUrl?: string }>();
+    expect(reauth.mode).toBe("saltedge_connect");
+    expect(reauth.connectUrl).toContain("saltedge.com");
 
     const connectionsResponse = await app.inject({
       method: "GET",
@@ -190,22 +201,17 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
     expect(connectionsResponse.statusCode).toBe(200);
     const connections = connectionsResponse.json<Array<{
       id: string;
-      accounts: Array<{ id: string; type: string; subtype?: string | null }>;
+      provider: string;
+      accounts: Array<{ id: string; externalAccountId: string }>;
     }>>();
     const connection = connections.find(entry => entry.id === connectionId);
-    expect(connection).toBeTruthy();
-    const providerAccount = connection?.accounts.find(account => account.type === "depository") ?? connection?.accounts[0];
+    expect(connection?.provider).toBe("SALT_EDGE");
+    expect(connection?.accounts.length).toBeGreaterThan(0);
+    const providerAccount =
+      (process.env.SALT_EDGE_TEST_ACCOUNT_ID
+        ? connection?.accounts.find(account => account.externalAccountId === process.env.SALT_EDGE_TEST_ACCOUNT_ID)
+        : undefined) ?? connection?.accounts[0];
     expect(providerAccount).toBeTruthy();
-
-    const seedTransactionsResponse = await app.inject({
-      method: "POST",
-      url: `/api/connections/${connectionId}/plaid/sandbox/seed-transactions`,
-      cookies,
-      payload: {
-        count: 3
-      }
-    });
-    expect(seedTransactionsResponse.statusCode).toBe(200);
 
     const actualAccountsResponse = await app.inject({
       method: "GET",
@@ -213,12 +219,13 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
       cookies
     });
     expect(actualAccountsResponse.statusCode).toBe(200);
-    const actualAccounts = actualAccountsResponse.json<Array<{ id: string; name: string }>>();
-    const actualAccount = actualAccounts.find(account => account.name === "Sandbox Checking");
+    const actualAccounts = actualAccountsResponse.json<Array<{ id: string; name: string; closed?: boolean }>>();
+    const actualAccount = actualAccounts.find(account => account.name === "Sandbox Checking" && !account.closed) ?? actualAccounts[0];
     expect(actualAccount).toBeTruthy();
-    if (!actualAccount) {
-      throw new Error("Sandbox Checking account was not seeded into Actual");
+    if (!actualAccount || !providerAccount) {
+      throw new Error("Expected a seeded Actual account and Salt Edge provider account");
     }
+
     const linkResponse = await app.inject({
       method: "PUT",
       url: `/api/account-links/${actualAccount.id}`,
@@ -226,9 +233,9 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
       payload: {
         actualAccountName: actualAccount.name,
         assetType: "BANK",
-        provider: "PLAID",
+        provider: "SALT_EDGE",
         connectionId,
-        connectionAccountId: providerAccount!.id,
+        connectionAccountId: providerAccount.id,
         syncFrequency: "MANUAL",
         syncHour: null,
         syncDayOfWeek: null,
@@ -252,7 +259,7 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
     expect(syncRunsResponse.statusCode).toBe(200);
     const syncRuns = syncRunsResponse.json<Array<{ status: string; summary?: string | null }>>();
     expect(syncRuns[0]?.status).toBe("SUCCESS");
-    expect(syncRuns[0]?.summary).toMatch(/^Imported [1-9]\d* transactions, updated \d+, removed \d+\.$/);
+    expect(syncRuns[0]?.summary).toMatch(/^Imported \d+ transactions, updated \d+, removed \d+\.$/);
 
     const persistedLink = await prisma.accountLink.findFirstOrThrow({
       where: {

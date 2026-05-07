@@ -150,7 +150,7 @@ Coverage includes:
 Provider live validation is split into two layers:
 
 - Default mocked tests for routes and service orchestration. These are fast, deterministic, and always run in `npm test`.
-- Optional live provider smoke tests for the Plaid, Teller, and SimpleFIN adapters. These only run when their `*_TEST_RUN_LIVE=1` gate is enabled and the required provider credentials are present.
+- Optional live provider smoke tests for the Plaid, Teller, SimpleFIN, and Salt Edge adapters. These only run when their `*_TEST_RUN_LIVE=1` gate is enabled and the required provider credentials are present.
 
 Run the optional live Plaid test:
 
@@ -170,10 +170,22 @@ Run the optional live SimpleFIN test:
 npm run test:simplefin-live
 ```
 
+Run the optional live Salt Edge adapter test:
+
+```bash
+npm run test:saltedge-live
+```
+
 Run the full end-to-end live sync test:
 
 ```bash
 npm run test:full-live
+```
+
+Run the Salt Edge to Actual end-to-end live sync test:
+
+```bash
+npm run test:saltedge-full-live
 ```
 
 Environment for live Plaid tests:
@@ -196,6 +208,18 @@ Environment for live SimpleFIN tests:
 - `SIMPLEFIN_TEST_RUN_LIVE=1`
 - `SIMPLEFIN_TEST_ACCESS_KEY`
 - optional `SIMPLEFIN_TEST_ACCOUNT_ID` to target a specific provider account
+
+Environment for live Salt Edge tests:
+
+- `SALT_EDGE_TEST_RUN_LIVE=1`
+- `SALT_EDGE_TEST_ENVIRONMENT=sandbox`, `test`, or `production`
+- `SALT_EDGE_TEST_APP_ID`
+- `SALT_EDGE_TEST_SECRET`
+- `SALT_EDGE_TEST_CONNECTION_ID` for a pre-existing active Salt Edge connection
+- optional `SALT_EDGE_TEST_ACCOUNT_ID` to target a specific provider account
+- optional `SALT_EDGE_TEST_CONNECTION_SECRET` and `SALT_EDGE_TEST_CUSTOMER_ID` if you want the finalize flow to persist those exact values during live testing
+
+Salt Edge support is wired against the current AIS `v6` API. Because Salt Edge Connect is browser-driven, the automated live tests do not try to complete the Connect iframe. Instead, they validate live connect-session creation and use a pre-existing connection ID for finalize, refresh, reauth-session generation, and transaction sync. Sandbox or fake-provider connections created manually through Salt Edge Connect are a good fit for this flow.
 
 As of May 4, 2026, Plaid’s official guidance is to use Sandbox for automated development testing and to bypass Link in automated tests with `/sandbox/public_token/create`, rather than scripting the Link UI. For testing with real bank data, Plaid recommends Limited Production or Production instead of Sandbox.
 

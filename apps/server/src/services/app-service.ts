@@ -11,12 +11,14 @@ import type {
   MigrationPreviewDto,
   Provider,
   RuntimeInfoDto,
+  SaltEdgeConnectSessionDto,
   SyncRunDto,
   UpsertHomeValueConnectionPayload,
   UpdateAccountLinkPayload
 } from "@actual-sync/shared";
 import {
   getActivePlaidEnvironmentSettings,
+  getSaltEdgeIncludeSandboxes,
   getActiveSimpleFinModeSettings,
   getActiveTellerEnvironmentSettings
 } from "@actual-sync/shared";
@@ -48,6 +50,8 @@ import type { ProviderSettingsService } from "./provider-settings-service.js";
 import { parseSimpleFinAccountRawJson } from "./simplefin-native-metadata.js";
 import { simplefinService } from "./simplefin-service.js";
 import type { SimpleFinService } from "./simplefin-service.js";
+import { saltEdgeService } from "./saltedge-service.js";
+import type { SaltEdgeService } from "./saltedge-service.js";
 import { createSyncReviewService } from "./sync-review-service.js";
 import { tellerService } from "./teller-service.js";
 import type { TellerService, TellerWebhookEvent } from "./teller-service.js";
@@ -180,6 +184,13 @@ export type AppService = {
     skipped: number;
     unmatched: number;
   }>;
+  createSaltEdgeConnectSession(userId: string, label?: string | null): Promise<SaltEdgeConnectSessionDto>;
+  finalizeSaltEdgeConnection(args: {
+    connectionId: string;
+    customerId?: string | null;
+    connectionSecret?: string | null;
+    label?: string | null;
+  }): Promise<{ connectionId: string; warning?: string }>;
   createConnectionReauthSession(connectionId: string, userId: string): Promise<ConnectionReauthSessionDto>;
   createHomeValueConnection(payload: UpsertHomeValueConnectionPayload): Promise<{ connectionId: string }>;
   updateHomeValueConnection(connectionId: string, payload: UpsertHomeValueConnectionPayload): Promise<{ connectionId: string }>;
@@ -204,6 +215,7 @@ export function createAppService({
   plaidService: plaid = plaidService,
   providerSettingsService: settings = createProviderSettingsService({ prisma: database }),
   simplefinService: simplefin = simplefinService,
+  saltEdgeService: saltEdge = saltEdgeService,
   tellerService: teller = tellerService,
   runtime = {
     instanceLabel: env.APP_INSTANCE_LABEL,
@@ -221,6 +233,7 @@ export function createAppService({
   plaidService?: PlaidService;
   providerSettingsService?: ProviderSettingsService;
   simplefinService?: SimpleFinService;
+  saltEdgeService?: SaltEdgeService;
   tellerService?: TellerService;
   runtime?: {
     instanceLabel: string;
@@ -235,6 +248,7 @@ export function createAppService({
   const providerAdapters = {
     HOME_VALUES: homeValues,
     PLAID: plaid,
+    SALT_EDGE: saltEdge,
     SIMPLEFIN: simplefin,
     TELLER: teller
   } satisfies Record<Provider, ProviderAdapter>;
@@ -295,6 +309,10 @@ export function createAppService({
       return Boolean(getActiveTellerEnvironmentSettings(providerSettings.TELLER).appId);
     }
 
+    if (provider === "SALT_EDGE") {
+      return Boolean(providerSettings.SALT_EDGE.appId.trim() && providerSettings.SALT_EDGE.secret);
+    }
+
     return true;
   };
 
@@ -316,6 +334,9 @@ export function createAppService({
     const simpleFinMode = providerSettings.SIMPLEFIN.mode;
     const simpleFinDevelopmentConfigured =
       simpleFinMode !== "development" || Boolean(getActiveSimpleFinModeSettings(providerSettings.SIMPLEFIN)?.serverUrl);
+    const saltEdgeEnabled = Boolean(
+      providerSettings.SALT_EDGE.appId.trim() && providerSettings.SALT_EDGE.secret
+    );
 
     return [
       {
@@ -374,6 +395,19 @@ export function createAppService({
               ? "Use a setup token from the SimpleFIN Bridge demo flow."
               : "Use a setup token from your production SimpleFIN provider or the live Bridge."
         ]
+      },
+      {
+        provider: "SALT_EDGE",
+        label: "Salt Edge",
+        enabled: saltEdgeEnabled,
+        ready: saltEdgeEnabled,
+        environment: providerSettings.SALT_EDGE.environment,
+        issues: saltEdgeEnabled ? [] : ["Enter a Salt Edge App ID and Secret to enable Salt Edge connections."],
+        notes: [
+          getSaltEdgeIncludeSandboxes(providerSettings.SALT_EDGE)
+            ? "Salt Edge sandboxes and fake providers are enabled for Connect flows."
+            : "Salt Edge sandboxes and fake providers are disabled for Connect flows."
+        ]
       }
     ];
   };
@@ -383,6 +417,7 @@ export function createAppService({
     const dynamicAutomaticSyncConcurrency: AutomaticSyncConcurrencyConfig = {
       HOME_VALUES: providerSettings.HOME_VALUES?.automaticSyncConcurrency ?? 1,
       PLAID: providerSettings.PLAID.automaticSyncConcurrency,
+      SALT_EDGE: providerSettings.SALT_EDGE.automaticSyncConcurrency,
       TELLER: providerSettings.TELLER.automaticSyncConcurrency,
       SIMPLEFIN: providerSettings.SIMPLEFIN.automaticSyncConcurrency
     };
@@ -1478,6 +1513,11 @@ export function createAppService({
           mode: effectiveSettings.SIMPLEFIN.mode,
           requiresSetupToken: true
         },
+        saltEdge: {
+          enabled: Boolean(effectiveSettings.SALT_EDGE.appId.trim() && effectiveSettings.SALT_EDGE.secret),
+          environment: effectiveSettings.SALT_EDGE.environment,
+          includeSandboxes: getSaltEdgeIncludeSandboxes(effectiveSettings.SALT_EDGE)
+        },
         actual: {
           serverUrl: runtime.actualServerUrl,
           budgetSyncIdConfigured: runtime.actualBudgetSyncIdConfigured,
@@ -1507,13 +1547,19 @@ export function createAppService({
           institutionName: connection.institutionName,
           institutionId: connection.institutionId,
           providerUserId:
-            connection.provider === "TELLER" &&
-            typeof metadata.teller === "object" &&
-            metadata.teller &&
-            "userId" in metadata.teller &&
-            typeof metadata.teller.userId === "string"
-              ? metadata.teller.userId
-              : null,
+            connection.provider === "SALT_EDGE" &&
+            typeof metadata.saltEdge === "object" &&
+            metadata.saltEdge &&
+            "customerId" in metadata.saltEdge &&
+            typeof metadata.saltEdge.customerId === "string"
+              ? metadata.saltEdge.customerId
+              : connection.provider === "TELLER" &&
+                  typeof metadata.teller === "object" &&
+                  metadata.teller &&
+                  "userId" in metadata.teller &&
+                  typeof metadata.teller.userId === "string"
+                ? metadata.teller.userId
+                : null,
           providerAccountsUrl:
             connection.provider === "SIMPLEFIN" &&
             typeof metadata.simplefin === "object" &&
@@ -1552,11 +1598,27 @@ export function createAppService({
               availableBalance: account.availableBalance,
               providerConnectionId: account.providerConnectionId ?? simplefinRaw.connId ?? null,
               providerConnectionName: account.providerConnectionName ?? simplefinRaw.connName ?? null,
-              providerInstitutionName: simplefinRaw.institution ?? simplefinRaw.connOrgName ?? null
+              providerInstitutionName:
+                simplefinRaw.institution ??
+                simplefinRaw.connOrgName ??
+                account.providerConnectionName ??
+                connection.institutionName ??
+                null
             };
           })
         };
       });
+    },
+
+    async createSaltEdgeConnectSession(userId: string, label?: string | null) {
+      return saltEdge.createConnectSession({
+        userId,
+        label
+      });
+    },
+
+    async finalizeSaltEdgeConnection(args) {
+      return saltEdge.finalizeConnection(args);
     },
 
     async createHomeValueConnection(payload) {
@@ -1836,6 +1898,8 @@ export function createAppService({
           ? "Teller"
           : connection.provider === "PLAID"
             ? "Plaid"
+            : connection.provider === "SALT_EDGE"
+              ? "Salt Edge"
             : connection.provider === "SIMPLEFIN"
               ? "SimpleFIN"
               : "Home Values";

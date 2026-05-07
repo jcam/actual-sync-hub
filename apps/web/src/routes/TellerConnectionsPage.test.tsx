@@ -109,8 +109,8 @@ describe("TellerConnectionsPage", () => {
           },
           development: {
             appId: "app_test_123",
-            certificatePem: "",
-            keyPem: "",
+            certificatePem: "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+            keyPem: "-----BEGIN PRIVATE KEY-----\nTEST\n-----END PRIVATE KEY-----",
             webhookSigningSecrets: []
           },
           production: {
@@ -132,6 +132,14 @@ describe("TellerConnectionsPage", () => {
           },
           transactionsInitialDays: 45,
           automaticSyncConcurrency: 1
+        },
+        SALT_EDGE: {
+          environment: "test",
+          appId: "",
+          secret: "",
+          consentDays: 90,
+          transactionsFetchDays: 90,
+          automaticSyncConcurrency: 2
         }
       },
       plaid: {
@@ -149,6 +157,11 @@ describe("TellerConnectionsPage", () => {
         mode: "sandbox",
         requiresSetupToken: true
       },
+      saltEdge: {
+        enabled: false,
+        environment: "test",
+        includeSandboxes: true
+      },
       actual: {
         serverUrl: "http://127.0.0.1:5006",
         budgetSyncIdConfigured: true,
@@ -164,8 +177,8 @@ describe("TellerConnectionsPage", () => {
       },
       development: {
         appId: "app_test_123",
-        certificatePem: "",
-        keyPem: "",
+        certificatePem: "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+        keyPem: "-----BEGIN PRIVATE KEY-----\nTEST\n-----END PRIVATE KEY-----",
         webhookSigningSecrets: []
       },
       production: {
@@ -221,8 +234,8 @@ describe("TellerConnectionsPage", () => {
         },
         development: {
           appId: "app_test_123",
-          certificatePem: "",
-          keyPem: "",
+          certificatePem: "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----",
+          keyPem: "-----BEGIN PRIVATE KEY-----\nTEST\n-----END PRIVATE KEY-----",
           webhookSigningSecrets: []
         },
         production: {
