@@ -26,6 +26,14 @@ export type ActualCapabilities = {
   externalSyncWritebackEnabled: boolean;
 }
 
+export type ActualExternalSyncPrefs = {
+  importPending: boolean;
+  importNotes: boolean;
+  reimportDeleted: boolean;
+  importTransactions: boolean;
+  updateDates: boolean;
+}
+
 type ActualModule = typeof ActualApi;
 type ActualImportTransaction = Parameters<ActualModule["importTransactions"]>[1][number];
 type ActualTransaction = Awaited<ReturnType<ActualModule["getTransactions"]>>[number];
@@ -52,6 +60,22 @@ export type ActualBankSyncLinkRecord = {
   closed?: boolean;
   offbudget?: boolean;
   lastSyncedAt?: string | null;
+}
+
+export type ActualExternalSyncAccountRecord = {
+  id: string;
+  linked: boolean;
+  syncSource: "external" | null;
+  providerAccountId: string | null;
+  institutionName: string | null;
+  institutionExternalId: string | null;
+  mask: string | null;
+  officialName: string | null;
+  balanceCurrent: number | null;
+  balanceAvailable: number | null;
+  balanceLimit: number | null;
+  lastSync: string | null;
+  prefs: ActualExternalSyncPrefs;
 }
 
 export type ActualExternalSyncMetadataInput = {
@@ -123,6 +147,11 @@ export type ReconcileTransactionInput = {
   transfer_actual_account_id?: string;
 }
 
+export type ActualImportBehaviorOptions = {
+  reimportDeleted?: boolean;
+  updateDates?: boolean;
+}
+
 type WorkerReadyMessage = {
   type: "ready";
 };
@@ -136,6 +165,10 @@ type WorkerCommandPayload =
     }
   | {
       operation: "listBankSyncLinks";
+    }
+  | {
+      operation: "getExternalSyncAccount";
+      accountId: string;
     }
   | {
       operation: "getCapabilities";
@@ -159,11 +192,13 @@ type WorkerCommandPayload =
       operation: "importTransactions";
       accountId: string;
       transactions: ImportTransactionInput[];
+      options?: ActualImportBehaviorOptions;
     }
   | {
       operation: "previewImportTransactions";
       accountId: string;
       transactions: ImportTransactionInput[];
+      options?: ActualImportBehaviorOptions;
     }
   | {
       operation: "reconcileTransactions";
@@ -171,6 +206,7 @@ type WorkerCommandPayload =
       transactions: ReconcileTransactionInput[];
       removedImportedIds: string[];
       removedActualTransactionIds: string[];
+      options?: ActualImportBehaviorOptions;
     };
 
 type WorkerCommand = WorkerCommandPayload & {
@@ -242,15 +278,16 @@ export type ActualService = {
   listAccounts(): Promise<ActualAccountRecord[]>;
   listCategories(): Promise<ActualCategoryRecord[]>;
   listBankSyncLinks(): Promise<ActualBankSyncLinkRecord[]>;
+  getExternalSyncAccount?(accountId: string): Promise<ActualExternalSyncAccountRecord>;
   linkExternalSyncAccount(accountId: string, metadata: ActualExternalSyncMetadataInput): Promise<void>;
   unlinkExternalSyncAccount(accountId: string): Promise<void>;
   listTransactionsByDateRange(accountId: string, startDate: string, endDate: string): Promise<ActualTransactionRecord[]>;
-  importTransactions(accountId: string, transactions: ImportTransactionInput[]): Promise<{
+  importTransactions(accountId: string, transactions: ImportTransactionInput[], options?: ActualImportBehaviorOptions): Promise<{
     added: string[];
     updated: string[];
     errors: Array<{ message: string }>;
   }>;
-  previewImportTransactions(accountId: string, transactions: ImportTransactionInput[]): Promise<{
+  previewImportTransactions(accountId: string, transactions: ImportTransactionInput[], options?: ActualImportBehaviorOptions): Promise<{
     added: string[];
     updated: string[];
     errors: Array<{ message: string }>;
@@ -260,7 +297,8 @@ export type ActualService = {
     accountId: string,
     transactions: ReconcileTransactionInput[],
     removedImportedIds?: string[],
-    removedActualTransactionIds?: string[]
+    removedActualTransactionIds?: string[],
+    options?: ActualImportBehaviorOptions
   ): Promise<{
     added: number;
     updated: number;
@@ -525,6 +563,13 @@ export function createActualService({
       });
     },
 
+    async getExternalSyncAccount(accountId: string): Promise<ActualExternalSyncAccountRecord> {
+      return runWorker<ActualExternalSyncAccountRecord>({
+        operation: "getExternalSyncAccount",
+        accountId
+      });
+    },
+
     async linkExternalSyncAccount(accountId: string, metadata: ActualExternalSyncMetadataInput) {
       await runWorker<void>({
         operation: "linkExternalSyncAccount",
@@ -551,7 +596,7 @@ export function createActualService({
       });
     },
 
-    async importTransactions(accountId: string, transactions: ImportTransactionInput[]) {
+    async importTransactions(accountId: string, transactions: ImportTransactionInput[], options?: ActualImportBehaviorOptions) {
       const result = await runWorker<{
         added: string[];
         updated: string[];
@@ -559,13 +604,14 @@ export function createActualService({
       }>({
         operation: "importTransactions",
         accountId,
-        transactions
+        transactions,
+        options
       });
       clearReadCaches();
       return result;
     },
 
-    async previewImportTransactions(accountId: string, transactions: ImportTransactionInput[]) {
+    async previewImportTransactions(accountId: string, transactions: ImportTransactionInput[], options?: ActualImportBehaviorOptions) {
       return runWorker<{
         added: string[];
         updated: string[];
@@ -574,7 +620,8 @@ export function createActualService({
       }>({
         operation: "previewImportTransactions",
         accountId,
-        transactions
+        transactions,
+        options
       });
     },
 
@@ -582,7 +629,8 @@ export function createActualService({
       accountId: string,
       transactions: ReconcileTransactionInput[],
       removedImportedIds: string[] = [],
-      removedActualTransactionIds: string[] = []
+      removedActualTransactionIds: string[] = [],
+      options?: ActualImportBehaviorOptions
     ) {
       const result = await runWorker<{
         added: number;
@@ -596,7 +644,8 @@ export function createActualService({
         accountId,
         transactions,
         removedImportedIds,
-        removedActualTransactionIds
+        removedActualTransactionIds,
+        options
       });
       clearReadCaches();
       return result;

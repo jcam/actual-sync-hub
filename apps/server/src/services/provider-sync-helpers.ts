@@ -3,6 +3,22 @@ import type { ImportTransactionInput, PreviewImportMatchRecord, ReconcileTransac
 import type { ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
 import { resolveActualCategoryId } from "./category-matching.js";
 
+export type ActualExternalSyncPrefs = {
+  importPending: boolean;
+  importNotes: boolean;
+  reimportDeleted: boolean;
+  importTransactions: boolean;
+  updateDates: boolean;
+}
+
+export const DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS: ActualExternalSyncPrefs = {
+  importPending: true,
+  importNotes: true,
+  reimportDeleted: true,
+  importTransactions: true,
+  updateDates: false
+};
+
 function normalizeMatchText(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -104,6 +120,45 @@ export function sanitizeProviderSyncResult(result: ProviderSyncResult): Provider
     transactions: sanitizedTransactions,
     removedImportedIds
   };
+}
+
+export function normalizeActualExternalSyncPrefs(
+  prefs: Partial<ActualExternalSyncPrefs> | null | undefined
+): ActualExternalSyncPrefs {
+  return {
+    importPending: prefs?.importPending ?? DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS.importPending,
+    importNotes: prefs?.importNotes ?? DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS.importNotes,
+    reimportDeleted: prefs?.reimportDeleted ?? DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS.reimportDeleted,
+    importTransactions: prefs?.importTransactions ?? DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS.importTransactions,
+    updateDates: prefs?.updateDates ?? DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS.updateDates
+  };
+}
+
+export function applyActualExternalSyncPrefsToProviderSyncResult(
+  result: ProviderSyncResult,
+  prefs: Partial<ActualExternalSyncPrefs> | null | undefined
+): ProviderSyncResult {
+  const normalizedPrefs = normalizeActualExternalSyncPrefs(prefs);
+  if (!normalizedPrefs.importTransactions) {
+    return sanitizeProviderSyncResult({
+      ...result,
+      imported: 0,
+      transactions: [],
+      removedImportedIds: []
+    });
+  }
+
+  const filteredTransactions = result.transactions
+    .filter(transaction => normalizedPrefs.importPending || transaction.cleared)
+    .map(transaction => ({
+      ...transaction,
+      notes: normalizedPrefs.importNotes ? transaction.notes : undefined
+    }));
+
+  return sanitizeProviderSyncResult({
+    ...result,
+    transactions: filteredTransactions
+  });
 }
 
 export function getPrimarySourceCategory(transaction: ProviderSyncTransaction) {

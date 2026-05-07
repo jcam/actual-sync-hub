@@ -29,6 +29,13 @@ type ActualModuleWithExternalSync = ActualModule & {
     balanceAvailable: number | null;
     balanceLimit: number | null;
     lastSync: string | null;
+    prefs: {
+      importPending: boolean;
+      importNotes: boolean;
+      reimportDeleted: boolean;
+      importTransactions: boolean;
+      updateDates: boolean;
+    };
   }>;
   unlinkExternalSyncAccount?: (accountId: string) => Promise<unknown>;
 };
@@ -86,8 +93,14 @@ type ReconcileTransactionInput = {
   transfer_actual_account_id?: string;
 }
 
+type ActualImportBehaviorOptions = {
+  reimportDeleted?: boolean;
+  updateDates?: boolean;
+}
+
 type PreviewExistingTransaction = {
   id: string;
+  date?: string | null;
   imported_id?: string | null;
   imported_payee?: string | null;
   notes?: string | null;
@@ -132,6 +145,11 @@ type WorkerCommand =
     }
   | {
       id: string;
+      operation: "getExternalSyncAccount";
+      accountId: string;
+    }
+  | {
+      id: string;
       operation: "linkExternalSyncAccount";
       accountId: string;
       metadata: ActualExternalSyncMetadataInput;
@@ -153,12 +171,14 @@ type WorkerCommand =
       operation: "importTransactions";
       accountId: string;
       transactions: ImportTransactionInput[];
+      options?: ActualImportBehaviorOptions;
     }
   | {
       id: string;
       operation: "previewImportTransactions";
       accountId: string;
       transactions: ImportTransactionInput[];
+      options?: ActualImportBehaviorOptions;
     }
   | {
       id: string;
@@ -167,6 +187,7 @@ type WorkerCommand =
       transactions: ReconcileTransactionInput[];
       removedImportedIds: string[];
       removedActualTransactionIds: string[];
+      options?: ActualImportBehaviorOptions;
     };
 
 type WorkerResponse =
@@ -202,6 +223,41 @@ function isActualCategory(entity: APICategoryEntity | APICategoryGroupEntity): e
 
 function isActualBankSyncSource(value: string | null | undefined): value is ActualBankSyncSource {
   return value === "simpleFin" || value === "goCardless" || value === "pluggyai" || value === "external";
+}
+
+function collectDateUpdates({
+  updatedPreview,
+  transactions,
+  updateDates
+}: {
+  updatedPreview: PreviewImportResult["updatedPreview"];
+  transactions: Array<{
+    date: string;
+  }>;
+  updateDates: boolean;
+}) {
+  if (!updateDates) {
+    return [];
+  }
+
+  return updatedPreview.flatMap((preview, index) => {
+    const existing = preview.existing;
+    if (!existing || preview.ignored || preview.tombstone || !existing.id) {
+      return [];
+    }
+
+    const transaction = transactions[index];
+    if (!transaction?.date || existing.date === transaction.date) {
+      return [];
+    }
+
+    return [
+      {
+        id: existing.id,
+        date: transaction.date
+      }
+    ];
+  });
 }
 
 function getActualCapabilities(actual: ActualModule): ActualCapabilities {
@@ -504,6 +560,16 @@ async function main() {
           };
         }
 
+        case "getExternalSyncAccount": {
+          await syncIfNeeded();
+          const externalSync = await getActualExternalSyncReadApi(actual).getExternalSyncAccount!(command.accountId);
+          return {
+            id: command.id,
+            ok: true,
+            result: externalSync
+          };
+        }
+
         case "linkExternalSyncAccount": {
           await syncIfNeeded();
           await getActualExternalSyncWritebackApi(actual).linkExternalSyncAccount!(command.accountId, {
@@ -592,8 +658,27 @@ async function main() {
           }));
 
           const result = await actual.importTransactions(command.accountId, payload, {
-            defaultCleared: true
+            defaultCleared: true,
+            reimportDeleted: command.options?.reimportDeleted
           });
+          if (command.options?.updateDates && payload.length > 0 && result.updated.length > 0) {
+            const previewResult = (await actual.importTransactions(command.accountId, payload, {
+              defaultCleared: true,
+              dryRun: true,
+              reimportDeleted: command.options?.reimportDeleted
+            })) as PreviewImportResult;
+            const dateUpdates = collectDateUpdates({
+              updatedPreview: previewResult.updatedPreview,
+              transactions: command.transactions,
+              updateDates: true
+            });
+
+            for (const update of dateUpdates) {
+              await actual.updateTransaction(update.id, {
+                date: update.date
+              });
+            }
+          }
           await syncIfNeeded(true);
 
           return {
@@ -634,7 +719,8 @@ async function main() {
 
           const result = await actual.importTransactions(command.accountId, payload, {
             defaultCleared: true,
-            dryRun: true
+            dryRun: true,
+            reimportDeleted: command.options?.reimportDeleted
           });
 
           return {
@@ -716,7 +802,8 @@ async function main() {
               category: transaction.category
             })), {
               defaultCleared: true,
-              dryRun: true
+              dryRun: true,
+              reimportDeleted: command.options?.reimportDeleted
             })) as PreviewImportResult;
 
             if (previewResult.errors.length > 0) {
@@ -735,7 +822,8 @@ async function main() {
               cleared: transaction.cleared ?? true,
               category: transaction.category
             })), {
-              defaultCleared: true
+              defaultCleared: true,
+              reimportDeleted: command.options?.reimportDeleted
             });
 
             if (importResult.errors.length > 0) {
@@ -779,6 +867,18 @@ async function main() {
                 name: transaction.payee_name
               });
               renamedPayees += 1;
+            }
+
+            const dateUpdates = collectDateUpdates({
+              updatedPreview: previewResult.updatedPreview,
+              transactions: command.transactions,
+              updateDates: command.options?.updateDates === true
+            });
+
+            for (const update of dateUpdates) {
+              await actual.updateTransaction(update.id, {
+                date: update.date
+              });
             }
 
             await syncIfNeeded(true);

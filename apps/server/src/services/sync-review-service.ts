@@ -11,8 +11,11 @@ import { pruneImportedTransactionLedger } from "./imported-transaction-ledger.js
 import type { LinkConfigData } from "./link-config.js";
 import { parseLinkConfig, serializeLinkConfig } from "./link-config.js";
 import {
+  applyActualExternalSyncPrefsToProviderSyncResult,
+  DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS,
   getPrimarySourceCategory,
   mapPreviewItemByImportedId,
+  normalizeActualExternalSyncPrefs,
   toImportTransactionInput
 } from "./provider-sync-helpers.js";
 import type { ProviderAdapter, ProviderSyncTransaction } from "./provider-adapter.js";
@@ -23,7 +26,13 @@ type ReviewDatabase = Pick<DatabaseClient, "accountLink" | "syncRun" | "imported
 type ReviewActualService = Pick<
   ActualService,
   "listCategories" | "previewImportTransactions" | "importTransactions" | "reconcileTransactions" | "listTransactionsByDateRange"
->;
+> &
+  Partial<
+    Pick<
+      ActualService,
+      "getExternalSyncAccount"
+    >
+  >;
 
 type ReviewableLink = {
   id: string;
@@ -140,6 +149,14 @@ export function createSyncReviewService<TSiblingLinks>({
     }));
   }
 
+  async function getActualExternalSyncPrefs(actualAccountId: string) {
+    if (typeof actual.getExternalSyncAccount !== "function") {
+      return DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS;
+    }
+
+    return (await actual.getExternalSyncAccount(actualAccountId)).prefs;
+  }
+
   return {
     previewAccountSyncReview: async (actualAccountId: string): Promise<MigrationPreviewDto> => {
       const link = await loadCurrentReviewableLink(actualAccountId);
@@ -151,7 +168,13 @@ export function createSyncReviewService<TSiblingLinks>({
       try {
         const actualCategories = await listActualCategories();
         const linkConfig = parseLinkConfig(link.configJson);
-        const syncResult = await adapter.syncAccountLink(link.id);
+        const actualExternalSyncPrefs = normalizeActualExternalSyncPrefs(
+          await getActualExternalSyncPrefs(actualAccountId)
+        );
+        const syncResult = applyActualExternalSyncPrefsToProviderSyncResult(
+          await adapter.syncAccountLink(link.id),
+          actualExternalSyncPrefs
+        );
         const siblingLinks = await buildSiblingLinks(link);
         const reconcileTransactions = buildReconcileTransactions({
           actualAccountId,
@@ -163,7 +186,11 @@ export function createSyncReviewService<TSiblingLinks>({
 
         const previewResult = await actual.previewImportTransactions(
           actualAccountId,
-          reconcileTransactions.map(toImportTransactionInput)
+          reconcileTransactions.map(toImportTransactionInput),
+          {
+            reimportDeleted: actualExternalSyncPrefs.reimportDeleted,
+            updateDates: actualExternalSyncPrefs.updateDates
+          }
         );
         if (previewResult.errors.length > 0) {
           throw new Error(previewResult.errors[0]?.message || "Actual migration preview failed");
@@ -229,7 +256,13 @@ export function createSyncReviewService<TSiblingLinks>({
         const allowedImportedIds = new Set(payload.importedIds);
         const actualCategories = await listActualCategories();
         const linkConfig = parseLinkConfig(link.configJson);
-        const syncResult = await adapter.syncAccountLink(link.id);
+        const actualExternalSyncPrefs = normalizeActualExternalSyncPrefs(
+          await getActualExternalSyncPrefs(actualAccountId)
+        );
+        const syncResult = applyActualExternalSyncPrefsToProviderSyncResult(
+          await adapter.syncAccountLink(link.id),
+          actualExternalSyncPrefs
+        );
         const siblingLinks = await buildSiblingLinks(link);
         const selectedTransactions = syncResult.transactions.filter(transaction =>
           allowedImportedIds.has(transaction.importedId)
@@ -247,7 +280,10 @@ export function createSyncReviewService<TSiblingLinks>({
           importedId => !reconcileTransactions.some(transaction => transaction.imported_id === importedId)
         );
         const migrationResult = migrating
-          ? await actual.importTransactions(actualAccountId, reconcileTransactions.map(toImportTransactionInput))
+          ? await actual.importTransactions(actualAccountId, reconcileTransactions.map(toImportTransactionInput), {
+              reimportDeleted: actualExternalSyncPrefs.reimportDeleted,
+              updateDates: actualExternalSyncPrefs.updateDates
+            })
           : null;
         if (migrationResult?.errors.length) {
           throw new Error(migrationResult.errors[0]?.message || "Actual sync review import failed");
@@ -277,7 +313,11 @@ export function createSyncReviewService<TSiblingLinks>({
               actualAccountId,
               reconcileTransactions,
               removedImportedIds,
-              removedActualTransactionIds
+              removedActualTransactionIds,
+              {
+                reimportDeleted: actualExternalSyncPrefs.reimportDeleted,
+                updateDates: actualExternalSyncPrefs.updateDates
+              }
             )
           : null;
         const bounds = getDateRangeBounds(reconcileTransactions.map(transaction => transaction.date));

@@ -35,7 +35,10 @@ import type { LinkConfigData } from "./link-config.js";
 import { plaidService } from "./plaid-service.js";
 import type { PlaidService } from "./plaid-service.js";
 import {
+  applyActualExternalSyncPrefsToProviderSyncResult,
+  DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS,
   getPrimarySourceCategory,
+  normalizeActualExternalSyncPrefs,
   resolveTransactionCategoryId,
   resolveTransferActualAccountId
 } from "./provider-sync-helpers.js";
@@ -227,6 +230,14 @@ export function createAppService({
     }
 
     return providerAdapters[provider];
+  };
+
+  const getActualExternalSyncPrefs = async (actualAccountId: string) => {
+    if (typeof actual.getExternalSyncAccount !== "function") {
+      return DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS;
+    }
+
+    return (await actual.getExternalSyncAccount(actualAccountId)).prefs;
   };
 
   const getProviderRuntimeInfo = async (): Promise<RuntimeInfoDto["providers"]> => {
@@ -763,6 +774,10 @@ export function createAppService({
       id: category.id,
       name: category.name
     }));
+    const actualExternalSyncPrefs = normalizeActualExternalSyncPrefs(
+      await getActualExternalSyncPrefs(link.actualAccountId)
+    );
+    syncResult = applyActualExternalSyncPrefsToProviderSyncResult(syncResult, actualExternalSyncPrefs);
     let linkConfig = parseLinkConfig(link.configJson);
     linkConfig = await learnCategoryMappingsFromHistory({
       database,
@@ -799,7 +814,12 @@ export function createAppService({
       category: transaction.resolved_category_id,
       transfer_actual_account_id: transaction.transfer_actual_account_id
     }));
-    const migrationResult = migrating ? await actual.importTransactions(link.actualAccountId, migrationImportPayload) : null;
+    const migrationResult = migrating
+      ? await actual.importTransactions(link.actualAccountId, migrationImportPayload, {
+          reimportDeleted: actualExternalSyncPrefs.reimportDeleted,
+          updateDates: actualExternalSyncPrefs.updateDates
+        })
+      : null;
     if (migrationResult?.errors.length) {
       throw new Error(migrationResult.errors[0]?.message || "Actual migration import failed");
     }
@@ -828,7 +848,11 @@ export function createAppService({
           link.actualAccountId,
           reconcileTransactions,
           removedImportedIds,
-          removedActualTransactionIds
+          removedActualTransactionIds,
+          {
+            reimportDeleted: actualExternalSyncPrefs.reimportDeleted,
+            updateDates: actualExternalSyncPrefs.updateDates
+          }
         )
       : !migrating
         ? { added: 0, updated: 0, removed: 0, renamedPayees: 0, addedIds: [], updatedIds: [] }

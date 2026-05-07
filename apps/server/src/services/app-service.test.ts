@@ -1332,7 +1332,10 @@ describe.sequential("app service", () => {
         resolved_category_id: "cat-food",
         transfer_actual_account_id: undefined
       }
-    ], [], []);
+    ], [], [], {
+      reimportDeleted: true,
+      updateDates: false
+    });
     expect(link.lastSyncedAt?.toISOString()).toBe(now.toISOString());
     expect(link.configJson).toContain("\"cursor\":\"cursor-2\"");
     expect(runs).toHaveLength(1);
@@ -1344,6 +1347,358 @@ describe.sequential("app service", () => {
       primarySourceCategory: "Food And Drink",
       appliedCategoryId: "cat-food",
       observedCategoryId: "cat-food"
+    });
+  });
+
+  it("respects Actual external sync importPending and importNotes prefs during sync", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary",
+        providerItemId: "item-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "ext-1",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    const reconcileTransactions = vi.fn().mockResolvedValue({
+      added: 1,
+      updated: 0,
+      removed: 0,
+      renamedPayees: 0,
+      addedIds: ["tx-1"],
+      updatedIds: []
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        getExternalSyncAccount: vi.fn().mockResolvedValue({
+          id: "actual-1",
+          linked: true,
+          syncSource: "external",
+          providerAccountId: "ext-1",
+          institutionName: "First Platypus Bank",
+          institutionExternalId: "platypus-bank",
+          mask: "1234",
+          officialName: "Checking",
+          balanceCurrent: 50000,
+          balanceAvailable: 45000,
+          balanceLimit: null,
+          lastSync: null,
+          prefs: {
+            importPending: false,
+            importNotes: false,
+            reimportDeleted: true,
+            importTransactions: true,
+            updateDates: false
+          }
+        }),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([
+          {
+            id: "tx-1",
+            imported_id: "posted-1",
+            date: "2026-05-03",
+            amount: -12.34,
+            category: null,
+            notes: null,
+            imported_payee: "COFFEE SHOP",
+            cleared: true
+          }
+        ]),
+        importTransactions: vi.fn(),
+        reconcileTransactions
+      } as never,
+      plaidService: {
+        syncAccountLink: vi.fn().mockResolvedValue({
+          imported: 2,
+          transactions: [
+            {
+              date: "2026-05-03",
+              amount: -12.34,
+              payeeName: "Coffee Shop",
+              importedPayee: "COFFEE SHOP",
+              notes: "ORDER 123",
+              importedId: "posted-1",
+              cleared: true,
+              categoryNames: ["Food And Drink"],
+              searchText: ["Coffee Shop"]
+            },
+            {
+              date: "2026-05-04",
+              amount: -55,
+              payeeName: "Pending Merchant",
+              importedPayee: "PENDING MERCHANT",
+              notes: "PENDING NOTE",
+              importedId: "pending-1",
+              cleared: false,
+              categoryNames: ["Shops"],
+              searchText: ["Pending Merchant"]
+            }
+          ],
+          removedImportedIds: [],
+          configPatch: {}
+        })
+      } as never
+    });
+
+    await service.runAccountSync("actual-1");
+
+    expect(reconcileTransactions).toHaveBeenCalledWith("actual-1", [
+      {
+        amount: -12.34,
+        category_names: ["Food And Drink"],
+        cleared: true,
+        date: "2026-05-03",
+        imported_id: "posted-1",
+        imported_payee: "COFFEE SHOP",
+        notes: undefined,
+        payee_name: "Coffee Shop",
+        resolved_category_id: undefined,
+        transfer_actual_account_id: undefined
+      }
+    ], [], [], {
+      reimportDeleted: true,
+      updateDates: false
+    });
+  });
+
+  it("passes Actual external sync reimportDeleted and updateDates prefs through reconcile", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary",
+        providerItemId: "item-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "ext-1",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    const reconcileTransactions = vi.fn().mockResolvedValue({
+      added: 0,
+      updated: 1,
+      removed: 0,
+      renamedPayees: 0,
+      addedIds: [],
+      updatedIds: ["tx-1"]
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        getExternalSyncAccount: vi.fn().mockResolvedValue({
+          id: "actual-1",
+          linked: true,
+          syncSource: "external",
+          providerAccountId: "ext-1",
+          institutionName: "First Platypus Bank",
+          institutionExternalId: "platypus-bank",
+          mask: "1234",
+          officialName: "Checking",
+          balanceCurrent: 50000,
+          balanceAvailable: 45000,
+          balanceLimit: null,
+          lastSync: null,
+          prefs: {
+            importPending: true,
+            importNotes: true,
+            reimportDeleted: false,
+            importTransactions: true,
+            updateDates: true
+          }
+        }),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions
+      } as never,
+      plaidService: {
+        syncAccountLink: vi.fn().mockResolvedValue({
+          imported: 1,
+          transactions: [
+            {
+              date: "2026-05-03",
+              amount: -12.34,
+              payeeName: "Coffee Shop",
+              importedPayee: "COFFEE SHOP",
+              importedId: "posted-1",
+              cleared: true,
+              categoryNames: [],
+              searchText: ["Coffee Shop"]
+            }
+          ],
+          removedImportedIds: ["deleted-1"],
+          configPatch: {}
+        })
+      } as never
+    });
+
+    await service.runAccountSync("actual-1");
+
+    expect(reconcileTransactions).toHaveBeenCalledWith(
+      "actual-1",
+      [
+        expect.objectContaining({
+          imported_id: "posted-1"
+        })
+      ],
+      ["deleted-1"],
+      [],
+      {
+        reimportDeleted: false,
+        updateDates: true
+      }
+    );
+  });
+
+  it("skips transaction import when Actual external sync importTransactions is false", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary",
+        providerItemId: "item-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "ext-1",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    const reconcileTransactions = vi.fn();
+    const importTransactions = vi.fn();
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        getExternalSyncAccount: vi.fn().mockResolvedValue({
+          id: "actual-1",
+          linked: true,
+          syncSource: "external",
+          providerAccountId: "ext-1",
+          institutionName: "First Platypus Bank",
+          institutionExternalId: "platypus-bank",
+          mask: "1234",
+          officialName: "Checking",
+          balanceCurrent: 50000,
+          balanceAvailable: 45000,
+          balanceLimit: null,
+          lastSync: null,
+          prefs: {
+            importPending: true,
+            importNotes: true,
+            reimportDeleted: false,
+            importTransactions: false,
+            updateDates: false
+          }
+        }),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
+        importTransactions,
+        reconcileTransactions
+      } as never,
+      plaidService: {
+        syncAccountLink: vi.fn().mockResolvedValue({
+          imported: 1,
+          transactions: [
+            {
+              date: "2026-05-03",
+              amount: -12.34,
+              payeeName: "Coffee Shop",
+              importedPayee: "COFFEE SHOP",
+              importedId: "posted-1",
+              cleared: true,
+              categoryNames: [],
+              searchText: ["Coffee Shop"]
+            }
+          ],
+          removedImportedIds: ["deleted-1"],
+          configPatch: {}
+        })
+      } as never
+    });
+
+    const result = await service.runAccountSync("actual-1");
+
+    expect(importTransactions).not.toHaveBeenCalled();
+    expect(reconcileTransactions).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      newTransactions: [],
+      matchedTransactions: [],
+      updatedAccounts: []
     });
   });
 
@@ -1566,7 +1921,10 @@ describe.sequential("app service", () => {
         imported_id: "plaid-1",
         category: "cat-food"
       })
-    ]);
+    ], {
+      reimportDeleted: true,
+      updateDates: false
+    });
     expect(reconcileTransactions).not.toHaveBeenCalled();
 
     const currentLink = await prisma.accountLink.findFirstOrThrow({
@@ -1703,7 +2061,10 @@ describe.sequential("app service", () => {
         resolved_category_id: undefined,
         transfer_actual_account_id: "actual-savings"
       })
-    ], [], []);
+    ], [], [], {
+      reimportDeleted: true,
+      updateDates: false
+    });
   });
 
   it("learns a category mapping from recent Actual recategorizations without storing full transactions", async () => {
@@ -1832,7 +2193,10 @@ describe.sequential("app service", () => {
         imported_id: "new-1",
         resolved_category_id: "cat-groceries"
       })
-    ], [], []);
+    ], [], [], {
+      reimportDeleted: true,
+      updateDates: false
+    });
 
     const refreshedLink = await prisma.accountLink.findUniqueOrThrow({
       where: {
@@ -2025,7 +2389,10 @@ describe.sequential("app service", () => {
 
     await service.runAccountSync("actual-1");
 
-    expect(reconcileTransactions).toHaveBeenCalledWith("actual-1", [], ["gone-1"], []);
+    expect(reconcileTransactions).toHaveBeenCalledWith("actual-1", [], ["gone-1"], [], {
+      reimportDeleted: true,
+      updateDates: false
+    });
     expect(await prisma.importedTransaction.count()).toBe(0);
   });
 

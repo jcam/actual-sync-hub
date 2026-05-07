@@ -7,17 +7,28 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-05-07
+
 ### Added
 - Optional live Teller and SimpleFIN adapter smoke tests alongside the existing Plaid live validation flow.
 - A provider-sync sanitization pass that drops malformed transactions, dedupes repeated imported IDs and search/category text, and prevents removed IDs from conflicting with still-imported rows.
 
 ### Changed
 - Hardened Plaid, Teller, and SimpleFIN sync result handling so provider payload quirks do not leak directly into Actual reconciliation.
+
+## [0.15.0] - 2026-05-07
+
+### Changed
 - Added detection for native Actual `external` unlink actions so previously written-back links are disabled locally and surfaced with `ACTUAL_UNLINKED` attention state instead of silently continuing to sync.
 - Replaced the `ACTUAL_EXTERNAL_SYNC_WRITEBACK_ENABLED` env flag with runtime capability detection against the installed `@actual-app/api` package.
 - Reworked Actual transaction lookup and reconciliation to rely on public date-range reads plus minimal imported-transaction metadata instead of imported-id AQL queries.
 - Simplified external-sync writeback so `lastSync` is carried through `linkExternalSyncAccount(...)`, removing the redundant completion callback path from the sync bridge.
-- Documented the remaining TODO to honor Actual account-level non-mapping bank-sync prefs from the bridge-managed sync path.
+
+## [0.16.0] - 2026-05-07
+
+### Changed
+- Taught bridge-managed sync to honor Actual account-level bank-sync prefs for pending transactions, transaction notes, deleted-transaction reimports, balance-only import mode, and date updates.
+- Narrowed the remaining bridge/Actual sync-pref gap to custom field mappings instead of the simpler account-level import flags.
 
 ## [0.13.0] - 2026-05-06
 
