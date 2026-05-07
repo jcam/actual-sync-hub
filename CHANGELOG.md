@@ -7,6 +7,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-05-07
+
+### Added
+- Stripe webhook handling with signature verification, provider settings for per-environment webhook signing secrets, and route-level coverage for verified and rejected Stripe webhook requests.
+- Stripe Financial Connections lifecycle handling for webhook-driven deactivation, reactivation, and disconnect events, including persisted connection health updates and automatic disabling of affected links.
+- Webhook-driven incremental Stripe transaction sync that consumes successful `financial_connections.account.refreshed_transactions` events without issuing a second refresh call.
+
+### Changed
+- Refactored Stripe account-link sync internals so manual/scheduled syncs and webhook-triggered syncs share the same reconciliation path while allowing the webhook flow to skip redundant provider refresh calls.
+
 ## [0.20.0] - 2026-05-07
 
 ### Added
