@@ -442,6 +442,114 @@ describe("server auth and connection routes", () => {
     expect(disconnectConnection).toHaveBeenCalledWith("conn-simplefin-1");
   });
 
+  it("creates a Home Values connection", async () => {
+    const createHomeValueConnection = vi.fn().mockResolvedValue({
+      connectionId: "connection-home-value-1"
+    });
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-home-values",
+              username: "admin"
+            })
+          },
+          appService: {
+            createHomeValueConnection
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/connections/home-values",
+      payload: {
+        label: "Primary residence",
+        address: "123 Main St, Springfield, IL",
+        source: "AVERAGE",
+        redfinEstimate: 650000,
+        redfinUrl: "https://www.redfin.com/example",
+        zillowEstimate: 645000,
+        zillowUrl: "https://www.zillow.com/example"
+      },
+      cookies: await loginAsAdmin(app)
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      connectionId: "connection-home-value-1"
+    });
+    expect(createHomeValueConnection).toHaveBeenCalledWith({
+      label: "Primary residence",
+      address: "123 Main St, Springfield, IL",
+      source: "AVERAGE",
+      redfinEstimate: 650000,
+      redfinUrl: "https://www.redfin.com/example",
+      zillowEstimate: 645000,
+      zillowUrl: "https://www.zillow.com/example"
+    });
+  });
+
+  it("updates a Home Values connection", async () => {
+    const updateHomeValueConnection = vi.fn().mockResolvedValue({
+      connectionId: "connection-home-value-1"
+    });
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-home-values",
+              username: "admin"
+            })
+          },
+          appService: {
+            updateHomeValueConnection
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/connections/connection-home-value-1/home-values",
+      payload: {
+        label: "Primary residence",
+        address: "123 Main St, Springfield, IL",
+        source: "ZILLOW",
+        redfinEstimate: 650000,
+        redfinUrl: "https://www.redfin.com/example",
+        zillowEstimate: 648500,
+        zillowUrl: "https://www.zillow.com/example"
+      },
+      cookies: await loginAsAdmin(app)
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      connectionId: "connection-home-value-1"
+    });
+    expect(updateHomeValueConnection).toHaveBeenCalledWith("connection-home-value-1", {
+      label: "Primary residence",
+      address: "123 Main St, Springfield, IL",
+      source: "ZILLOW",
+      redfinEstimate: 650000,
+      redfinUrl: "https://www.redfin.com/example",
+      zillowEstimate: 648500,
+      zillowUrl: "https://www.zillow.com/example"
+    });
+  });
+
   it("returns Teller Connect config and persists a Teller enrollment", async () => {
     const getConnectConfig = vi.fn().mockReturnValue({
       applicationId: "app_test_123",

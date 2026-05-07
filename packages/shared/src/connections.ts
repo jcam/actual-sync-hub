@@ -1,6 +1,8 @@
 import type { ConnectionStatus, Provider } from "./core.js";
 import type { SyncHealthDto } from "./health.js";
 
+export type HomeValueSource = "REDFIN" | "ZILLOW" | "AVERAGE";
+
 export type TellerConnectConfigDto = {
   applicationId: string;
   environment: "sandbox" | "development" | "production";
@@ -47,6 +49,17 @@ export type ConnectionAccountDto = {
   providerInstitutionName?: string | null;
 }
 
+export type HomeValueConnectionDetailsDto = {
+  address: string;
+  source: HomeValueSource;
+  redfinEstimate?: number | null;
+  redfinUrl?: string | null;
+  zillowEstimate?: number | null;
+  zillowUrl?: string | null;
+  calculatedValue?: number | null;
+  lastCalculatedAt?: string | null;
+}
+
 export type ConnectionDto = {
   id: string;
   provider: Provider;
@@ -58,10 +71,21 @@ export type ConnectionDto = {
   providerAccountsUrl?: string | null;
   lastRefreshedAt?: string | null;
   health?: SyncHealthDto | null;
+  homeValues?: HomeValueConnectionDetailsDto | null;
   accounts: ConnectionAccountDto[];
 }
 
 export type ProviderConnectResult = {
   connectionId: string;
   warning?: string;
+}
+
+export type UpsertHomeValueConnectionPayload = {
+  label?: string | null;
+  address: string;
+  source: HomeValueSource;
+  redfinEstimate?: number | null;
+  redfinUrl?: string | null;
+  zillowEstimate?: number | null;
+  zillowUrl?: string | null;
 }

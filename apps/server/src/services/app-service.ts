@@ -12,6 +12,7 @@ import type {
   Provider,
   RuntimeInfoDto,
   SyncRunDto,
+  UpsertHomeValueConnectionPayload,
   UpdateAccountLinkPayload
 } from "@actual-sync/shared";
 import {
@@ -52,6 +53,8 @@ import { tellerService } from "./teller-service.js";
 import type { TellerService, TellerWebhookEvent } from "./teller-service.js";
 import type { ProviderAdapter, ProviderSyncOutcome, ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
 import { clearSyncHealth, isBlockingSyncHealth, isRateLimitedSyncError, toSyncHealth } from "./sync-health.js";
+import { homeValuesService } from "./home-values-service.js";
+import type { HomeValuesService } from "./home-values-service.js";
 
 type DatabaseClient = typeof prisma;
 type ActualService = typeof actualService;
@@ -178,6 +181,8 @@ export type AppService = {
     unmatched: number;
   }>;
   createConnectionReauthSession(connectionId: string, userId: string): Promise<ConnectionReauthSessionDto>;
+  createHomeValueConnection(payload: UpsertHomeValueConnectionPayload): Promise<{ connectionId: string }>;
+  updateHomeValueConnection(connectionId: string, payload: UpsertHomeValueConnectionPayload): Promise<{ connectionId: string }>;
   disconnectConnection(connectionId: string): Promise<void>;
   refreshConnection(connectionId: string): Promise<void>;
   refreshAllConnections(): Promise<void>;
@@ -195,6 +200,7 @@ export type AppService = {
 export function createAppService({
   prisma: database = prisma,
   actualService: actual = actualService,
+  homeValuesService: homeValues = homeValuesService,
   plaidService: plaid = plaidService,
   providerSettingsService: settings = createProviderSettingsService({ prisma: database }),
   simplefinService: simplefin = simplefinService,
@@ -211,6 +217,7 @@ export function createAppService({
 }: {
   prisma?: DatabaseClient;
   actualService?: ActualService;
+  homeValuesService?: HomeValuesService;
   plaidService?: PlaidService;
   providerSettingsService?: ProviderSettingsService;
   simplefinService?: SimpleFinService;
@@ -226,6 +233,7 @@ export function createAppService({
   now?: () => Date;
 } = {}): AppService {
   const providerAdapters = {
+    HOME_VALUES: homeValues,
     PLAID: plaid,
     SIMPLEFIN: simplefin,
     TELLER: teller
@@ -274,6 +282,10 @@ export function createAppService({
   const isProviderConfigured = async (provider: Provider) => {
     const providerSettings = await getEffectiveProviderSettings();
 
+    if (provider === "HOME_VALUES") {
+      return true;
+    }
+
     if (provider === "PLAID") {
       const activePlaidSettings = getActivePlaidEnvironmentSettings(providerSettings.PLAID);
       return Boolean(activePlaidSettings.clientId && activePlaidSettings.secret);
@@ -306,6 +318,15 @@ export function createAppService({
       simpleFinMode !== "development" || Boolean(getActiveSimpleFinModeSettings(providerSettings.SIMPLEFIN)?.serverUrl);
 
     return [
+      {
+        provider: "HOME_VALUES",
+        label: "Home Values",
+        enabled: true,
+        ready: true,
+        environment: null,
+        issues: [],
+        notes: ["Use manually entered Redfin and Zillow estimates to keep an off-budget asset account current."]
+      },
       {
         provider: "PLAID",
         label: "Plaid",
@@ -358,6 +379,7 @@ export function createAppService({
   const runWithProviderBackgroundGate = async <T>(provider: Provider, task: () => Promise<T>) => {
     const providerSettings = await getEffectiveProviderSettings();
     const dynamicAutomaticSyncConcurrency: AutomaticSyncConcurrencyConfig = {
+      HOME_VALUES: providerSettings.HOME_VALUES?.automaticSyncConcurrency ?? 1,
       PLAID: providerSettings.PLAID.automaticSyncConcurrency,
       TELLER: providerSettings.TELLER.automaticSyncConcurrency,
       SIMPLEFIN: providerSettings.SIMPLEFIN.automaticSyncConcurrency
@@ -1412,6 +1434,12 @@ export function createAppService({
               : null,
           lastRefreshedAt: connection.lastRefreshedAt?.toISOString() ?? null,
           health: metadata.health ?? null,
+          homeValues:
+            connection.provider === "HOME_VALUES" &&
+            typeof metadata.homeValues === "object" &&
+            metadata.homeValues
+              ? (metadata.homeValues as ConnectionDto["homeValues"])
+              : null,
           accounts: connection.accounts.map(account => {
             const simplefinRaw =
               connection.provider === "SIMPLEFIN" ? parseSimpleFinAccountRawJson(account.rawJson) : {};
@@ -1432,6 +1460,14 @@ export function createAppService({
           })
         };
       });
+    },
+
+    async createHomeValueConnection(payload) {
+      return homeValues.createConnection(payload);
+    },
+
+    async updateHomeValueConnection(connectionId, payload) {
+      return homeValues.updateConnection(connectionId, payload);
     },
 
     async listActualAccounts(): Promise<ActualAccountDto[]> {
@@ -1677,8 +1713,19 @@ export function createAppService({
 
       const metadata = parseConnectionMetadata(connection.metadataJson);
       const providerKey = connection.provider.toLowerCase();
-      const healthAction = connection.provider === "SIMPLEFIN" ? "MANUAL_RECONNECT" : "REAUTH_CONNECTION";
-      const healthMessage = `${connection.provider === "TELLER" ? "Teller" : connection.provider === "PLAID" ? "Plaid" : "SimpleFIN"} connection was disconnected and must be reconnected.`;
+      const healthAction =
+        connection.provider === "SIMPLEFIN" || connection.provider === "HOME_VALUES"
+          ? "MANUAL_RECONNECT"
+          : "REAUTH_CONNECTION";
+      const providerLabel =
+        connection.provider === "TELLER"
+          ? "Teller"
+          : connection.provider === "PLAID"
+            ? "Plaid"
+            : connection.provider === "SIMPLEFIN"
+              ? "SimpleFIN"
+              : "Home Values";
+      const healthMessage = `${providerLabel} connection was disconnected and must be reconnected.`;
 
       await database.$transaction(async tx => {
         await tx.connection.update({

@@ -82,6 +82,9 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
             },
             transactionsInitialDays: 45,
             automaticSyncConcurrency: 1
+          },
+          HOME_VALUES: {
+            automaticSyncConcurrency: 1
           }
         },
         plaid: {
@@ -110,6 +113,8 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       listActualBankSyncLinks: vi.fn(),
       importExistingSimpleFinLinks: vi.fn(),
       createConnectionReauthSession: vi.fn(),
+      createHomeValueConnection: vi.fn(),
+      updateHomeValueConnection: vi.fn(),
       disconnectConnection: vi.fn(),
       refreshConnection: vi.fn(),
       refreshAllConnections: vi.fn(),
@@ -174,6 +179,9 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           },
           transactionsInitialDays: 45,
           automaticSyncConcurrency: 1
+        },
+        HOME_VALUES: {
+          automaticSyncConcurrency: 1
         }
       }),
       get: vi.fn(),
@@ -217,6 +225,15 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       refreshConnection: vi.fn(),
       syncAccountLink: vi.fn(),
       ...(overrides.simplefinService as object | undefined)
+    },
+    homeValuesService: {
+      provider: "HOME_VALUES" as const,
+      isConfigured: vi.fn().mockReturnValue(true),
+      createConnection: vi.fn(),
+      updateConnection: vi.fn(),
+      refreshConnection: vi.fn(),
+      syncAccountLink: vi.fn(),
+      ...(overrides.homeValuesService as object | undefined)
     }
   };
 }

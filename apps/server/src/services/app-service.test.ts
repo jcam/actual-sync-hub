@@ -426,22 +426,28 @@ describe.sequential("app service", () => {
 
     const runtime = await service.getRuntimeInfo();
 
-    expect(runtime.providers).toEqual([
-      expect.objectContaining({
-        provider: "PLAID",
-        ready: false,
-        issues: ["Enter a Plaid client ID and secret to enable Plaid connections."]
-      }),
-      expect.objectContaining({
-        provider: "TELLER",
-        ready: false,
-        issues: ["Enter Teller client certificate and key PEM values to enable non-sandbox Teller connections."]
-      }),
-      expect.objectContaining({
-        provider: "SIMPLEFIN",
-        ready: true
-      })
-    ]);
+    expect(runtime.providers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: "HOME_VALUES",
+          ready: true
+        }),
+        expect.objectContaining({
+          provider: "PLAID",
+          ready: false,
+          issues: ["Enter a Plaid client ID and secret to enable Plaid connections."]
+        }),
+        expect.objectContaining({
+          provider: "TELLER",
+          ready: false,
+          issues: ["Enter Teller client certificate and key PEM values to enable non-sandbox Teller connections."]
+        }),
+        expect.objectContaining({
+          provider: "SIMPLEFIN",
+          ready: true
+        })
+      ])
+    );
   });
 
   it("disables external sync writeback in runtime info when the Actual runtime lacks getExternalSyncAccount", async () => {

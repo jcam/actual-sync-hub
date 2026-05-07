@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-05-07
+
+### Added
+- A new Home Values provider that tracks manually entered Redfin and Zillow estimates and syncs them into Actual through synthetic valuation transactions for off-budget asset accounts.
+- Dedicated Home Values connection management UI for creating, editing, recalculating, and disconnecting tracked properties.
+
+### Changed
+- Extended provider settings, runtime status, account-link UI, and connection DTOs so non-transaction providers like Home Values can participate cleanly in the sync hub.
+
 ## [0.14.0] - 2026-05-07
 
 ### Added

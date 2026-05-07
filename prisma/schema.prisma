@@ -11,6 +11,7 @@ enum Provider {
   PLAID
   TELLER
   SIMPLEFIN
+  HOME_VALUES
 }
 
 enum ConnectionStatus {

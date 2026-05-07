@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createAppService } from "../services/app-service.js";
 import { createAuthService } from "../services/auth.js";
 import { createActualService } from "../services/actual-service.js";
+import { createHomeValuesService } from "../services/home-values-service.js";
 import { createPlaidService } from "../services/plaid-service.js";
 import { createProviderSettingsService } from "../services/provider-settings-service.js";
 import { simplefinService } from "../services/simplefin-service.js";
@@ -107,6 +108,10 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
     const providerSettingsService = createProviderSettingsService({
       prisma
     });
+    const homeValuesService = createHomeValuesService({
+      prisma,
+      providerSettings: providerSettingsService
+    });
     const authService = createAuthService({
       prisma
     });
@@ -118,6 +123,7 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
       context: {
         prisma,
         actualService,
+        homeValuesService,
         plaidService,
         providerSettingsService,
         simplefinService,

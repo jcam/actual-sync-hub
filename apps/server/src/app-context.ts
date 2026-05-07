@@ -6,6 +6,8 @@ import { createAppService } from './services/app-service.js';
 import type { AppService } from './services/app-service.js';
 import { createAuthService } from './services/auth.js';
 import type { AuthService } from './services/auth.js';
+import { createHomeValuesService } from './services/home-values-service.js';
+import type { HomeValuesService } from './services/home-values-service.js';
 import { plaidService } from './services/plaid-service.js';
 import type { PlaidService } from './services/plaid-service.js';
 import { createProviderSettingsService } from './services/provider-settings-service.js';
@@ -19,6 +21,7 @@ export type AppContext = {
   prisma: PrismaClient;
   authService: AuthService;
   appService: AppService;
+  homeValuesService: HomeValuesService;
   plaidService: PlaidService;
   providerSettingsService: ProviderSettingsService;
   simplefinService: SimpleFinService;
@@ -29,6 +32,7 @@ export type AppContext = {
 export function createAppContext(overrides: Partial<AppContext> = {}): AppContext {
   const database = overrides.prisma ?? prisma;
   const settings = overrides.providerSettingsService ?? createProviderSettingsService({ prisma: database });
+  const homeValues = overrides.homeValuesService ?? createHomeValuesService({ prisma: database, providerSettings: settings });
   const plaid = overrides.plaidService ?? plaidService;
   const simplefin = overrides.simplefinService ?? simplefinService;
   const teller = overrides.tellerService ?? tellerService;
@@ -36,6 +40,7 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
   return {
     prisma: database,
     actualService: overrides.actualService ?? actualService,
+    homeValuesService: homeValues,
     plaidService: plaid,
     providerSettingsService: settings,
     simplefinService: simplefin,
@@ -46,6 +51,7 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
       createAppService({
         prisma: database,
         actualService: overrides.actualService ?? actualService,
+        homeValuesService: homeValues,
         plaidService: plaid,
         providerSettingsService: settings,
         simplefinService: simplefin,

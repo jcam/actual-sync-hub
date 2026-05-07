@@ -36,6 +36,7 @@ export function AccountCard({
   const activeConnectionOption = account.options.find(option => option.connectionId === account.link.connectionId);
   const automaticSyncPauseSummary =
     form.isEnabled && form.syncFrequency !== "MANUAL" ? getAutomaticSyncPauseSummary(account.link) : null;
+  const categoryMappingRelevant = (form.provider ?? account.link.provider) !== "HOME_VALUES";
   const blockingConnectionState =
     activeConnectionOption?.connectionStatus !== "ACTIVE" ||
     activeConnectionOption?.connectionHealth?.state === "REAUTH_REQUIRED" ||
@@ -178,18 +179,20 @@ export function AccountCard({
         ) : null}
       </div>
 
-      <section className="category-summary-panel">
-        <div>
-          <p className="eyebrow">Category mapping</p>
-          <p className="muted">
-            {account.link.categoryMappings.length} explicit mapping{account.link.categoryMappings.length === 1 ? "" : "s"} ·{" "}
-            {account.link.seenCategoryNames.length} recent provider categor{account.link.seenCategoryNames.length === 1 ? "y" : "ies"}
-          </p>
-        </div>
-        <Link className="ghost-button inline-link-button" to={`/accounts/${account.id}/mappings`}>
-          Edit category mappings
-        </Link>
-      </section>
+      {categoryMappingRelevant ? (
+        <section className="category-summary-panel">
+          <div>
+            <p className="eyebrow">Category mapping</p>
+            <p className="muted">
+              {account.link.categoryMappings.length} explicit mapping{account.link.categoryMappings.length === 1 ? "" : "s"} ·{" "}
+              {account.link.seenCategoryNames.length} recent provider categor{account.link.seenCategoryNames.length === 1 ? "y" : "ies"}
+            </p>
+          </div>
+          <Link className="ghost-button inline-link-button" to={`/accounts/${account.id}/mappings`}>
+            Edit category mappings
+          </Link>
+        </section>
+      ) : null}
 
       {account.link.health ? (
         <SyncHealthPanel

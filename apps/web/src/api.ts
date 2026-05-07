@@ -12,6 +12,7 @@ import type {
   SessionDto,
   SyncRunDto,
   TellerConnectConfigDto,
+  UpsertHomeValueConnectionPayload,
   UpdateAccountLinkPayload
 } from "@actual-sync/shared";
 import { ApiError } from "./lib/errors";
@@ -120,6 +121,18 @@ export const api = {
         body: JSON.stringify({ connectionId })
       }
     );
+  },
+  createHomeValueConnection(payload: UpsertHomeValueConnectionPayload) {
+    return request<ProviderConnectResult>("/api/connections/home-values", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  updateHomeValueConnection(id: string, payload: UpsertHomeValueConnectionPayload) {
+    return request<ProviderConnectResult>(`/api/connections/${id}/home-values`, {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    });
   },
   getTellerConnectConfig() {
     return request<TellerConnectConfigDto>("/api/connections/teller/connect-config");

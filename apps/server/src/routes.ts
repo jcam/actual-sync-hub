@@ -17,7 +17,7 @@ const connectionIdParamsSchema = z.object({
 });
 
 const providerParamsSchema = z.object({
-  provider: z.enum(["PLAID", "TELLER", "SIMPLEFIN"])
+  provider: z.enum(["PLAID", "TELLER", "SIMPLEFIN", "HOME_VALUES"])
 });
 
 const externalSyncStatusQuerySchema = z.object({
@@ -26,6 +26,16 @@ const externalSyncStatusQuerySchema = z.object({
 
 const externalSyncBodySchema = z.object({
   accountId: z.string().min(1)
+});
+
+const homeValueConnectionBodySchema = z.object({
+  label: z.string().min(1).nullable().optional(),
+  address: z.string().min(1),
+  source: z.enum(["REDFIN", "ZILLOW", "AVERAGE"]),
+  redfinEstimate: z.number().positive().nullable().optional(),
+  redfinUrl: z.string().url().nullable().optional(),
+  zillowEstimate: z.number().positive().nullable().optional(),
+  zillowUrl: z.string().url().nullable().optional()
 });
 
 const tellerWebhookBodySchema = z.object({
@@ -329,6 +339,25 @@ export async function registerRoutes(
     return context.appService.importExistingSimpleFinLinks(body.connectionId);
   });
 
+  app.post("/api/connections/home-values", async (request, reply) => {
+    if (!assertAuthenticated(request, reply)) {
+      return;
+    }
+
+    const body = homeValueConnectionBodySchema.parse(request.body ?? {});
+    return context.appService.createHomeValueConnection(body);
+  });
+
+  app.put("/api/connections/:id/home-values", async (request, reply) => {
+    if (!assertAuthenticated(request, reply)) {
+      return;
+    }
+
+    const params = connectionIdParamsSchema.parse(request.params);
+    const body = homeValueConnectionBodySchema.parse(request.body ?? {});
+    return context.appService.updateHomeValueConnection(params.id, body);
+  });
+
   app.get("/api/connections/teller/connect-config", async (request, reply) => {
     if (!assertAuthenticated(request, reply)) {
       return;
@@ -479,7 +508,7 @@ export async function registerRoutes(
       .object({
         actualAccountName: z.string().min(1),
         assetType: z.literal("BANK"),
-        provider: z.enum(["PLAID", "TELLER", "SIMPLEFIN"]).nullable().optional(),
+        provider: z.enum(["PLAID", "TELLER", "SIMPLEFIN", "HOME_VALUES"]).nullable().optional(),
         connectionId: z.string().nullable().optional(),
         connectionAccountId: z.string().nullable().optional(),
         syncFrequency: z.enum(["MANUAL", "HOURLY", "DAILY", "WEEKLY"]),

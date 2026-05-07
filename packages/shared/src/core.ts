@@ -1,4 +1,4 @@
-export type Provider = "PLAID" | "TELLER" | "SIMPLEFIN";
+export type Provider = "PLAID" | "TELLER" | "SIMPLEFIN" | "HOME_VALUES";
 export type ActualBankSyncSource = "simpleFin" | "goCardless" | "pluggyai" | "external";
 export type ConnectionStatus = "ACTIVE" | "ERROR" | "DISCONNECTED";
 export type SyncFrequency = "MANUAL" | "HOURLY" | "DAILY" | "WEEKLY";

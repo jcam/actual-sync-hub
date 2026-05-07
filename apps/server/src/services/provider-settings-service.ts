@@ -1,4 +1,5 @@
 import type {
+  HomeValuesProviderSettingsDto,
   PlaidProviderSettingsDto,
   Provider,
   ProviderSettingsByProviderDto,
@@ -61,10 +62,15 @@ const simpleFinSettingsSchema = z.object({
   automaticSyncConcurrency: z.coerce.number().int().min(1).max(20)
 });
 
+const homeValuesSettingsSchema = z.object({
+  automaticSyncConcurrency: z.coerce.number().int().min(1).max(20)
+});
+
 export const providerSchemas = {
   PLAID: plaidSettingsSchema,
   TELLER: tellerSettingsSchema,
-  SIMPLEFIN: simpleFinSettingsSchema
+  SIMPLEFIN: simpleFinSettingsSchema,
+  HOME_VALUES: homeValuesSettingsSchema
 } as const;
 
 function defaultProviderSettings(): ProviderSettingsDto {
@@ -117,6 +123,9 @@ function defaultProviderSettings(): ProviderSettingsDto {
       },
       transactionsInitialDays: 45,
       automaticSyncConcurrency: 2
+    },
+    HOME_VALUES: {
+      automaticSyncConcurrency: 1
     }
   };
 }
@@ -212,6 +221,17 @@ function normalizeSimpleFinSettings(raw: unknown, defaults: SimpleFinProviderSet
   };
 }
 
+function normalizeHomeValuesSettings(raw: unknown, defaults: HomeValuesProviderSettingsDto) {
+  if (!raw || typeof raw !== "object") {
+    return raw;
+  }
+
+  const value = raw as Record<string, unknown>;
+  return {
+    automaticSyncConcurrency: value.automaticSyncConcurrency ?? defaults.automaticSyncConcurrency
+  };
+}
+
 function parseProviderSettings<T extends Provider>(
   provider: T,
   raw: string | null | undefined,
@@ -228,7 +248,9 @@ function parseProviderSettings<T extends Provider>(
         ? normalizePlaidSettings(parsed, defaults.PLAID)
         : provider === "TELLER"
           ? normalizeTellerSettings(parsed, defaults.TELLER)
-          : normalizeSimpleFinSettings(parsed, defaults.SIMPLEFIN);
+          : provider === "SIMPLEFIN"
+            ? normalizeSimpleFinSettings(parsed, defaults.SIMPLEFIN)
+            : normalizeHomeValuesSettings(parsed, defaults.HOME_VALUES ?? defaultProviderSettings().HOME_VALUES!);
     return providerSchemas[provider].parse(normalized) as ProviderSettingsByProviderDto<T>;
   } catch {
     return null;
@@ -256,7 +278,8 @@ export function createProviderSettingsService({
       return {
         PLAID: parseProviderSettings("PLAID", byProvider.get("PLAID"), defaults) ?? defaults.PLAID,
         TELLER: parseProviderSettings("TELLER", byProvider.get("TELLER"), defaults) ?? defaults.TELLER,
-        SIMPLEFIN: parseProviderSettings("SIMPLEFIN", byProvider.get("SIMPLEFIN"), defaults) ?? defaults.SIMPLEFIN
+        SIMPLEFIN: parseProviderSettings("SIMPLEFIN", byProvider.get("SIMPLEFIN"), defaults) ?? defaults.SIMPLEFIN,
+        HOME_VALUES: parseProviderSettings("HOME_VALUES", byProvider.get("HOME_VALUES"), defaults) ?? defaults.HOME_VALUES
       };
     },
 

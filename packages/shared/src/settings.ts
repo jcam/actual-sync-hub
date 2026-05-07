@@ -52,17 +52,24 @@ export type SimpleFinProviderSettingsDto = {
   automaticSyncConcurrency: number;
 }
 
+export type HomeValuesProviderSettingsDto = {
+  automaticSyncConcurrency: number;
+}
+
 export type ProviderSettingsDto = {
   PLAID: PlaidProviderSettingsDto;
   TELLER: TellerProviderSettingsDto;
   SIMPLEFIN: SimpleFinProviderSettingsDto;
+  HOME_VALUES?: HomeValuesProviderSettingsDto;
 }
 
 export type ProviderSettingsByProviderDto<T extends Provider = Provider> = T extends "PLAID"
   ? PlaidProviderSettingsDto
   : T extends "TELLER"
     ? TellerProviderSettingsDto
-    : SimpleFinProviderSettingsDto;
+    : T extends "SIMPLEFIN"
+      ? SimpleFinProviderSettingsDto
+      : HomeValuesProviderSettingsDto;
 
 export function getActivePlaidEnvironmentSettings(settings: PlaidProviderSettingsDto) {
   return settings[settings.environment];

@@ -50,7 +50,15 @@ type SimpleFinSettingsDraft = {
   automaticSyncConcurrency: string;
 };
 
-type ProviderSettingsDraft = PlaidSettingsDraft | TellerSettingsDraft | SimpleFinSettingsDraft;
+type HomeValuesSettingsDraft = {
+  automaticSyncConcurrency: string;
+};
+
+type ProviderSettingsDraft =
+  | PlaidSettingsDraft
+  | TellerSettingsDraft
+  | SimpleFinSettingsDraft
+  | HomeValuesSettingsDraft;
 
 function toDraft<T extends Provider>(
   provider: T,
@@ -102,6 +110,12 @@ function toDraft<T extends Provider>(
         transactionsInitialDays: String(simpleFinSettings.transactionsInitialDays),
         automaticSyncConcurrency: String(simpleFinSettings.automaticSyncConcurrency)
       } satisfies SimpleFinSettingsDraft;
+    }
+    case "HOME_VALUES": {
+      const homeValuesSettings = settings as ProviderSettingsByProviderDto<"HOME_VALUES">;
+      return {
+        automaticSyncConcurrency: String(homeValuesSettings.automaticSyncConcurrency)
+      } satisfies HomeValuesSettingsDraft;
     }
   }
 }
@@ -183,6 +197,12 @@ function toPayload<T extends Provider>(
         automaticSyncConcurrency: Number(simpleFinDraft.automaticSyncConcurrency)
       } as ProviderSettingsByProviderDto<T>;
     }
+    case "HOME_VALUES": {
+      const homeValuesDraft = draft as HomeValuesSettingsDraft;
+      return {
+        automaticSyncConcurrency: Number(homeValuesDraft.automaticSyncConcurrency)
+      } as ProviderSettingsByProviderDto<T>;
+    }
   }
 }
 
@@ -226,6 +246,7 @@ export function ProviderSettingsPanel<T extends Provider>({
   const plaidDraft = provider === "PLAID" ? (draft as PlaidSettingsDraft) : null;
   const tellerDraft = provider === "TELLER" ? (draft as TellerSettingsDraft) : null;
   const simpleFinDraft = provider === "SIMPLEFIN" ? (draft as SimpleFinSettingsDraft) : null;
+  const homeValuesDraft = provider === "HOME_VALUES" ? (draft as HomeValuesSettingsDraft) : null;
 
   return (
     <section className="panel provider-settings-panel">
@@ -666,6 +687,24 @@ export function ProviderSettingsPanel<T extends Provider>({
               />
             </label>
           </>
+        ) : null}
+
+        {homeValuesDraft ? (
+          <label>
+            <span>Automatic sync concurrency</span>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={homeValuesDraft.automaticSyncConcurrency}
+              onChange={event =>
+                setDraft(current => ({
+                  ...(current as HomeValuesSettingsDraft),
+                  automaticSyncConcurrency: event.target.value
+                }))
+              }
+            />
+          </label>
         ) : null}
       </div>
 
