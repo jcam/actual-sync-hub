@@ -7,6 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-05-07
+
+### Added
+- Salt Edge as a first-class provider, including connection/account hydration, manual refresh, transaction sync import, and dedicated managed-connections UI.
+- Salt Edge Connect and reconnect session support, including browser-driven initial auth and inline reauthentication when consent expires or bank auth needs attention.
+- Optional live Salt Edge adapter smoke tests plus a Salt Edge-to-Actual live integration test, using a pre-existing Salt Edge connection ID for headless finalize/refresh/sync validation.
+
+### Changed
+- Migrated Salt Edge integration onto the current AIS `v6` API and exposed Salt Edge environment selection as `sandbox`, `test`, or `production`, with save-time correction when the chosen mode is not supported by the client state.
+- Removed provider-settings shape normalization for greenfield installs so persisted provider config now uses only the current schemas instead of reshaping legacy JSON.
+- Pinned SimpleFIN account fetches to protocol `version=2` and dropped the deprecated string-array `errors` fallback in favor of structured `errlist` handling.
+
 ## [0.18.0] - 2026-05-07
 
 ### Added
