@@ -1,75 +1,70 @@
-# Actual Mainline External Sync PR Checklist
+# Actual Mainline External Sync PR Notes
 
-This document captures the smallest upstream Actual change set that would let this app integrate as a generic external sync bridge without teaching Actual about Plaid, Teller, or SimpleFIN.
+This document tracks the slimmer upstream Actual change set we actually kept.
 
-## TODOs In This Repo
+The final direction is:
 
-- TODO: when syncing through this bridge, read and honor Actual account-level synced prefs for non-mapping bank-sync options where practical:
-  - `sync-import-pending-${accountId}`
-  - `sync-import-notes-${accountId}`
-  - `sync-reimport-deleted-${accountId}`
-  - `sync-import-transactions-${accountId}` (`Investment Account`)
-  - `sync-update-dates-${accountId}`
-- TODO: do not attempt to support `custom-sync-mappings-${accountId}` unless the bridge also adopts Actual-native raw bank-sync payload conventions, including `raw_synced_data`.
+- let Actual understand and store external linkage metadata on accounts
+- expose a small external-sync CRUD-style API surface for that metadata
+- expose the existing account-level bank-sync preference flags through the external-sync read API
 
-## Rollout Phases
-
-### Phase 1: Accept external linkage metadata
-
-Goal:
-
-- let Actual tolerate `account_sync_source = 'external'`
-- allow a supported API to write native external sync metadata onto accounts
-- make the desktop/mobile client render linked external accounts safely
-
-Phase 1 intentionally does not include:
+We explicitly did **not** keep the broader follow-on ideas around:
 
 - external status polling
 - manual sync trigger through Actual
-- provider-specific setup or reauth flows
-
-This is the lowest-risk upstream slice and the best first PR candidate.
-
-### Phase 2: External status and manual sync bridge
-
-Goal:
-
-- let Actual query an external bridge for sync status
-- let Actual trigger a manual sync through the external bridge
-
-This depends on Phase 1 but can be proposed separately if needed.
+- external sync completion/update signaling
+- cross-client updated-account event propagation
 
 ## Goal
 
-Add a generic `external` sync source in Actual that can:
+Make it possible for an external bridge to manage Actual-linked accounts through supported APIs without teaching Actual about Plaid, Teller, SimpleFIN, or any other provider-specific transport.
 
-- mark an account as externally synced
-- store native sync metadata through supported APIs
-- fetch account sync status from an external bridge
-- trigger a manual sync through an external bridge
+Actual should:
 
-The external bridge would be this app. Actual should not own provider-specific auth, account discovery, or sync implementation details.
+- tolerate `account_sync_source = 'external'`
+- store native linkage metadata on accounts
+- let a caller read that linkage metadata back
+- let a caller clear that linkage
+- expose the normal synced-account option flags the bridge may need to honor
 
-## Scope
+Actual should **not**:
 
-In scope:
+- call the bridge over HTTP
+- own external provider auth or discovery
+- trigger manual external sync
+- own external sync runtime status
 
-- add `external` as a supported `account_sync_source`
-- add a dedicated API for native sync metadata writeback
-- add generic status and manual-sync bridge endpoints
-- update desktop/mobile client code to tolerate and display `external`
+## What We Built Upstream
 
-Out of scope:
+### 1. External linkage metadata support
 
-- provider-specific setup flows
-- provider-specific secrets in Actual
-- provider-specific account discovery in Actual
-- plugin architecture
-- teaching Actual about Plaid, Teller, or SimpleFIN
+Actual now has a neutral `external` sync source that can be written through supported APIs.
 
-## Public API Additions
+This includes:
 
-Add these new `@actual-app/api` handlers:
+- `account_sync_source = 'external'`
+- native metadata writeback onto Actual accounts
+- safe client rendering for externally linked accounts
+
+### 2. External metadata read API
+
+Actual now has a dedicated `get` API for the external-sync metadata instead of requiring callers to rely on widened generic account reads.
+
+That API returns:
+
+- linkage state
+- provider account id
+- institution info
+- mask / official name
+- stored balances
+- `last_sync`
+- synced-account preference flags
+
+### 3. External unlink API
+
+Actual exposes a narrow unlink API for externally linked accounts that reuses the existing native unlink semantics.
+
+## Current Public API Shape
 
 ### `api/account-external-sync-link`
 
@@ -86,7 +81,7 @@ type ExternalSyncMetadataInput = {
   balanceCurrent?: number | null;
   balanceAvailable?: number | null;
   balanceLimit?: number | null;
-  lastSync?: string | null; // ISO timestamp
+  lastSync?: string | null;
 };
 ```
 
@@ -108,6 +103,54 @@ Behavior:
 - optionally set balances
 - optionally set `last_sync`
 
+This is effectively the upsert/update call for durable external metadata.
+
+### `api/account-external-sync-get`
+
+Request:
+
+```ts
+type ExternalSyncAccountInfo = {
+  id: string;
+  linked: boolean;
+  syncSource: 'external' | null;
+  providerAccountId: string | null;
+  institutionName: string | null;
+  institutionExternalId: string | null;
+  mask: string | null;
+  officialName: string | null;
+  balanceCurrent: number | null;
+  balanceAvailable: number | null;
+  balanceLimit: number | null;
+  lastSync: string | null;
+  prefs: {
+    importPending: boolean;
+    importNotes: boolean;
+    reimportDeleted: boolean;
+    importTransactions: boolean;
+    updateDates: boolean;
+  };
+};
+```
+
+```ts
+'api/account-external-sync-get': (arg: {
+  id: string;
+}) => Promise<ExternalSyncAccountInfo>;
+```
+
+Behavior:
+
+- return the stored external linkage metadata for an account
+- return `linked: false` with `null` external fields when the account is not externally linked
+- return the current account-level synced-account option flags:
+  - `Import pending transactions`
+  - `Import transaction notes`
+  - `Reimport deleted transactions`
+  - `Investment Account`
+  - `Update Dates`
+- avoid widening `api/accounts-get` just to expose external-sync details
+
 ### `api/account-external-sync-unlink`
 
 ```ts
@@ -118,197 +161,88 @@ Behavior:
 
 Behavior:
 
-- clear `account_sync_source`
-- clear `account_id`
-- clear `bank`
-- clear `mask`
-- clear `official_name`
-- clear `last_sync`
-- decide whether to preserve or clear sync-derived balances
+- clear external link metadata using Actual's existing unlink semantics
+- only allow this API for externally linked accounts
 
-### `api/external-sync-status`
+## Current API Model
 
-```ts
-type ExternalSyncState =
-  | 'ok'
-  | 'syncing'
-  | 'error'
-  | 'reauth_required'
-  | 'not_configured';
+The external-sync surface is intentionally small:
 
-type ExternalSyncStatus = {
-  accountId: string;
-  configured: boolean;
-  state: ExternalSyncState;
-  message?: string | null;
-  lastSync?: string | null;
-  canSync: boolean;
-  needsReauth: boolean;
-};
-```
+- create or refresh durable metadata:
+  - `api/account-external-sync-link`
+- read durable metadata and synced-account prefs:
+  - `api/account-external-sync-get`
+- clear durable metadata:
+  - `api/account-external-sync-unlink`
 
-```ts
-'api/external-sync-status': (arg?: {
-  accountId?: string;
-}) => Promise<ExternalSyncStatus[]>;
-```
+We are deliberately treating `link` as the durable metadata upsert.
 
-### `api/external-sync`
-
-```ts
-type ExternalSyncRunResult = {
-  accountId: string;
-  state: 'ok' | 'syncing' | 'error' | 'reauth_required';
-  message?: string | null;
-  newTransactions?: number;
-  matchedTransactions?: number;
-  updatedAccounts?: string[];
-};
-```
-
-```ts
-'api/external-sync': (arg: {
-  accountId: string;
-}) => Promise<ExternalSyncRunResult>;
-```
-
-## Phase 1 Exact Scope
-
-If we want the absolute smallest upstream PR, Phase 1 should include only:
-
-- widen `AccountSyncSource` to include `external`
-- add `api/account-external-sync-link`
-- add `api/account-external-sync-unlink`
-- add internal handlers for those two operations
-- update desktop/mobile client code to tolerate and display `external`
-
-Phase 1 should not include:
-
-- `api/external-sync-status`
-- `api/external-sync`
-- external bridge server config
-- HTTP calls from Actual to an external system
+We are **not** adding a separate external-sync `update` or `complete` API in the slimmed-down branch.
 
 ## Internal Handler Additions
 
-Add generic internal handlers in `loot-core` beside the existing bank-sync handlers:
+Current handlers added in `loot-core`:
 
 - `account-external-sync-link`
+- `account-external-sync-get`
 - `account-external-sync-unlink`
+
+We did **not** keep the earlier proposed handlers:
+
+- `account-external-sync-complete`
 - `external-sync-status`
 - `external-sync`
 
-These should remain generic and should not know anything about specific external providers.
+## Client Behavior
 
-For Phase 1, only the first two handlers are required.
+For accounts with `account_sync_source === 'external'`:
 
-## External Bridge Contract
+- show them as linked
+- label them `External`
+- tolerate missing `last_sync`
+- do not assume they are one of the built-in providers
+- do not route them into native built-in sync actions
 
-Actual would call this app over HTTP using server-side configuration.
+The client changes are intentionally minimal:
 
-Suggested config:
+- safe grouping / labeling in bank sync UI
+- safe `last_sync` display
+- avoid treating external-linked accounts as built-in sync targets
 
-- `EXTERNAL_SYNC_BASE_URL`
-- `EXTERNAL_SYNC_TOKEN`
+## What We Explicitly Did Not Build
 
-Suggested headers:
+We are **not** currently pursuing these in the upstream PR:
 
-```http
-Authorization: Bearer <EXTERNAL_SYNC_TOKEN>
-Content-Type: application/json
-```
+- `api/external-sync-status`
+- `api/external-sync`
+- `api/account-external-sync-complete`
+- `updatedAccountIds` additions to `sync-event`
+- cross-client synced-indicator update signaling
+- external bridge server config in Actual
+- HTTP calls from Actual to `/external-sync/status`
+- HTTP calls from Actual to `/external-sync/sync`
+- native manual sync trigger for external providers inside Actual
+- provider-specific setup, reauth, or discovery flows
 
-### Status endpoint
+Those were part of earlier larger plans. They are not part of the slimmed-down branch.
 
-Request:
+## TODOs In This Repo
 
-```http
-GET /actual/external-sync/status?accountId=<actualAccountId>
-```
-
-Response:
-
-```json
-{
-  "accounts": [
-    {
-      "accountId": "acc_123",
-      "configured": true,
-      "state": "ok",
-      "message": null,
-      "lastSync": "2026-05-04T19:12:00.000Z",
-      "canSync": true,
-      "needsReauth": false
-    }
-  ]
-}
-```
-
-### Manual sync endpoint
-
-Request:
-
-```http
-POST /actual/external-sync/sync
-```
-
-```json
-{
-  "accountId": "acc_123"
-}
-```
-
-Response:
-
-```json
-{
-  "accountId": "acc_123",
-  "state": "ok",
-  "message": "Imported 14 transactions.",
-  "newTransactions": 14,
-  "matchedTransactions": 2,
-  "updatedAccounts": ["acc_123"]
-}
-```
-
-### Error shape
-
-Use one shared error shape from the external bridge:
-
-```json
-{
-  "error": {
-    "code": "REAUTH_REQUIRED",
-    "message": "Bank credentials need to be refreshed."
-  }
-}
-```
-
-Suggested error codes:
-
-- `NOT_CONFIGURED`
-- `REAUTH_REQUIRED`
-- `SYNC_FAILED`
-- `ACCOUNT_NOT_FOUND`
-- `UNSUPPORTED`
-
-All of the external bridge HTTP contract above is Phase 2, not Phase 1.
+- TODO: when syncing through this bridge, read and honor the returned synced-account prefs where practical:
+  - `prefs.importPending`
+  - `prefs.importNotes`
+  - `prefs.reimportDeleted`
+  - `prefs.importTransactions`
+  - `prefs.updateDates`
+- TODO: do not attempt to support `custom-sync-mappings-${accountId}` unless the bridge also adopts Actual-native raw bank-sync payload conventions, including `raw_synced_data`
 
 ## Type Changes
 
-Update Actual type unions to allow `external`.
-
-Primary change:
+Primary type change:
 
 - widen `AccountSyncSource` in `actual/packages/loot-core/src/types/models/account.ts`
 
-Current:
-
-```ts
-export type AccountSyncSource = 'simpleFin' | 'goCardless' | 'pluggyai';
-```
-
-Target:
+Target shape:
 
 ```ts
 export type AccountSyncSource =
@@ -318,108 +252,63 @@ export type AccountSyncSource =
   | 'external';
 ```
 
-Also update any other narrow sync-source unions and label maps in:
+Also update the bank-sync grouping / label maps to tolerate `external`.
 
-- `types/models/bank-sync.ts`
-- desktop bank-sync screens
-- mobile bank-sync screens
-- selection/edit flows that assume only built-in providers
-
-## Client Behavior
-
-For accounts with `account_sync_source === 'external'`:
-
-- show them as linked
-- label them `External`
-- show status from `api/external-sync-status`
-- allow manual sync via `api/external-sync`
-- do not show native provider setup or relink flows
-
-The client should tolerate the new source without crashing anywhere that currently assumes only built-ins.
-
-For Phase 1 specifically:
-
-- show them as linked
-- label them `External`
-- do not show provider-specific setup flows
-- do not require status polling or manual sync support yet
-
-## Likely Files To Touch Upstream
+## Likely Files Touched Upstream
 
 Server and types:
 
 - `actual/packages/loot-core/src/types/models/account.ts`
-- `actual/packages/loot-core/src/types/models/bank-sync.ts`
 - `actual/packages/loot-core/src/types/api-handlers.ts`
 - `actual/packages/loot-core/src/server/accounts/app.ts`
+- `actual/packages/loot-core/src/server/accounts/link.ts`
 - `actual/packages/loot-core/src/server/api.ts`
-- `actual/packages/loot-core/src/server/api-models.ts` if needed
+- `actual/packages/loot-core/src/server/db/types/index.ts`
 
 Desktop and mobile client:
 
-- `actual/packages/desktop-client/src/components/banksync/index.tsx`
 - `actual/packages/desktop-client/src/components/banksync/AccountRow.tsx`
-- `actual/packages/desktop-client/src/components/mobile/banksync/MobileBankSyncPage.tsx`
-- `actual/packages/desktop-client/src/components/mobile/banksync/BankSyncAccountsList.tsx`
-- `actual/packages/desktop-client/src/accounts/mutations.ts`
+- `actual/packages/desktop-client/src/components/banksync/bankSyncUtils.ts`
+- `actual/packages/desktop-client/src/components/accounts/Header.tsx`
 
-Optional config/docs:
+SDK surface:
 
-- sync-server or server config for external bridge URL and token
-- bank-sync docs
+- `actual/packages/api/methods.ts`
 
-Phase 1 likely does not need sync-server config changes.
+Tests:
+
+- `actual/packages/loot-core/src/server/accounts/app-external-sync.test.ts`
+- `actual/packages/loot-core/src/server/accounts/app-bank-sync.test.ts`
+- `actual/packages/desktop-client/src/components/banksync/bankSyncUtils.test.ts`
 
 ## Acceptance Criteria
 
 - Actual accepts `account_sync_source = 'external'` without crashing
-- an external bridge can mark an account as linked through supported APIs
-- the sidebar and account views treat the account as linked
-- desktop/mobile bank-sync pages render a generic external state instead of assuming a built-in provider
-- Actual can request external sync status for an account
-- Actual can trigger a manual sync for an account
-- no provider-specific logic for Plaid, Teller, or SimpleFIN is added to Actual
-
-## Phase 1 Acceptance Criteria
-
-- Actual accepts `account_sync_source = 'external'` without crashing
 - a caller can mark an account as externally linked through supported APIs
+- a caller can read the current external linkage metadata through a supported API
+- a caller can read the current synced-account preference flags through that API
 - a caller can clear that external linkage through supported APIs
 - the sidebar and account views treat the account as linked when external metadata exists
 - desktop/mobile bank-sync pages render a generic external state instead of assuming a built-in provider
 - no provider-specific logic for Plaid, Teller, or SimpleFIN is added to Actual
-
-## Phase 2 Acceptance Criteria
-
-- Actual can request external sync status for an account
-- Actual can trigger a manual sync for an account
+- no provider transport or bridge polling is added to Actual
 
 ## Open Questions
 
-- Should `api/external-sync-status` return a list or a single object when `accountId` is provided?
-- Should unlink clear `balance_current`, or preserve the last known synced balance?
-- Should the external bridge contract include a richer status taxonomy, or should Actual keep it intentionally coarse?
-- Should the external bridge config be global server config only, or per-budget?
+- Should `account-external-sync-unlink` remain a narrow external-only API, or should upstream instead expose a generic public `account-unlink`?
+- Should `findOrCreateExternalBank(...)` stay separate, or should upstream generalize the existing bank helper to accept an arbitrary bank key?
+- Should these synced-account option flags eventually get their own explicit settings API instead of riding along on `account-external-sync-get`?
+- Should unlink clear sync-derived balances, or preserve the last known values?
 
 ## Suggested PR Framing
 
 Possible title:
-
-- `Add generic external sync bridge support`
-
-Possible Phase 1 title:
 
 - `Allow generic external account sync metadata`
 
 Suggested framing:
 
 - add a neutral external sync source
-- add a safe external sync metadata API
-- add generic status and manual-sync bridge hooks
-- avoid embedding third-party provider logic in Actual
-
-Suggested Phase 1 framing:
-
-- add a neutral external sync source
-- add safe APIs for writing and clearing external sync metadata
-- make the client tolerate externally linked accounts without requiring provider-specific integration
+- add safe APIs for writing, reading, and clearing external sync metadata
+- expose the existing synced-account option flags alongside the external linkage metadata
+- make the client tolerate externally linked accounts without adding provider-specific integration or runtime bridge calls

@@ -22,7 +22,7 @@ The scheduler runs inside a single Node process that polls for due links and exe
 
 - The app syncs transactions into Actual through `@actual-app/api`.
 - Native Actual external-sync metadata writeback is optional and disabled by default.
-- Enable it with `ACTUAL_EXTERNAL_SYNC_WRITEBACK_ENABLED=1` only when the connected Actual runtime exposes the external-sync account APIs, such as the `external-sync` branch currently checked out in the sibling `actual/` repo.
+- Native external-sync writeback is enabled automatically when the connected `@actual-app/api` runtime exposes the external-sync account APIs, such as the `external-sync` branch currently checked out in the sibling `actual/` repo.
 - When enabled, linked provider accounts are written back into Actual as native `external` sync links so Actual can reflect that ownership in its own account metadata.
 - The app also exposes `/external-sync/status` and `/external-sync/sync` for an external-sync-capable Actual runtime to call when it wants native status or manual sync execution from this bridge.
 

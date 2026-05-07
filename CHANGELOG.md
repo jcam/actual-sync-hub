@@ -14,6 +14,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Changed
 - Hardened Plaid, Teller, and SimpleFIN sync result handling so provider payload quirks do not leak directly into Actual reconciliation.
 - Added detection for native Actual `external` unlink actions so previously written-back links are disabled locally and surfaced with `ACTUAL_UNLINKED` attention state instead of silently continuing to sync.
+- Replaced the `ACTUAL_EXTERNAL_SYNC_WRITEBACK_ENABLED` env flag with runtime capability detection against the installed `@actual-app/api` package.
+- Reworked Actual transaction lookup and reconciliation to rely on public date-range reads plus minimal imported-transaction metadata instead of imported-id AQL queries.
+- Simplified external-sync writeback so `lastSync` is carried through `linkExternalSyncAccount(...)`, removing the redundant completion callback path from the sync bridge.
 - Documented the remaining TODO to honor Actual account-level non-mapping bank-sync prefs from the bridge-managed sync path.
 
 ## [0.13.0] - 2026-05-06
@@ -58,7 +61,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ## [0.10.0] - 2026-05-05
 
 ### Added
-- Optional native Actual external-sync metadata writeback behind `ACTUAL_EXTERNAL_SYNC_WRITEBACK_ENABLED`, using the external-sync account APIs exposed by the checked-out Actual `external-sync` branch.
+- Optional native Actual external-sync metadata writeback when the installed `@actual-app/api` runtime exposes the external-sync account APIs.
 - External-sync bridge endpoints that expose app-managed status and manual sync execution for Actual to call through the checked-out `external-sync` branch.
 - Unified provider readiness surfacing across Plaid, Teller.io, and SimpleFIN, including shared readiness DTOs and frontend status panels.
 - Explicit provider disconnect actions for Plaid and Teller alongside the existing SimpleFIN disconnect flow.
