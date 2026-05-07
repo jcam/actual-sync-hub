@@ -802,7 +802,10 @@ export function createTellerService({
         throw new Error("Teller sandbox helpers are only available in the sandbox environment");
       }
 
-      const accessToken = effectiveConfig.sandboxAccessToken || "test_token_redacted";
+      const accessToken = effectiveConfig.sandboxAccessToken.trim();
+      if (!accessToken) {
+        throw new Error("Teller sandbox access token is required to seed a sandbox connection");
+      }
       const accounts = await listAccountsWithBalances({
         request: requestClient,
         accessToken

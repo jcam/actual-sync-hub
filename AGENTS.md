@@ -18,7 +18,7 @@ Do not assume `yarn`, `lage`, Playwright, Electron, i18n generation, or the main
 
 ## Root commands
 
-Run commands from `actual-sync`.
+Run commands from the repo root.
 
 ```bash
 npm install
@@ -107,7 +107,7 @@ There is no Playwright test harness in this repo.
 
 ## Database and schema
 
-- Prisma schema: [prisma/schema.prisma](actual-sync/prisma/schema.prisma)
+- Prisma schema: `prisma/schema.prisma`
 - Prisma client output: `apps/server/src/generated/prisma`
 
 When schema changes are made:
@@ -213,7 +213,7 @@ There is no React Native, Electron desktop app, or main-Actual component library
 
 - Prefer local validation for obvious user-input mistakes before submit.
 - Shared API validation errors should flow through:
-  - [apps/web/src/lib/errors.ts](actual-sync/apps/web/src/lib/errors.ts)
+  - `apps/web/src/lib/errors.ts`
 - Server-side Zod failures are intentionally surfaced as human-readable field messages rather than a raw generic `Invalid request`.
 - When tightening validation, update both:
   - the relevant page/component tests
@@ -222,18 +222,18 @@ There is no React Native, Electron desktop app, or main-Actual component library
 ## Where to look first
 
 - Main orchestration and account-link behavior:
-  - [apps/server/src/services/app-service.ts](actual-sync/apps/server/src/services/app-service.ts)
+  - `apps/server/src/services/app-service.ts`
 - Actual runtime bridge:
-  - [apps/server/src/services/actual-worker.ts](actual-sync/apps/server/src/services/actual-worker.ts)
+  - `apps/server/src/services/actual-worker.ts`
 - Home Values fetch and sync logic:
-  - [apps/server/src/services/home-values-service.ts](actual-sync/apps/server/src/services/home-values-service.ts)
+  - `apps/server/src/services/home-values-service.ts`
 - Provider settings schemas/defaults:
-  - [apps/server/src/services/provider-settings-service.ts](actual-sync/apps/server/src/services/provider-settings-service.ts)
+  - `apps/server/src/services/provider-settings-service.ts`
 - Home Values UI:
-  - [apps/web/src/routes/HomeValuesConnectionsPage.tsx](actual-sync/apps/web/src/routes/HomeValuesConnectionsPage.tsx)
+  - `apps/web/src/routes/HomeValuesConnectionsPage.tsx`
 - Shared DTOs/settings:
-  - [packages/shared/src/connections.ts](actual-sync/packages/shared/src/connections.ts)
-  - [packages/shared/src/settings.ts](actual-sync/packages/shared/src/settings.ts)
+  - `packages/shared/src/connections.ts`
+  - `packages/shared/src/settings.ts`
 
 ## Release hygiene
 

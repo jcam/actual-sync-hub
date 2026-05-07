@@ -74,7 +74,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Changed
 - Upgraded root lint scripts so `npm run lint` now performs a real code-quality pass before workspace typechecks.
 - Brought the repo into compliance with stricter type, promise, import, and boundary rules modeled after the main Actual repo.
-- Rewrote [AGENTS.md](actual-sync/AGENTS.md) so its build, test, and workflow guidance matches this repo instead of the main Actual monorepo.
+- Rewrote `AGENTS.md` so its build, test, and workflow guidance matches this repo instead of the main Actual monorepo.
 
 ## [0.12.0] - 2026-05-06
 
@@ -97,7 +97,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Added
 - Provider settings as a persisted in-app configuration surface, with dedicated settings panels and readiness panels on the Plaid, Teller.io, and SimpleFIN pages.
 - Mode-specific provider settings for Plaid, Teller, and SimpleFIN, including sandbox/development/production selection where applicable.
-- Containerized `dev:live-sandbox` support via [Dockerfile.dev](actual-sync/Dockerfile.dev), with scripted startup of Actual, the dev app container, and sandbox seeding.
+- Containerized `dev:live-sandbox` support via `Dockerfile.dev`, with scripted startup of Actual, the dev app container, and sandbox seeding.
 
 ### Changed
 - Moved provider credentials and provider tuning out of runtime `.env` fallbacks and into the app-managed provider settings model.

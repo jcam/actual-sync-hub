@@ -7,7 +7,7 @@ This project was informed by the design and implementation approaches of the fol
 ### tim-smart/actualbudget-sync
 - Repository: [https://github.com/tim-smart/actualbudget-sync](https://github.com/tim-smart/actualbudget-sync)
 - License: MIT
-- Local reference copy used during development: `outside-this-repo reference copy`
+- Local reference copies outside this repo were used during development.
 
 Used as a reference for:
 - Actual client version-matching strategy
@@ -17,7 +17,7 @@ Used as a reference for:
 ### redbark-co/actual-sync
 - Repository: [https://github.com/redbark-co/actual-sync](https://github.com/redbark-co/actual-sync)
 - License: MIT
-- Local reference copy used during development: `outside-this-repo reference copy`
+- Local reference copies outside this repo were used during development.
 
 Used as a reference for:
 - Actual API version compatibility handling

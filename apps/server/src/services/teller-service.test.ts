@@ -529,4 +529,29 @@ describe.sequential("teller service", () => {
     expect(connection.accounts).toHaveLength(1);
     expect(fixtureCache.getTeller).toHaveBeenCalledOnce();
   });
+
+  it("requires a sandbox access token before seeding a Teller sandbox connection", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const service = createTellerService({
+      prisma,
+      config: {
+        appId: "teller-app-id",
+        environment: "sandbox",
+        certificateFile: "",
+        keyFile: "",
+        sandboxAccessToken: "",
+        transactionsInitialDays: 90,
+        transactionsOverlapDays: 10,
+        webhookSigningSecrets: [],
+        webhookToleranceSeconds: 180
+      } satisfies TellerConfig,
+      request: vi.fn()
+    });
+
+    await expect(service.seedSandboxConnection("Sandbox Teller")).rejects.toThrow(
+      "Teller sandbox access token is required to seed a sandbox connection"
+    );
+  });
 });

@@ -4,9 +4,9 @@ import { createTestDatabase } from "../test/test-db.js";
 import { createHomeValuesService } from "./home-values-service.js";
 
 const redfinUrl = "https://www.redfin.com/MA/Somerville/77-Columbus-Ave-02143/home/11475799";
-const movotoUrl = "https://www.movoto.com/framingham-ma/77-columbus-ave-somerville-ma-02143/pid_jiivq42tfh/";
-const homesUrl = "https://www.homes.com/property/380-winch-st-framingham-ma/1bhcn8d1lkjlz/";
-const truliaUrl = "https://www.trulia.com/home/77-columbus-ave-somerville-ma-02143-165982312";
+const movotoUrl = "https://www.movoto.com/somerville-ma/77-columbus-ave-somerville-ma-02143/pid_testmovoto/";
+const homesUrl = "https://www.homes.com/property/77-columbus-ave-somerville-ma/testhomes/";
+const truliaUrl = "https://www.trulia.com/home/77-columbus-ave-somerville-ma-02143-testtrulia";
 const dayMs = 24 * 60 * 60 * 1000;
 
 function buildHomeValuesProviderSettings(overrides?: {
