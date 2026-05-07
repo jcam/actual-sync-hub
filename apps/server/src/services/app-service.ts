@@ -325,7 +325,9 @@ export function createAppService({
         ready: true,
         environment: null,
         issues: [],
-        notes: ["Use manually entered Redfin and Zillow estimates to keep an off-budget asset account current."]
+        notes: [
+          "Use property URLs from Redfin, Movoto, Homes.com, or Trulia to keep an off-budget asset account current with weekly spaced refreshes."
+        ]
       },
       {
         provider: "PLAID",
@@ -424,6 +426,101 @@ export function createAppService({
         connectionAccount: true
       }
     });
+  };
+
+  const getNextHomeValueWeeklySlot = async (excludeLinkId?: string | null) => {
+    const weeklyLinks = await database.accountLink.findMany({
+      where: {
+        provider: "HOME_VALUES",
+        syncFrequency: "WEEKLY",
+        isEnabled: true,
+        status: {
+          in: [...CURRENT_LINK_STATUSES]
+        },
+        ...(excludeLinkId
+          ? {
+              id: {
+                not: excludeLinkId
+              }
+            }
+          : {})
+      },
+      select: {
+        syncHour: true,
+        syncDayOfWeek: true
+      }
+    });
+
+    const usedSlots = new Set(
+      weeklyLinks
+        .map(link =>
+          typeof link.syncDayOfWeek === "number" && typeof link.syncHour === "number"
+            ? link.syncDayOfWeek * 24 + link.syncHour
+            : null
+        )
+        .filter((slot): slot is number => slot != null)
+    );
+
+    for (let slot = 0; slot < 7 * 24; slot += 1) {
+      if (!usedSlots.has(slot)) {
+        return {
+          syncDayOfWeek: Math.floor(slot / 24),
+          syncHour: slot % 24
+        };
+      }
+    }
+
+    const fallbackSlot = usedSlots.size % (7 * 24);
+    return {
+      syncDayOfWeek: Math.floor(fallbackSlot / 24),
+      syncHour: fallbackSlot % 24
+    };
+  };
+
+  const normalizeHomeValueLinkSchedule = async (
+    payload: UpdateAccountLinkPayload,
+    currentLink?: {
+      id: string;
+      provider: Provider | null;
+      syncFrequency: "MANUAL" | "HOURLY" | "DAILY" | "WEEKLY";
+      syncHour: number | null;
+      syncDayOfWeek: number | null;
+    } | null
+  ): Promise<UpdateAccountLinkPayload> => {
+    if (payload.provider !== "HOME_VALUES") {
+      return payload;
+    }
+
+    if (payload.syncFrequency === "MANUAL" || !payload.isEnabled) {
+      return {
+        ...payload,
+        syncFrequency: "MANUAL",
+        syncHour: null,
+        syncDayOfWeek: null
+      };
+    }
+
+    if (
+      currentLink?.provider === "HOME_VALUES" &&
+      currentLink.syncFrequency === "WEEKLY" &&
+      typeof currentLink.syncHour === "number" &&
+      typeof currentLink.syncDayOfWeek === "number"
+    ) {
+      return {
+        ...payload,
+        syncFrequency: "WEEKLY",
+        syncHour: currentLink.syncHour,
+        syncDayOfWeek: currentLink.syncDayOfWeek
+      };
+    }
+
+    const slot = await getNextHomeValueWeeklySlot(currentLink?.id ?? null);
+    return {
+      ...payload,
+      syncFrequency: "WEEKLY",
+      syncHour: slot.syncHour,
+      syncDayOfWeek: slot.syncDayOfWeek
+    };
   };
 
   const listCurrentSyncLinks = (where: Prisma.AccountLinkWhereInput = {}) =>
@@ -1706,6 +1803,23 @@ export function createAppService({
         }
       });
 
+      if (connection.provider === "HOME_VALUES") {
+        await database.$transaction(async tx => {
+          await tx.accountLink.deleteMany({
+            where: {
+              connectionId: connection.id
+            }
+          });
+
+          await tx.connection.delete({
+            where: {
+              id: connection.id
+            }
+          });
+        });
+        return;
+      }
+
       const adapter = getProviderAdapter(connection.provider);
       if (adapter?.disconnectConnection) {
         await adapter.disconnectConnection(connectionId);
@@ -1714,7 +1828,7 @@ export function createAppService({
       const metadata = parseConnectionMetadata(connection.metadataJson);
       const providerKey = connection.provider.toLowerCase();
       const healthAction =
-        connection.provider === "SIMPLEFIN" || connection.provider === "HOME_VALUES"
+        connection.provider === "SIMPLEFIN"
           ? "MANUAL_RECONNECT"
           : "REAUTH_CONNECTION";
       const providerLabel =
@@ -1856,6 +1970,7 @@ export function createAppService({
 
       const mappingChanged = linkIdentityChanged(currentLink, payload);
       const existingConfig = parseLinkConfig(currentLink?.configJson);
+      const normalizedSchedulePayload = await normalizeHomeValueLinkSchedule(payload, currentLink);
       const nextConfig = {
         providerSyncState: mappingChanged ? undefined : existingConfig.providerSyncState,
         health: mappingChanged ? null : existingConfig.health ?? null,
@@ -1882,15 +1997,15 @@ export function createAppService({
           data: {
             status: "ACTIVE",
             actualAccountId,
-            actualAccountName: payload.actualAccountName,
-            assetType: payload.assetType,
-            provider: toPrismaProvider(payload.provider ?? null),
-            connectionId: payload.connectionId ?? null,
-            connectionAccountId: payload.connectionAccountId ?? null,
-            syncFrequency: payload.syncFrequency,
-            syncHour: payload.syncHour ?? null,
-            syncDayOfWeek: payload.syncDayOfWeek ?? null,
-            isEnabled: payload.isEnabled,
+            actualAccountName: normalizedSchedulePayload.actualAccountName,
+            assetType: normalizedSchedulePayload.assetType,
+            provider: toPrismaProvider(normalizedSchedulePayload.provider ?? null),
+            connectionId: normalizedSchedulePayload.connectionId ?? null,
+            connectionAccountId: normalizedSchedulePayload.connectionAccountId ?? null,
+            syncFrequency: normalizedSchedulePayload.syncFrequency,
+            syncHour: normalizedSchedulePayload.syncHour ?? null,
+            syncDayOfWeek: normalizedSchedulePayload.syncDayOfWeek ?? null,
+            isEnabled: normalizedSchedulePayload.isEnabled,
             configJson: serializeLinkConfig(nextConfig)
           }
         });
@@ -1904,15 +2019,15 @@ export function createAppService({
             id: currentLink.id
           },
           data: {
-            actualAccountName: payload.actualAccountName,
-            assetType: payload.assetType,
-            provider: toPrismaProvider(payload.provider ?? null),
-            connectionId: payload.connectionId ?? null,
-            connectionAccountId: payload.connectionAccountId ?? null,
-            syncFrequency: payload.syncFrequency,
-            syncHour: payload.syncHour ?? null,
-            syncDayOfWeek: payload.syncDayOfWeek ?? null,
-            isEnabled: payload.isEnabled,
+            actualAccountName: normalizedSchedulePayload.actualAccountName,
+            assetType: normalizedSchedulePayload.assetType,
+            provider: toPrismaProvider(normalizedSchedulePayload.provider ?? null),
+            connectionId: normalizedSchedulePayload.connectionId ?? null,
+            connectionAccountId: normalizedSchedulePayload.connectionAccountId ?? null,
+            syncFrequency: normalizedSchedulePayload.syncFrequency,
+            syncHour: normalizedSchedulePayload.syncHour ?? null,
+            syncDayOfWeek: normalizedSchedulePayload.syncDayOfWeek ?? null,
+            isEnabled: normalizedSchedulePayload.isEnabled,
             configJson: serializeLinkConfig(nextConfig)
           }
         });
@@ -1926,15 +2041,15 @@ export function createAppService({
           data: {
             status: "MIGRATING",
             actualAccountId,
-            actualAccountName: payload.actualAccountName,
-            assetType: payload.assetType,
-            provider: toPrismaProvider(payload.provider ?? null),
-            connectionId: payload.connectionId ?? null,
-            connectionAccountId: payload.connectionAccountId ?? null,
-            syncFrequency: payload.syncFrequency,
-            syncHour: payload.syncHour ?? null,
-            syncDayOfWeek: payload.syncDayOfWeek ?? null,
-            isEnabled: payload.isEnabled,
+            actualAccountName: normalizedSchedulePayload.actualAccountName,
+            assetType: normalizedSchedulePayload.assetType,
+            provider: toPrismaProvider(normalizedSchedulePayload.provider ?? null),
+            connectionId: normalizedSchedulePayload.connectionId ?? null,
+            connectionAccountId: normalizedSchedulePayload.connectionAccountId ?? null,
+            syncFrequency: normalizedSchedulePayload.syncFrequency,
+            syncHour: normalizedSchedulePayload.syncHour ?? null,
+            syncDayOfWeek: normalizedSchedulePayload.syncDayOfWeek ?? null,
+            isEnabled: normalizedSchedulePayload.isEnabled,
             migrationStartedAt: timestamp,
             configJson: serializeLinkConfig(nextConfig)
           }

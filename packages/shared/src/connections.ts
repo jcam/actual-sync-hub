@@ -1,18 +1,29 @@
 import type { ConnectionStatus, Provider } from "./core.js";
 import type { SyncHealthDto } from "./health.js";
 
-export type HomeValueSource = "REDFIN" | "ZILLOW" | "AVERAGE";
+export type HomeValueSource = "REDFIN" | "MOVOTO" | "HOMES_COM" | "TRULIA" | "AVERAGE";
+
+export type HomeValueEstimateStateDto = {
+  url?: string | null;
+  estimate?: number | null;
+  lastFetchedAt?: string | null;
+  lastSuccessfulAt?: string | null;
+  lastFailedAt?: string | null;
+  lastFailureMessage?: string | null;
+  usingCachedEstimate?: boolean | null;
+  stale?: boolean | null;
+};
 
 export type TellerConnectConfigDto = {
   applicationId: string;
   environment: "sandbox" | "development" | "production";
   products: string[];
   selectAccount: "disabled" | "single" | "multiple";
-}
+};
 
 export type TellerReauthConfigDto = {
   enrollmentId: string;
-} & TellerConnectConfigDto
+} & TellerConnectConfigDto;
 
 export type ConnectionReauthSessionDto =
   | {
@@ -54,11 +65,21 @@ export type HomeValueConnectionDetailsDto = {
   source: HomeValueSource;
   redfinEstimate?: number | null;
   redfinUrl?: string | null;
-  zillowEstimate?: number | null;
-  zillowUrl?: string | null;
+  movotoEstimate?: number | null;
+  movotoUrl?: string | null;
+  homesEstimate?: number | null;
+  homesUrl?: string | null;
+  truliaEstimate?: number | null;
+  truliaUrl?: string | null;
+  sources?: {
+    redfin?: HomeValueEstimateStateDto | null;
+    movoto?: HomeValueEstimateStateDto | null;
+    homes?: HomeValueEstimateStateDto | null;
+    trulia?: HomeValueEstimateStateDto | null;
+  } | null;
   calculatedValue?: number | null;
   lastCalculatedAt?: string | null;
-}
+};
 
 export type ConnectionDto = {
   id: string;
@@ -78,7 +99,7 @@ export type ConnectionDto = {
 export type ProviderConnectResult = {
   connectionId: string;
   warning?: string;
-}
+};
 
 export type UpsertHomeValueConnectionPayload = {
   label?: string | null;
@@ -86,6 +107,10 @@ export type UpsertHomeValueConnectionPayload = {
   source: HomeValueSource;
   redfinEstimate?: number | null;
   redfinUrl?: string | null;
-  zillowEstimate?: number | null;
-  zillowUrl?: string | null;
-}
+  movotoEstimate?: number | null;
+  movotoUrl?: string | null;
+  homesEstimate?: number | null;
+  homesUrl?: string | null;
+  truliaEstimate?: number | null;
+  truliaUrl?: string | null;
+};

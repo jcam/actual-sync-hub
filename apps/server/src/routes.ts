@@ -31,11 +31,15 @@ const externalSyncBodySchema = z.object({
 const homeValueConnectionBodySchema = z.object({
   label: z.string().min(1).nullable().optional(),
   address: z.string().min(1),
-  source: z.enum(["REDFIN", "ZILLOW", "AVERAGE"]),
+  source: z.enum(["REDFIN", "MOVOTO", "HOMES_COM", "TRULIA", "AVERAGE"]),
   redfinEstimate: z.number().positive().nullable().optional(),
-  redfinUrl: z.string().url().nullable().optional(),
-  zillowEstimate: z.number().positive().nullable().optional(),
-  zillowUrl: z.string().url().nullable().optional()
+  redfinUrl: z.string().min(1).nullable().optional(),
+  movotoEstimate: z.number().positive().nullable().optional(),
+  movotoUrl: z.string().min(1).nullable().optional(),
+  homesEstimate: z.number().positive().nullable().optional(),
+  homesUrl: z.string().min(1).nullable().optional(),
+  truliaEstimate: z.number().positive().nullable().optional(),
+  truliaUrl: z.string().min(1).nullable().optional()
 });
 
 const tellerWebhookBodySchema = z.object({

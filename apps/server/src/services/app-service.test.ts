@@ -95,6 +95,97 @@ describe.sequential("app service", () => {
     });
   });
 
+  it("normalizes enabled Home Values links onto spaced weekly schedule slots", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "HOME_VALUES",
+        label: "Properties",
+        providerItemId: "home-values-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const firstAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "property-1",
+        name: "First home",
+        type: "property"
+      }
+    });
+
+    const secondAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "property-2",
+        name: "Second home",
+        type: "property"
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions: vi.fn()
+      } as never
+    });
+
+    await service.upsertAccountLink("actual-home-1", {
+      actualAccountName: "First home",
+      assetType: "BANK",
+      provider: "HOME_VALUES",
+      connectionId: connection.id,
+      connectionAccountId: firstAccount.id,
+      syncFrequency: "DAILY",
+      syncHour: 17,
+      syncDayOfWeek: 4,
+      isEnabled: true,
+      categoryMappings: []
+    });
+
+    await service.upsertAccountLink("actual-home-2", {
+      actualAccountName: "Second home",
+      assetType: "BANK",
+      provider: "HOME_VALUES",
+      connectionId: connection.id,
+      connectionAccountId: secondAccount.id,
+      syncFrequency: "HOURLY",
+      syncHour: 9,
+      syncDayOfWeek: 2,
+      isEnabled: true,
+      categoryMappings: []
+    });
+
+    const links = await prisma.accountLink.findMany({
+      where: {
+        actualAccountId: {
+          in: ["actual-home-1", "actual-home-2"]
+        }
+      },
+      orderBy: {
+        actualAccountId: "asc"
+      }
+    });
+
+    expect(links[0]).toMatchObject({
+      syncFrequency: "WEEKLY",
+      syncDayOfWeek: 0,
+      syncHour: 0
+    });
+    expect(links[1]).toMatchObject({
+      syncFrequency: "WEEKLY",
+      syncDayOfWeek: 0,
+      syncHour: 1
+    });
+  });
+
   it("surfaces existing Actual bank-sync links alongside current local link state", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
@@ -660,6 +751,73 @@ describe.sequential("app service", () => {
       lastSync: null
     });
     expect(unlinkExternalSyncAccount).not.toHaveBeenCalled();
+  });
+
+  it("removes home values connections instead of marking them disconnected", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "HOME_VALUES",
+        label: "Primary residence",
+        institutionName: "Home Values",
+        institutionId: "home-values",
+        providerItemId: "home-value-1",
+        accessTokenCiphertext: "cipher",
+        metadataJson: JSON.stringify({
+          homeValues: {
+            address: "123 Main St, Springfield, IL",
+            source: "REDFIN"
+          }
+        }),
+        accounts: {
+          create: {
+            externalAccountId: "home-account-1",
+            name: "Primary residence",
+            officialName: "123 Main St, Springfield, IL",
+            type: "property",
+            subtype: "home-value"
+          }
+        }
+      },
+      include: {
+        accounts: true
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-home-1",
+        actualAccountName: "Home",
+        assetType: "BANK",
+        provider: "HOME_VALUES",
+        connectionId: connection.id,
+        connectionAccountId: connection.accounts[0]!.id,
+        syncFrequency: "WEEKLY",
+        isEnabled: true
+      }
+    });
+
+    const service = createAppService({ prisma });
+
+    await service.disconnectConnection(connection.id);
+
+    await expect(
+      prisma.connection.findUniqueOrThrow({
+        where: {
+          id: connection.id
+        }
+      })
+    ).rejects.toThrow();
+
+    expect(
+      await prisma.accountLink.count({
+        where: {
+          connectionId: connection.id
+        }
+      })
+    ).toBe(0);
   });
 
   it("writes external-sync metadata even when the local link is disabled", async () => {

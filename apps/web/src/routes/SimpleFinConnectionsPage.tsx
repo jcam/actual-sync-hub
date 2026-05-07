@@ -275,12 +275,21 @@ export function SimpleFinConnectionsPage() {
             className="primary-button"
             disabled={submitting || setupToken.trim().length === 0}
             onClick={async () => {
+              const normalizedSetupToken = setupToken.trim();
+              const normalizedLabel = label.trim();
+              if (!normalizedSetupToken) {
+                setError("Setup token is required.");
+                setMessage(null);
+                setWarning(null);
+                return;
+              }
+
               setSubmitting(true);
               setError(null);
               setMessage(null);
               setWarning(null);
               try {
-                const result = await api.connectSimpleFin(setupToken.trim(), label.trim() || undefined);
+                const result = await api.connectSimpleFin(normalizedSetupToken, normalizedLabel || undefined);
                 setSetupToken("");
                 setLabel("");
                 setMessage("SimpleFIN connection saved.");

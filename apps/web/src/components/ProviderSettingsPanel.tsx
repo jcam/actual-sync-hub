@@ -52,6 +52,10 @@ type SimpleFinSettingsDraft = {
 
 type HomeValuesSettingsDraft = {
   automaticSyncConcurrency: string;
+  redfinFetchMethod: "node_fetch" | "curl" | "wget" | "disabled";
+  movotoFetchMethod: "node_fetch" | "curl" | "wget" | "disabled";
+  homesFetchMethod: "node_fetch" | "curl" | "wget" | "disabled";
+  truliaFetchMethod: "node_fetch" | "curl" | "wget" | "disabled";
 };
 
 type ProviderSettingsDraft =
@@ -59,6 +63,105 @@ type ProviderSettingsDraft =
   | TellerSettingsDraft
   | SimpleFinSettingsDraft
   | HomeValuesSettingsDraft;
+
+function parseWholeNumber(value: string) {
+  if (!/^-?\d+$/.test(value.trim())) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
+function requireIntegerInRange(label: string, value: string, min: number, max: number) {
+  const parsed = parseWholeNumber(value);
+  if (parsed == null) {
+    return `${label} must be a whole number.`;
+  }
+  if (parsed < min || parsed > max) {
+    return `${label} must be between ${min} and ${max}.`;
+  }
+  return null;
+}
+
+function isValidUrl(value: string) {
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validateDraft(provider: Provider, draft: ProviderSettingsDraft) {
+  switch (provider) {
+    case "PLAID": {
+      const plaidDraft = draft as PlaidSettingsDraft;
+      if (splitCsvField(plaidDraft.countryCodes).length === 0) {
+        return "Country codes must include at least one value.";
+      }
+      if (splitCsvField(plaidDraft.products).length === 0) {
+        return "Products must include at least one value.";
+      }
+      return (
+        requireIntegerInRange("Initial transaction window", plaidDraft.transactionsDaysRequested, 1, 730) ??
+        requireIntegerInRange("Automatic sync concurrency", plaidDraft.automaticSyncConcurrency, 1, 20)
+      );
+    }
+    case "TELLER": {
+      const tellerDraft = draft as TellerSettingsDraft;
+      const currentAppId =
+        tellerDraft.environment === "sandbox"
+          ? tellerDraft.sandboxAppId
+          : tellerDraft.environment === "development"
+            ? tellerDraft.developmentAppId
+            : tellerDraft.productionAppId;
+      if (!currentAppId.trim()) {
+        return "Application ID is required.";
+      }
+      if (tellerDraft.environment !== "sandbox") {
+        const certificate =
+          tellerDraft.environment === "development"
+            ? tellerDraft.developmentCertificatePem
+            : tellerDraft.productionCertificatePem;
+        const key =
+          tellerDraft.environment === "development" ? tellerDraft.developmentKeyPem : tellerDraft.productionKeyPem;
+        if (!certificate.trim()) {
+          return "Client certificate (PEM) is required.";
+        }
+        if (!key.trim()) {
+          return "Client key (PEM) is required.";
+        }
+      }
+      return (
+        requireIntegerInRange("Initial transaction window", tellerDraft.transactionsInitialDays, 1, 3650) ??
+        requireIntegerInRange("Overlap window", tellerDraft.transactionsOverlapDays, 1, 30) ??
+        requireIntegerInRange("Automatic sync concurrency", tellerDraft.automaticSyncConcurrency, 1, 20) ??
+        requireIntegerInRange("Webhook sync debounce", tellerDraft.webhookSyncDebounceSeconds, 0, 3600) ??
+        requireIntegerInRange("Webhook tolerance", tellerDraft.webhookToleranceSeconds, 1, 900)
+      );
+    }
+    case "SIMPLEFIN": {
+      const simpleFinDraft = draft as SimpleFinSettingsDraft;
+      if (simpleFinDraft.mode === "development") {
+        const serverUrl = simpleFinDraft.developmentServerUrl.trim();
+        if (!serverUrl) {
+          return "Development server URL is required in development mode.";
+        }
+        if (!isValidUrl(serverUrl)) {
+          return "Development server URL must be a valid URL.";
+        }
+      }
+      return (
+        requireIntegerInRange("Initial transaction window", simpleFinDraft.transactionsInitialDays, 1, 90) ??
+        requireIntegerInRange("Automatic sync concurrency", simpleFinDraft.automaticSyncConcurrency, 1, 20)
+      );
+    }
+    case "HOME_VALUES": {
+      const homeValuesDraft = draft as HomeValuesSettingsDraft;
+      return requireIntegerInRange("Automatic sync concurrency", homeValuesDraft.automaticSyncConcurrency, 1, 20);
+    }
+  }
+}
 
 function toDraft<T extends Provider>(
   provider: T,
@@ -114,7 +217,11 @@ function toDraft<T extends Provider>(
     case "HOME_VALUES": {
       const homeValuesSettings = settings as ProviderSettingsByProviderDto<"HOME_VALUES">;
       return {
-        automaticSyncConcurrency: String(homeValuesSettings.automaticSyncConcurrency)
+        automaticSyncConcurrency: String(homeValuesSettings.automaticSyncConcurrency),
+        redfinFetchMethod: homeValuesSettings.redfinFetchMethod,
+        movotoFetchMethod: homeValuesSettings.movotoFetchMethod,
+        homesFetchMethod: homeValuesSettings.homesFetchMethod,
+        truliaFetchMethod: homeValuesSettings.truliaFetchMethod
       } satisfies HomeValuesSettingsDraft;
     }
   }
@@ -200,7 +307,11 @@ function toPayload<T extends Provider>(
     case "HOME_VALUES": {
       const homeValuesDraft = draft as HomeValuesSettingsDraft;
       return {
-        automaticSyncConcurrency: Number(homeValuesDraft.automaticSyncConcurrency)
+        automaticSyncConcurrency: Number(homeValuesDraft.automaticSyncConcurrency),
+        redfinFetchMethod: homeValuesDraft.redfinFetchMethod,
+        movotoFetchMethod: homeValuesDraft.movotoFetchMethod,
+        homesFetchMethod: homeValuesDraft.homesFetchMethod,
+        truliaFetchMethod: homeValuesDraft.truliaFetchMethod
       } as ProviderSettingsByProviderDto<T>;
     }
   }
@@ -222,6 +333,13 @@ export function ProviderSettingsPanel<T extends Provider>({
   }, [provider, settings]);
 
   const save = async () => {
+    const validationMessage = validateDraft(provider, draft);
+    if (validationMessage) {
+      setMessage(null);
+      setError(validationMessage);
+      return;
+    }
+
     setSaving(true);
     setMessage(null);
     setError(null);
@@ -690,21 +808,91 @@ export function ProviderSettingsPanel<T extends Provider>({
         ) : null}
 
         {homeValuesDraft ? (
-          <label>
-            <span>Automatic sync concurrency</span>
-            <input
-              type="number"
-              min={1}
-              max={20}
-              value={homeValuesDraft.automaticSyncConcurrency}
-              onChange={event =>
-                setDraft(current => ({
-                  ...(current as HomeValuesSettingsDraft),
-                  automaticSyncConcurrency: event.target.value
-                }))
-              }
-            />
-          </label>
+          <>
+            <label>
+              <span>Redfin fetch method</span>
+              <select
+                value={homeValuesDraft.redfinFetchMethod}
+                onChange={event =>
+                  setDraft(current => ({
+                    ...(current as HomeValuesSettingsDraft),
+                    redfinFetchMethod: event.target.value as HomeValuesSettingsDraft["redfinFetchMethod"]
+                  }))
+                }
+              >
+                <option value="curl">curl</option>
+                <option value="wget">wget</option>
+                <option value="node_fetch">node fetch</option>
+                <option value="disabled">disabled</option>
+              </select>
+            </label>
+            <label>
+              <span>Movoto fetch method</span>
+              <select
+                value={homeValuesDraft.movotoFetchMethod}
+                onChange={event =>
+                  setDraft(current => ({
+                    ...(current as HomeValuesSettingsDraft),
+                    movotoFetchMethod: event.target.value as HomeValuesSettingsDraft["movotoFetchMethod"]
+                  }))
+                }
+              >
+                <option value="curl">curl</option>
+                <option value="wget">wget</option>
+                <option value="node_fetch">node fetch</option>
+                <option value="disabled">disabled</option>
+              </select>
+            </label>
+            <label>
+              <span>Homes.com fetch method</span>
+              <select
+                value={homeValuesDraft.homesFetchMethod}
+                onChange={event =>
+                  setDraft(current => ({
+                    ...(current as HomeValuesSettingsDraft),
+                    homesFetchMethod: event.target.value as HomeValuesSettingsDraft["homesFetchMethod"]
+                  }))
+                }
+              >
+                <option value="curl">curl</option>
+                <option value="wget">wget</option>
+                <option value="node_fetch">node fetch</option>
+                <option value="disabled">disabled</option>
+              </select>
+            </label>
+            <label>
+              <span>Trulia fetch method</span>
+              <select
+                value={homeValuesDraft.truliaFetchMethod}
+                onChange={event =>
+                  setDraft(current => ({
+                    ...(current as HomeValuesSettingsDraft),
+                    truliaFetchMethod: event.target.value as HomeValuesSettingsDraft["truliaFetchMethod"]
+                  }))
+                }
+              >
+                <option value="curl">curl</option>
+                <option value="wget">wget</option>
+                <option value="node_fetch">node fetch</option>
+                <option value="disabled">disabled</option>
+              </select>
+            </label>
+            <label>
+              <span>Automatic sync concurrency</span>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={homeValuesDraft.automaticSyncConcurrency}
+                onChange={event =>
+                  setDraft(current => ({
+                    ...(current as HomeValuesSettingsDraft),
+                    automaticSyncConcurrency: event.target.value
+                  }))
+                }
+              />
+            </label>
+          </>
         ) : null}
       </div>
 

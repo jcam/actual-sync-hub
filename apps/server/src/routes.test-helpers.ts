@@ -84,7 +84,11 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
             automaticSyncConcurrency: 1
           },
           HOME_VALUES: {
-            automaticSyncConcurrency: 1
+            automaticSyncConcurrency: 1,
+            redfinFetchMethod: "curl",
+            movotoFetchMethod: "curl",
+            homesFetchMethod: "wget",
+            truliaFetchMethod: "wget"
           }
         },
         plaid: {
@@ -181,7 +185,11 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           automaticSyncConcurrency: 1
         },
         HOME_VALUES: {
-          automaticSyncConcurrency: 1
+          automaticSyncConcurrency: 1,
+          redfinFetchMethod: "curl",
+          movotoFetchMethod: "curl",
+          homesFetchMethod: "wget",
+          truliaFetchMethod: "wget"
         }
       }),
       get: vi.fn(),

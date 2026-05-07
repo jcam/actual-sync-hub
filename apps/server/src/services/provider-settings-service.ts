@@ -63,7 +63,11 @@ const simpleFinSettingsSchema = z.object({
 });
 
 const homeValuesSettingsSchema = z.object({
-  automaticSyncConcurrency: z.coerce.number().int().min(1).max(20)
+  automaticSyncConcurrency: z.coerce.number().int().min(1).max(20),
+  redfinFetchMethod: z.enum(["node_fetch", "curl", "wget", "disabled"]).default("curl"),
+  movotoFetchMethod: z.enum(["node_fetch", "curl", "wget", "disabled"]).default("curl"),
+  homesFetchMethod: z.enum(["node_fetch", "curl", "wget", "disabled"]).default("wget"),
+  truliaFetchMethod: z.enum(["node_fetch", "curl", "wget", "disabled"]).default("wget")
 });
 
 export const providerSchemas = {
@@ -125,7 +129,11 @@ function defaultProviderSettings(): ProviderSettingsDto {
       automaticSyncConcurrency: 2
     },
     HOME_VALUES: {
-      automaticSyncConcurrency: 1
+      automaticSyncConcurrency: 1,
+      redfinFetchMethod: "curl",
+      movotoFetchMethod: "curl",
+      homesFetchMethod: "wget",
+      truliaFetchMethod: "wget"
     }
   };
 }
@@ -228,7 +236,11 @@ function normalizeHomeValuesSettings(raw: unknown, defaults: HomeValuesProviderS
 
   const value = raw as Record<string, unknown>;
   return {
-    automaticSyncConcurrency: value.automaticSyncConcurrency ?? defaults.automaticSyncConcurrency
+    automaticSyncConcurrency: value.automaticSyncConcurrency ?? defaults.automaticSyncConcurrency,
+    redfinFetchMethod: value.redfinFetchMethod ?? defaults.redfinFetchMethod,
+    movotoFetchMethod: value.movotoFetchMethod ?? defaults.movotoFetchMethod,
+    homesFetchMethod: value.homesFetchMethod ?? defaults.homesFetchMethod,
+    truliaFetchMethod: value.truliaFetchMethod ?? defaults.truliaFetchMethod
   };
 }
 

@@ -5,6 +5,7 @@ import fastifySession from "@fastify/session";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import { ZodError } from "zod";
+import type { ZodIssue } from "zod";
 import { createAppContext } from './app-context.js';
 import type { AppContext } from './app-context.js';
 import { registerRoutes } from "./routes.js";
@@ -24,11 +25,57 @@ export async function createServer({
     logger: true
   });
 
+  const formatValidationIssue = (issue: ZodIssue) => {
+    const rawIssue = issue as ZodIssue & Record<string, unknown>;
+    const path =
+      issue.path.length > 0
+        ? String(issue.path[0])
+            .replace(/([a-z])([A-Z])/g, "$1 $2")
+            .replace(/_/g, " ")
+            .replace(/\burl\b/gi, "URL")
+            .replace(/^./, value => value.toUpperCase())
+        : "Request";
+
+    if (issue.code === "invalid_type" && rawIssue.input === undefined) {
+      return `${path} is required.`;
+    }
+
+    if (issue.code === "too_small" && rawIssue.origin === "string") {
+      return `${path} is required.`;
+    }
+
+    if (issue.code === "invalid_format" && rawIssue.format === "url") {
+      return `${path} must be a valid URL.`;
+    }
+
+    if (issue.code === "invalid_value" && Array.isArray(rawIssue.values)) {
+      return `${path} must be one of ${rawIssue.values.join(", ")}.`;
+    }
+
+    if (issue.code === "too_small" && issue.path.length > 0) {
+      return `${path} is required.`;
+    }
+
+    if (issue.message && issue.message !== "Invalid input") {
+      return issue.message;
+    }
+
+    return `${path} is invalid.`;
+  };
+
+  const formatValidationError = (error: ZodError) => {
+    const messages = [...new Set(error.issues.map(formatValidationIssue).filter(Boolean))];
+    return messages[0] ?? "Invalid request.";
+  };
+
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ZodError) {
       return reply.status(400).send({
-        error: "Invalid request",
-        issues: error.issues
+        error: formatValidationError(error),
+        issues: error.issues.map(issue => ({
+          ...issue,
+          message: formatValidationIssue(issue)
+        }))
       });
     }
 

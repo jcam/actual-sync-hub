@@ -103,6 +103,17 @@ describe("AccountCard", () => {
     expect(onRefresh).toHaveBeenCalledOnce();
   });
 
+  it("shows a helpful error instead of submitting an incomplete link", async () => {
+    const user = userEvent.setup();
+    renderWithRouter(<AccountCard account={account} onRefresh={vi.fn().mockResolvedValue(undefined)} />);
+
+    await user.selectOptions(screen.getByLabelText("Connection"), "conn-2");
+    await user.click(screen.getByRole("button", { name: "Save link" }));
+
+    expect(await screen.findByText(/select a provider account for the chosen connection/i)).toBeInTheDocument();
+    expect(updateAccountLink).not.toHaveBeenCalled();
+  });
+
   it("links to the dedicated category mapping page", async () => {
     renderWithRouter(
       <AccountCard

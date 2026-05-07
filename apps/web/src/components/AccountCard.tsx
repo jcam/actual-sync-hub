@@ -35,6 +35,9 @@ export function AccountCard({
   const filteredOptions = account.options.filter(option => option.connectionId === form.connectionId);
   const selectedConnection = account.options.find(option => option.connectionId === form.connectionId);
   const activeConnectionOption = account.options.find(option => option.connectionId === account.link.connectionId);
+  const selectedProvider = form.connectionId ? selectedConnection?.provider ?? form.provider ?? null : null;
+  const homeValuesScheduled = selectedProvider === "HOME_VALUES";
+  const availableScheduleOptions = homeValuesScheduled ? (["MANUAL", "WEEKLY"] as const) : scheduleOptions;
   const automaticSyncPauseSummary =
     form.isEnabled && form.syncFrequency !== "MANUAL" ? getAutomaticSyncPauseSummary(account.link) : null;
   const categoryMappingRelevant = (form.provider ?? account.link.provider) !== "HOME_VALUES";
@@ -56,15 +59,47 @@ export function AccountCard({
   const buildPayload = (): UpdateAccountLinkPayload => ({
     actualAccountName: account.link.actualAccountName,
     assetType: account.link.assetType,
-    provider: form.connectionId ? selectedConnection?.provider ?? form.provider ?? null : null,
+    provider: selectedProvider,
     connectionId: form.connectionId ?? null,
     connectionAccountId: form.connectionAccountId ?? null,
-    syncFrequency: form.syncFrequency,
-    syncHour: form.syncHour ?? null,
-    syncDayOfWeek: form.syncDayOfWeek ?? null,
+    syncFrequency: homeValuesScheduled && form.syncFrequency !== "MANUAL" ? "WEEKLY" : form.syncFrequency,
+    syncHour: homeValuesScheduled ? null : form.syncHour ?? null,
+    syncDayOfWeek: homeValuesScheduled ? null : form.syncDayOfWeek ?? null,
     isEnabled: form.isEnabled,
     categoryMappings: account.link.categoryMappings
   });
+
+  const validateForm = () => {
+    if (!form.connectionId) {
+      if (form.isEnabled) {
+        return "Select a connection before enabling sync.";
+      }
+      return null;
+    }
+
+    if (!form.connectionAccountId) {
+      return "Select a provider account for the chosen connection.";
+    }
+
+    if (!homeValuesScheduled && (form.syncFrequency === "DAILY" || form.syncFrequency === "WEEKLY")) {
+      if (!Number.isInteger(form.syncHour) || form.syncHour == null || form.syncHour < 0 || form.syncHour > 23) {
+        return "Hour must be between 0 and 23.";
+      }
+    }
+
+    if (!homeValuesScheduled && form.syncFrequency === "WEEKLY") {
+      if (
+        !Number.isInteger(form.syncDayOfWeek) ||
+        form.syncDayOfWeek == null ||
+        form.syncDayOfWeek < 0 ||
+        form.syncDayOfWeek > 6
+      ) {
+        return "Day of week must be between 0 and 6.";
+      }
+    }
+
+    return null;
+  };
 
   return (
     <article className="account-card">
@@ -129,7 +164,7 @@ export function AccountCard({
             value={form.syncFrequency}
             onChange={event => setForm(current => ({ ...current, syncFrequency: event.target.value as SyncFrequency }))}
           >
-            {scheduleOptions.map(option => (
+            {availableScheduleOptions.map(option => (
               <option key={option} value={option}>
                 {option}
               </option>
@@ -148,7 +183,7 @@ export function AccountCard({
           </select>
         </label>
 
-        {(form.syncFrequency === "DAILY" || form.syncFrequency === "WEEKLY") ? (
+        {!homeValuesScheduled && (form.syncFrequency === "DAILY" || form.syncFrequency === "WEEKLY") ? (
           <label>
             <span>Hour</span>
             <input
@@ -161,7 +196,7 @@ export function AccountCard({
           </label>
         ) : null}
 
-        {form.syncFrequency === "WEEKLY" ? (
+        {!homeValuesScheduled && form.syncFrequency === "WEEKLY" ? (
           <label>
             <span>Day of week</span>
             <select
@@ -177,6 +212,13 @@ export function AccountCard({
               <option value={6}>Saturday</option>
             </select>
           </label>
+        ) : null}
+
+        {homeValuesScheduled && form.syncFrequency === "WEEKLY" ? (
+          <div>
+            <span>Schedule slot</span>
+            <p className="muted">Weekly updates are assigned automatically to spread property fetches out.</p>
+          </div>
         ) : null}
       </div>
 
@@ -259,6 +301,12 @@ export function AccountCard({
           className="primary-button"
           disabled={saving}
           onClick={async () => {
+            const validationMessage = validateForm();
+            if (validationMessage) {
+              setError(validationMessage);
+              return;
+            }
+
             setSaving(true);
             setError(null);
             try {

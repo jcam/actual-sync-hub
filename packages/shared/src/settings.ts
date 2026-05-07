@@ -1,5 +1,7 @@
 import type { Provider } from "./core.js";
 
+export type HomeValuesFetchMethod = "node_fetch" | "curl" | "wget" | "disabled";
+
 export type PlaidProviderSettingsDto = {
   environment: "sandbox" | "production";
   sandbox: {
@@ -54,14 +56,18 @@ export type SimpleFinProviderSettingsDto = {
 
 export type HomeValuesProviderSettingsDto = {
   automaticSyncConcurrency: number;
-}
+  redfinFetchMethod: HomeValuesFetchMethod;
+  movotoFetchMethod: HomeValuesFetchMethod;
+  homesFetchMethod: HomeValuesFetchMethod;
+  truliaFetchMethod: HomeValuesFetchMethod;
+};
 
 export type ProviderSettingsDto = {
   PLAID: PlaidProviderSettingsDto;
   TELLER: TellerProviderSettingsDto;
   SIMPLEFIN: SimpleFinProviderSettingsDto;
   HOME_VALUES?: HomeValuesProviderSettingsDto;
-}
+};
 
 export type ProviderSettingsByProviderDto<T extends Provider = Provider> = T extends "PLAID"
   ? PlaidProviderSettingsDto

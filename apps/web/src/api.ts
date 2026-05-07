@@ -32,7 +32,9 @@ async function request<T>(input: RequestInfo, init?: RequestInit) {
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new ApiError(payload.error || `Request failed with status ${response.status}`, response.status);
+    throw new ApiError(payload.error || `Request failed with status ${response.status}`, response.status, {
+      issues: Array.isArray(payload.issues) ? payload.issues : undefined
+    });
   }
 
   return response.json() as Promise<T>;

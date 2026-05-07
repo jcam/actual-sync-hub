@@ -21,4 +21,24 @@ describe("getDisplayErrorMessage", () => {
       "Invalid credentials"
     );
   });
+
+  it("formats API validation issues when present", () => {
+    expect(
+      getDisplayErrorMessage(
+        new ApiError("Invalid request", 400, {
+          issues: [
+            {
+              path: ["redfinUrl"],
+              message: "Redfin URL must point to redfin.com."
+            },
+            {
+              path: ["address"],
+              message: "Address is required."
+            }
+          ]
+        }),
+        "Fallback message."
+      )
+    ).toBe("Redfin URL must point to redfin.com. Address is required.");
+  });
 });

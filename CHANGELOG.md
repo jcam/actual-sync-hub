@@ -7,6 +7,20 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-05-07
+
+### Added
+- Automated Home Values estimate fetching from Redfin, Movoto, Homes.com, and Trulia, with per-site fetch-method controls for `curl`, `wget`, `node fetch`, or disabled mode.
+- Multi-property Home Values management with a single create/edit panel, a saved-properties list, explicit edit/disconnect actions, and per-source warning/staleness visibility.
+- Weekly Home Values refresh pacing that spreads properties across the week, avoids hitting the same source more than about once an hour, and keeps cached source values in scheduled averages when a provider is temporarily failing.
+- Shared API validation issue formatting so field-specific backend validation messages can surface cleanly in the UI.
+
+### Changed
+- Replaced the original manual-estimate Home Values workflow with property-URL-driven fetching and removed Zillow as a configured Home Values source.
+- Made Home Values saves more tolerant by allowing average-based properties to persist when at least one provider succeeds while blocked sources are retained as warnings.
+- Hardened form validation and error messaging across Home Values, provider settings, SimpleFIN setup, and account-link saves so common input mistakes are caught before the request is sent.
+- Updated the live sandbox image to install `ca-certificates` so curl-based Home Values fetches work inside the container.
+
 ## [0.17.0] - 2026-05-07
 
 ### Added

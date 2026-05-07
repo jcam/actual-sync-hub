@@ -630,4 +630,61 @@ describe("SimpleFinConnectionsPage", () => {
     expect(await screen.findByText("Healthy")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /open simplefin connections/i })).not.toBeInTheDocument();
   });
+
+  it("keeps the connect button disabled until the setup token contains real content", async () => {
+    listConnections.mockResolvedValue([]);
+    listActualBankSyncLinks.mockResolvedValue([]);
+    getRuntimeInfo.mockResolvedValue({
+      instanceLabel: "Dev",
+      liveSandboxMode: false,
+      providers: [],
+      settings: {
+        PLAID: {
+          environment: "sandbox",
+          sandbox: { clientId: "", secret: "" },
+          production: { clientId: "", secret: "" },
+          countryCodes: ["US"],
+          products: ["transactions"],
+          transactionsDaysRequested: 365,
+          personalFinanceCategoryVersion: "v2",
+          automaticSyncConcurrency: 2
+        },
+        TELLER: {
+          environment: "sandbox",
+          sandbox: { appId: "", sandboxAccessToken: "", webhookSigningSecrets: [] },
+          development: { appId: "", certificatePem: "", keyPem: "", webhookSigningSecrets: [] },
+          production: { appId: "", certificatePem: "", keyPem: "", webhookSigningSecrets: [] },
+          transactionsInitialDays: 90,
+          transactionsOverlapDays: 10,
+          automaticSyncConcurrency: 2,
+          webhookSyncDebounceSeconds: 30,
+          webhookToleranceSeconds: 180
+        },
+        SIMPLEFIN: {
+          mode: "sandbox",
+          development: { serverUrl: "" },
+          transactionsInitialDays: 45,
+          automaticSyncConcurrency: 1
+        }
+      },
+      plaid: { enabled: true, environment: "sandbox", sandboxToolsEnabled: false },
+      teller: { enabled: false, environment: "sandbox", mtlsConfigured: false },
+      simplefin: { enabled: true, mode: "sandbox", requiresSetupToken: true },
+      actual: {
+        serverUrl: "http://127.0.0.1:5006",
+        budgetSyncIdConfigured: true,
+        externalSyncWritebackEnabled: false
+      }
+    });
+
+    renderWithRouter(<SimpleFinConnectionsPage />);
+
+    const user = userEvent.setup();
+    const connectButton = await screen.findByRole("button", { name: /connect simplefin/i });
+    expect(connectButton).toBeDisabled();
+
+    await user.type(screen.getByLabelText(/setup token/i), "   ");
+    expect(connectButton).toBeDisabled();
+    expect(connectSimpleFin).not.toHaveBeenCalled();
+  });
 });
