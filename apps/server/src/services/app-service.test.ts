@@ -444,6 +444,72 @@ describe.sequential("app service", () => {
     ]);
   });
 
+  it("disables external sync writeback in runtime info when the Actual runtime lacks getExternalSyncAccount", async () => {
+    const service = createAppService({
+      actualService: {
+        linkExternalSyncAccount: vi.fn(),
+        unlinkExternalSyncAccount: vi.fn()
+      } as never,
+      providerSettingsService: {
+        getAll: vi.fn().mockResolvedValue({
+          PLAID: {
+            environment: "sandbox",
+            sandbox: {
+              clientId: "",
+              secret: ""
+            },
+            production: {
+              clientId: "",
+              secret: ""
+            },
+            countryCodes: ["US"],
+            products: ["transactions"],
+            transactionsDaysRequested: 365,
+            personalFinanceCategoryVersion: "v2",
+            automaticSyncConcurrency: 2
+          },
+          TELLER: {
+            environment: "sandbox",
+            sandbox: {
+              appId: "",
+              sandboxAccessToken: "",
+              webhookSigningSecrets: []
+            },
+            development: {
+              appId: "",
+              certificatePem: "",
+              keyPem: "",
+              webhookSigningSecrets: []
+            },
+            production: {
+              appId: "",
+              certificatePem: "",
+              keyPem: "",
+              webhookSigningSecrets: []
+            },
+            transactionsInitialDays: 90,
+            transactionsOverlapDays: 10,
+            automaticSyncConcurrency: 1,
+            webhookSyncDebounceSeconds: 30,
+            webhookToleranceSeconds: 180
+          },
+          SIMPLEFIN: {
+            mode: "sandbox",
+            development: {
+              serverUrl: ""
+            },
+            transactionsInitialDays: 45,
+            automaticSyncConcurrency: 1
+          }
+        })
+      } as never
+    });
+
+    const runtime = await service.getRuntimeInfo();
+
+    expect(runtime.actual.externalSyncWritebackEnabled).toBe(false);
+  });
+
   it("disconnects a provider connection and disables its active links", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
@@ -545,14 +611,12 @@ describe.sequential("app service", () => {
     const service = createAppService({
       prisma,
       actualService: {
-        getCapabilities: vi.fn().mockResolvedValue({
-          externalSyncWritebackEnabled: true
-        }),
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
         listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn(),
+        getExternalSyncAccount: vi.fn(),
         linkExternalSyncAccount,
         unlinkExternalSyncAccount
       } as never,
