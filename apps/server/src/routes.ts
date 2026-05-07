@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "./app-context.js";
 import { providerSchemas } from "./services/provider-settings-service.js";
+import type { PlaidWebhookEvent } from "./services/plaid-service.js";
 import type { TellerWebhookEvent } from "./services/teller-service.js";
 
 const actualAccountIdParamsSchema = z.object({
@@ -61,6 +62,17 @@ const tellerWebhookBodySchema = z.object({
     })
     .passthrough()
 });
+
+const plaidWebhookBodySchema = z.object({
+  webhook_type: z.string().min(1),
+  webhook_code: z.string().min(1),
+  item_id: z.string().min(1).optional(),
+  environment: z.string().min(1).optional(),
+  initial_update_complete: z.boolean().optional(),
+  historical_update_complete: z.boolean().optional(),
+  error: z.unknown().optional(),
+  new_transactions: z.number().optional()
+}).passthrough();
 
 function assertAuthenticated(request: FastifyRequest, reply: FastifyReply) {
   if (!request.session.user) {
@@ -190,6 +202,15 @@ export async function registerRoutes(
     }
 
     await context.appService.handleTellerWebhook(body as TellerWebhookEvent);
+    return {
+      ok: true
+    };
+  });
+
+  app.post("/api/webhooks/plaid", async request => {
+    const body = plaidWebhookBodySchema.parse(request.body ?? {});
+
+    await context.appService.handlePlaidWebhook(body as PlaidWebhookEvent);
     return {
       ok: true
     };

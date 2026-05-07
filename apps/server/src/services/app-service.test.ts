@@ -1392,6 +1392,311 @@ describe.sequential("app service", () => {
     expect(metadata.teller.lastWebhookSkipReason).toBe("debounced");
   });
 
+  it("runs scheduled Plaid links when a transactions sync webhook arrives", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-2",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "acct-1",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    const scheduledLink = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Scheduled Plaid",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-2",
+        actualAccountName: "Manual Plaid",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "MANUAL",
+        isEnabled: true
+      }
+    });
+
+    const syncAccountLink = vi.fn().mockResolvedValue({
+      imported: 0,
+      transactions: [],
+      removedImportedIds: [],
+      configPatch: {
+        providerSyncState: {
+          cursor: "cursor-new",
+          windowStartDate: null,
+          windowEndDate: null
+        }
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listCategories: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
+        reconcileTransactions: vi.fn().mockResolvedValue({
+          added: 0,
+          updated: 0,
+          removed: 0,
+          renamedPayees: 0,
+          addedIds: [],
+          updatedIds: []
+        }),
+        importTransactions: vi.fn(),
+        previewImportTransactions: vi.fn(),
+        getExternalSyncAccount: vi.fn().mockResolvedValue({
+          prefs: {
+            reimportDeleted: false,
+            updateDates: false
+          }
+        }),
+        linkExternalSyncAccount: vi.fn(),
+        unlinkExternalSyncAccount: vi.fn()
+      } as never,
+      plaidService: {
+        provider: "PLAID",
+        isConfigured: vi.fn().mockReturnValue(true),
+        createLinkToken: vi.fn(),
+        createUpdateLinkToken: vi.fn(),
+        exchangePublicToken: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection: vi.fn(),
+        syncAccountLink,
+        seedSandboxConnection: vi.fn(),
+        seedSandboxTransactions: vi.fn()
+      } as never,
+      now: () => new Date("2026-05-05T04:00:00.000Z")
+    });
+
+    await service.handlePlaidWebhook({
+      webhook_type: "TRANSACTIONS",
+      webhook_code: "SYNC_UPDATES_AVAILABLE",
+      item_id: "item-2",
+      environment: "sandbox",
+      initial_update_complete: true,
+      historical_update_complete: false
+    });
+
+    expect(syncAccountLink).toHaveBeenCalledTimes(1);
+    expect(syncAccountLink).toHaveBeenCalledWith(scheduledLink.id);
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+    expect(metadata.plaid.lastWebhookCode).toBe("SYNC_UPDATES_AVAILABLE");
+    expect(metadata.plaid.lastWebhookSyncedAt).toBe("2026-05-05T04:00:00.000Z");
+  });
+
+  it("ignores Plaid webhook types and codes that do not represent transaction sync updates", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-ignored",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const syncAccountLink = vi.fn();
+    const service = createAppService({
+      prisma,
+      plaidService: {
+        provider: "PLAID",
+        isConfigured: vi.fn().mockReturnValue(true),
+        createLinkToken: vi.fn(),
+        createUpdateLinkToken: vi.fn(),
+        exchangePublicToken: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection: vi.fn(),
+        syncAccountLink,
+        seedSandboxConnection: vi.fn(),
+        seedSandboxTransactions: vi.fn()
+      } as never
+    });
+
+    await service.handlePlaidWebhook({
+      webhook_type: "TRANSACTIONS",
+      webhook_code: "DEFAULT_UPDATE",
+      item_id: "item-ignored"
+    });
+
+    expect(syncAccountLink).not.toHaveBeenCalled();
+    expect(await prisma.syncRun.count()).toBe(0);
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+
+    expect(updatedConnection.metadataJson).toBeNull();
+  });
+
+  it("records a skipped Plaid webhook when no eligible links are enabled", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-no-links",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-manual",
+        actualAccountName: "Manual Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        syncFrequency: "MANUAL",
+        isEnabled: true
+      }
+    });
+
+    const syncAccountLink = vi.fn();
+    const service = createAppService({
+      prisma,
+      plaidService: {
+        provider: "PLAID",
+        isConfigured: vi.fn().mockReturnValue(true),
+        createLinkToken: vi.fn(),
+        createUpdateLinkToken: vi.fn(),
+        exchangePublicToken: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection: vi.fn(),
+        syncAccountLink,
+        seedSandboxConnection: vi.fn(),
+        seedSandboxTransactions: vi.fn()
+      } as never,
+      now: () => new Date("2026-05-05T04:30:00.000Z")
+    });
+
+    await service.handlePlaidWebhook({
+      webhook_type: "TRANSACTIONS",
+      webhook_code: "SYNC_UPDATES_AVAILABLE",
+      item_id: "item-no-links",
+      environment: "sandbox"
+    });
+
+    expect(syncAccountLink).not.toHaveBeenCalled();
+    expect(await prisma.syncRun.count()).toBe(0);
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+
+    expect(metadata.plaid.lastWebhookSkipReason).toBe("no_eligible_links");
+    expect(metadata.plaid.lastWebhookSyncSkippedAt).toBe("2026-05-05T04:30:00.000Z");
+  });
+
+  it("marks Plaid webhook sync runs failed when an eligible link sync throws", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-failure",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const link = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    const syncAccountLink = vi.fn().mockRejectedValue(new Error("Plaid webhook sync failed"));
+    const service = createAppService({
+      prisma,
+      plaidService: {
+        provider: "PLAID",
+        isConfigured: vi.fn().mockReturnValue(true),
+        createLinkToken: vi.fn(),
+        createUpdateLinkToken: vi.fn(),
+        exchangePublicToken: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection: vi.fn(),
+        syncAccountLink,
+        seedSandboxConnection: vi.fn(),
+        seedSandboxTransactions: vi.fn()
+      } as never,
+      now: () => new Date("2026-05-05T04:45:00.000Z")
+    });
+
+    await service.handlePlaidWebhook({
+      webhook_type: "TRANSACTIONS",
+      webhook_code: "SYNC_UPDATES_AVAILABLE",
+      item_id: "item-failure",
+      environment: "sandbox"
+    });
+
+    expect(syncAccountLink).toHaveBeenCalledWith(link.id);
+
+    const syncRuns = await prisma.syncRun.findMany({
+      where: {
+        accountLinkId: link.id
+      }
+    });
+    expect(syncRuns).toHaveLength(1);
+    expect(syncRuns[0]).toMatchObject({
+      status: "FAILED",
+      error: "Plaid webhook sync failed"
+    });
+
+    const updatedLink = await prisma.accountLink.findUniqueOrThrow({
+      where: {
+        id: link.id
+      }
+    });
+    const config = JSON.parse(updatedLink.configJson || "{}");
+    expect(config.automaticSyncFailureCount).toBe(1);
+  });
+
   it("marks Stripe connections as reauth-required when a deactivation webhook indicates relink", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
@@ -1465,6 +1770,79 @@ describe.sequential("app service", () => {
     });
     expect(metadata.stripe.lastWebhookType).toBe("financial_connections.account.deactivated");
     expect(metadata.stripe.accountIds).toEqual(["fca_123"]);
+  });
+
+  it("marks Stripe connections as attention-required when a deactivation is not a relink requirement", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "STRIPE",
+        label: "Primary Stripe",
+        providerItemId: "fcauth_attention",
+        accessTokenCiphertext: "",
+        metadataJson: JSON.stringify({
+          stripe: {
+            authorizationId: "fcauth_attention"
+          }
+        })
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      stripeService: {
+        provider: "STRIPE",
+        isConfigured: vi.fn().mockReturnValue(true),
+        createConnectSession: vi.fn(),
+        createReauthSession: vi.fn(),
+        finalizeAccounts: vi.fn(),
+        finalizeReauthSession: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection: vi.fn(),
+        syncAccountLink: vi.fn(),
+        webhooksConfigured: vi.fn().mockReturnValue(true),
+        constructWebhookEvent: vi.fn(),
+        getAuthorization: vi.fn().mockResolvedValue({
+          id: "fcauth_attention",
+          status: "inactive",
+          status_details: {
+            inactive: {
+              action: "repair_required"
+            }
+          }
+        })
+      } as never
+    });
+
+    await service.handleStripeWebhook({
+      id: "evt_attention",
+      type: "financial_connections.account.deactivated",
+      created: Math.floor(new Date("2026-05-05T00:30:00.000Z").getTime() / 1000),
+      data: {
+        object: {
+          id: "fca_attention",
+          object: "financial_connections.account",
+          authorization: "fcauth_attention"
+        }
+      }
+    } as never);
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+
+    expect(updatedConnection.status).toBe("ERROR");
+    expect(metadata.health).toMatchObject({
+      state: "ATTENTION_REQUIRED",
+      scope: "BANK_AUTH",
+      action: "MANUAL_RECONNECT",
+      code: "ACCOUNT_INACTIVE"
+    });
   });
 
   it("clears Stripe webhook health when a connection is reactivated", async () => {
@@ -1749,6 +2127,291 @@ describe.sequential("app service", () => {
     const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
     expect(metadata.stripe.lastTransactionWebhookSyncRefreshId).toBe("fctxnrefresh_new");
     expect(metadata.stripe.lastTransactionWebhookSyncedAt).toBe("2026-05-05T03:00:00.000Z");
+  });
+
+  it("skips Stripe webhook-driven syncs when the refresh cursor is already applied", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "STRIPE",
+        label: "Primary Stripe",
+        providerItemId: "fcauth_123",
+        accessTokenCiphertext: ""
+      }
+    });
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "fca_123",
+        name: "Checking",
+        type: "cash"
+      }
+    });
+    const link = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Checking",
+        assetType: "BANK",
+        provider: "STRIPE",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true,
+        configJson: JSON.stringify({
+          providerSyncState: {
+            cursor: "fctxnrefresh_same",
+            windowStartDate: null,
+            windowEndDate: null
+          }
+        })
+      }
+    });
+
+    const syncAccountLinkFromWebhook = vi.fn();
+    const service = createAppService({
+      prisma,
+      stripeService: {
+        provider: "STRIPE",
+        isConfigured: vi.fn().mockReturnValue(true),
+        createConnectSession: vi.fn(),
+        createReauthSession: vi.fn(),
+        finalizeAccounts: vi.fn(),
+        finalizeReauthSession: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection: vi.fn(),
+        syncAccountLink: vi.fn(),
+        syncAccountLinkFromWebhook,
+        webhooksConfigured: vi.fn().mockReturnValue(true),
+        constructWebhookEvent: vi.fn(),
+        getAuthorization: vi.fn()
+      } as never,
+      now: () => new Date("2026-05-05T03:15:00.000Z")
+    });
+
+    await service.handleStripeWebhook({
+      id: "evt_same_cursor",
+      type: "financial_connections.account.refreshed_transactions",
+      created: Math.floor(new Date("2026-05-05T03:15:00.000Z").getTime() / 1000),
+      data: {
+        object: {
+          id: "fca_123",
+          object: "financial_connections.account",
+          authorization: "fcauth_123",
+          transaction_refresh: {
+            id: "fctxnrefresh_same",
+            status: "succeeded"
+          }
+        }
+      }
+    } as never);
+
+    expect(syncAccountLinkFromWebhook).not.toHaveBeenCalled();
+    expect(await prisma.syncRun.count()).toBe(0);
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+    expect(metadata.stripe.lastTransactionWebhookSyncSkipReason).toBe("cursor_already_applied");
+    expect(metadata.stripe.lastTransactionWebhookSyncSkippedAt).toBe("2026-05-05T03:15:00.000Z");
+
+    const unchangedLink = await prisma.accountLink.findUniqueOrThrow({
+      where: {
+        id: link.id
+      }
+    });
+    expect(JSON.parse(unchangedLink.configJson || "{}").providerSyncState.cursor).toBe("fctxnrefresh_same");
+  });
+
+  it("ignores Stripe refreshed-transactions webhooks whose refresh did not succeed", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "STRIPE",
+        label: "Primary Stripe",
+        providerItemId: "fcauth_123",
+        accessTokenCiphertext: ""
+      }
+    });
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "fca_123",
+        name: "Checking",
+        type: "cash"
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Checking",
+        assetType: "BANK",
+        provider: "STRIPE",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    const syncAccountLinkFromWebhook = vi.fn();
+    const service = createAppService({
+      prisma,
+      stripeService: {
+        provider: "STRIPE",
+        isConfigured: vi.fn().mockReturnValue(true),
+        createConnectSession: vi.fn(),
+        createReauthSession: vi.fn(),
+        finalizeAccounts: vi.fn(),
+        finalizeReauthSession: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection: vi.fn(),
+        syncAccountLink: vi.fn(),
+        syncAccountLinkFromWebhook,
+        webhooksConfigured: vi.fn().mockReturnValue(true),
+        constructWebhookEvent: vi.fn(),
+        getAuthorization: vi.fn()
+      } as never,
+      now: () => new Date("2026-05-05T03:20:00.000Z")
+    });
+
+    await service.handleStripeWebhook({
+      id: "evt_failed_refresh",
+      type: "financial_connections.account.refreshed_transactions",
+      created: Math.floor(new Date("2026-05-05T03:20:00.000Z").getTime() / 1000),
+      data: {
+        object: {
+          id: "fca_123",
+          object: "financial_connections.account",
+          authorization: "fcauth_123",
+          transaction_refresh: {
+            id: "fctxnrefresh_failed",
+            status: "failed"
+          }
+        }
+      }
+    } as never);
+
+    expect(syncAccountLinkFromWebhook).not.toHaveBeenCalled();
+    expect(await prisma.syncRun.count()).toBe(0);
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+    expect(metadata.stripe.lastTransactionRefreshId).toBe("fctxnrefresh_failed");
+    expect(metadata.stripe.lastTransactionRefreshStatus).toBe("failed");
+    expect(metadata.stripe.lastTransactionWebhookSyncStartedAt).toBeUndefined();
+  });
+
+  it("marks Stripe webhook sync runs failed when the incremental import throws", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "STRIPE",
+        label: "Primary Stripe",
+        providerItemId: "fcauth_123",
+        accessTokenCiphertext: ""
+      }
+    });
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "fca_123",
+        name: "Checking",
+        type: "cash"
+      }
+    });
+    const link = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Checking",
+        assetType: "BANK",
+        provider: "STRIPE",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true,
+        configJson: JSON.stringify({
+          providerSyncState: {
+            cursor: "fctxnrefresh_old",
+            windowStartDate: null,
+            windowEndDate: null
+          }
+        })
+      }
+    });
+
+    const syncAccountLinkFromWebhook = vi.fn().mockRejectedValue(new Error("Stripe webhook sync failed"));
+    const service = createAppService({
+      prisma,
+      stripeService: {
+        provider: "STRIPE",
+        isConfigured: vi.fn().mockReturnValue(true),
+        createConnectSession: vi.fn(),
+        createReauthSession: vi.fn(),
+        finalizeAccounts: vi.fn(),
+        finalizeReauthSession: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection: vi.fn(),
+        syncAccountLink: vi.fn(),
+        syncAccountLinkFromWebhook,
+        webhooksConfigured: vi.fn().mockReturnValue(true),
+        constructWebhookEvent: vi.fn(),
+        getAuthorization: vi.fn()
+      } as never,
+      now: () => new Date("2026-05-05T03:25:00.000Z")
+    });
+
+    await service.handleStripeWebhook({
+      id: "evt_failed_sync",
+      type: "financial_connections.account.refreshed_transactions",
+      created: Math.floor(new Date("2026-05-05T03:25:00.000Z").getTime() / 1000),
+      data: {
+        object: {
+          id: "fca_123",
+          object: "financial_connections.account",
+          authorization: "fcauth_123",
+          transaction_refresh: {
+            id: "fctxnrefresh_new",
+            status: "succeeded"
+          }
+        }
+      }
+    } as never);
+
+    expect(syncAccountLinkFromWebhook).toHaveBeenCalledWith(link.id);
+
+    const syncRuns = await prisma.syncRun.findMany({
+      where: {
+        accountLinkId: link.id
+      }
+    });
+    expect(syncRuns).toHaveLength(1);
+    expect(syncRuns[0]).toMatchObject({
+      status: "FAILED",
+      error: "Stripe webhook sync failed"
+    });
+
+    const updatedLink = await prisma.accountLink.findUniqueOrThrow({
+      where: {
+        id: link.id
+      }
+    });
+    const config = JSON.parse(updatedLink.configJson || "{}");
+    expect(config.providerSyncState.cursor).toBe("fctxnrefresh_old");
+    expect(config.automaticSyncFailureCount).toBe(1);
   });
 
   it("creates a migrating replacement link when a synced provider link is switched", async () => {

@@ -37,7 +37,7 @@ import { learnCategoryMappingsFromHistory, pruneImportedTransactionLedger } from
 import { CURRENT_LINK_STATUSES, linkIdentityChanged, parseLinkConfig, selectCurrentLink, serializeLinkConfig, toLinkDto } from "./link-config.js";
 import type { LinkConfigData } from "./link-config.js";
 import { plaidService } from "./plaid-service.js";
-import type { PlaidService } from "./plaid-service.js";
+import type { PlaidService, PlaidWebhookEvent } from "./plaid-service.js";
 import {
   applyActualExternalSyncPrefsToProviderSyncResult,
   DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS,
@@ -204,6 +204,7 @@ export type AppService = {
   upsertAccountLink(actualAccountId: string, payload: UpdateAccountLinkPayload): Promise<unknown>;
   runAccountSync(actualAccountId: string): Promise<AppliedSyncOutcome | void>;
   runScheduledLinkSyncs(linkIds: string[]): Promise<void>;
+  handlePlaidWebhook(event: PlaidWebhookEvent): Promise<void>;
   handleTellerWebhook(event: TellerWebhookEvent): Promise<void>;
   handleStripeWebhook(event: Stripe.Event): Promise<void>;
   previewAccountSyncReview(actualAccountId: string): Promise<MigrationPreviewDto>;
@@ -2283,6 +2284,138 @@ export function createAppService({
       });
 
       await runLoadedLinkSyncBatch(links);
+    },
+
+    async handlePlaidWebhook(event: PlaidWebhookEvent) {
+      if (event.webhook_type !== "TRANSACTIONS" || event.webhook_code !== "SYNC_UPDATES_AVAILABLE") {
+        return;
+      }
+
+      if (!event.item_id) {
+        return;
+      }
+
+      const connection = await database.connection.findUnique({
+        where: {
+          provider_providerItemId: {
+            provider: "PLAID",
+            providerItemId: event.item_id
+          }
+        }
+      });
+
+      if (!connection) {
+        return;
+      }
+
+      const metadata = parseConnectionMetadata(connection.metadataJson);
+      const plaidMetadata =
+        typeof metadata.plaid === "object" && metadata.plaid ? (metadata.plaid as Record<string, unknown>) : {};
+      const nowIso = now().toISOString();
+
+      await database.connection.update({
+        where: {
+          id: connection.id
+        },
+        data: {
+          metadataJson: JSON.stringify({
+            ...metadata,
+            plaid: {
+              ...plaidMetadata,
+              lastWebhookAt: nowIso,
+              lastWebhookCode: event.webhook_code,
+              lastWebhookEnvironment: event.environment ?? null,
+              initialUpdateComplete: event.initial_update_complete ?? plaidMetadata.initialUpdateComplete ?? null,
+              historicalUpdateComplete: event.historical_update_complete ?? plaidMetadata.historicalUpdateComplete ?? null,
+              lastWebhookSyncStartedAt: nowIso
+            }
+          })
+        }
+      });
+
+      const eligibleLinks = await database.accountLink.findMany({
+        where: {
+          connectionId: connection.id,
+          provider: "PLAID",
+          status: "ACTIVE",
+          isEnabled: true,
+          syncFrequency: {
+            not: "MANUAL"
+          }
+        },
+        include: currentLinkInclude
+      });
+
+      if (eligibleLinks.length === 0) {
+        await database.connection.update({
+          where: {
+            id: connection.id
+          },
+          data: {
+            metadataJson: JSON.stringify({
+              ...metadata,
+              plaid: {
+                ...plaidMetadata,
+                lastWebhookAt: nowIso,
+                lastWebhookCode: event.webhook_code,
+                lastWebhookEnvironment: event.environment ?? null,
+                initialUpdateComplete: event.initial_update_complete ?? plaidMetadata.initialUpdateComplete ?? null,
+                historicalUpdateComplete: event.historical_update_complete ?? plaidMetadata.historicalUpdateComplete ?? null,
+                lastWebhookSyncSkippedAt: nowIso,
+                lastWebhookSkipReason: "no_eligible_links"
+              }
+            })
+          }
+        });
+        return;
+      }
+
+      for (const link of eligibleLinks) {
+        const syncRun = await createSyncRunForLink(link);
+
+        try {
+          const syncResult = await runWithProviderBackgroundGate("PLAID", () => plaid.syncAccountLink(link.id));
+          await applySyncResultToLink({
+            link,
+            syncRunId: syncRun.id,
+            syncResult
+          });
+        } catch (error) {
+          await markSyncRunFailure({
+            link,
+            syncRunId: syncRun.id,
+            error,
+            automatic: true
+          });
+        }
+      }
+
+      const latestConnection = await database.connection.findUniqueOrThrow({
+        where: {
+          id: connection.id
+        },
+        select: {
+          metadataJson: true
+        }
+      });
+      const latestMetadata = parseConnectionMetadata(latestConnection.metadataJson);
+      const latestPlaidMetadata =
+        typeof latestMetadata.plaid === "object" && latestMetadata.plaid ? (latestMetadata.plaid as Record<string, unknown>) : {};
+
+      await database.connection.update({
+        where: {
+          id: connection.id
+        },
+        data: {
+          metadataJson: JSON.stringify({
+            ...latestMetadata,
+            plaid: {
+              ...latestPlaidMetadata,
+              lastWebhookSyncedAt: now().toISOString()
+            }
+          })
+        }
+      });
     },
 
     async handleTellerWebhook(event: TellerWebhookEvent) {

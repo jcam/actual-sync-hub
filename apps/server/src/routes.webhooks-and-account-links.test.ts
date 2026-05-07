@@ -268,6 +268,78 @@ describe("server webhook and account-link routes", () => {
     expect(handleTellerWebhook).toHaveBeenCalledWith(payload);
   });
 
+  it("accepts a Plaid transactions webhook and delegates it to the app service", async () => {
+    const handlePlaidWebhook = vi.fn().mockResolvedValue(undefined);
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          appService: {
+            handlePlaidWebhook
+          }
+        })
+      })
+    );
+
+    const payload = {
+      webhook_type: "TRANSACTIONS",
+      webhook_code: "SYNC_UPDATES_AVAILABLE",
+      item_id: "item_123",
+      environment: "sandbox",
+      initial_update_complete: true,
+      historical_update_complete: false
+    };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/plaid",
+      payload
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      ok: true
+    });
+    expect(handlePlaidWebhook).toHaveBeenCalledWith(payload);
+  });
+
+  it("rejects malformed Plaid webhook payloads", async () => {
+    const handlePlaidWebhook = vi.fn().mockResolvedValue(undefined);
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          appService: {
+            handlePlaidWebhook
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/plaid",
+      payload: {
+        webhook_type: "TRANSACTIONS",
+        item_id: "item_123"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual(
+      expect.objectContaining({
+        error: "Webhook code is required."
+      })
+    );
+    expect(handlePlaidWebhook).not.toHaveBeenCalled();
+  });
+
   it("rejects Stripe webhooks when webhook verification is not configured", async () => {
     const app = trackedApps.track(
       await createServer({
@@ -372,6 +444,53 @@ describe("server webhook and account-link routes", () => {
         type: "financial_connections.account.reactivated"
       })
     );
+  });
+
+  it("rejects Stripe webhooks with invalid signatures", async () => {
+    const handleStripeWebhook = vi.fn().mockResolvedValue(undefined);
+    const constructWebhookEvent = vi.fn().mockResolvedValue(null);
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          appService: {
+            handleStripeWebhook
+          },
+          stripeService: {
+            webhooksConfigured: vi.fn().mockReturnValue(true),
+            constructWebhookEvent
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/stripe",
+      headers: {
+        "content-type": "application/json",
+        "stripe-signature": "t=123,v1=deadbeef"
+      },
+      payload: JSON.stringify({
+        id: "evt_bad",
+        type: "financial_connections.account.reactivated",
+        data: {
+          object: {
+            id: "fca_123",
+            object: "financial_connections.account"
+          }
+        }
+      })
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({
+      error: "Invalid Stripe webhook signature"
+    });
+    expect(handleStripeWebhook).not.toHaveBeenCalled();
   });
 
   it("saves an account link through the route layer", async () => {

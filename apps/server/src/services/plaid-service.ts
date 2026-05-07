@@ -103,6 +103,17 @@ export type PlaidSyncTransaction = {} & ProviderSyncTransaction
 
 type PlaidSyncResult = {} & ProviderSyncResult
 
+export type PlaidWebhookEvent = {
+  webhook_type: string;
+  webhook_code: string;
+  item_id?: string;
+  environment?: "sandbox" | "production" | string;
+  initial_update_complete?: boolean;
+  historical_update_complete?: boolean;
+  error?: unknown;
+  new_transactions?: number;
+}
+
 export type PlaidService = {
   createLinkToken(userId: string): Promise<string>;
   createUpdateLinkToken(connectionId: string, userId: string): Promise<string>;

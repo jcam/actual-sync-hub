@@ -162,6 +162,7 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       upsertAccountLink: vi.fn(),
       runAccountSync: vi.fn(),
       runScheduledLinkSyncs: vi.fn(),
+      handlePlaidWebhook: vi.fn(),
       handleTellerWebhook: vi.fn(),
       handleStripeWebhook: vi.fn(),
       previewAccountSyncReview: vi.fn(),
