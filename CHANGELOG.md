@@ -7,6 +7,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-05-07
+
+### Added
+- Stripe Financial Connections as a first-class provider, including provider settings, dedicated managed-connections UI, reusable connection/account storage, balance refresh, and transaction sync into Actual.
+- Stripe preview-SDK integration pinned to the current public-preview release, so Financial Connections preview fields like authorization and relink status are available through typed SDK calls instead of a custom HTTP client.
+- Inline Stripe reauthentication support using Financial Connections relink sessions, including reconnect-button launch flow, relink finalize endpoint, and focused route/UI test coverage.
+
+### Changed
+- Switched the Stripe adapter from hand-built `fetch` requests to the official Stripe Node SDK, keeping provider health mapping and sync orchestration intact while removing custom transport code.
+- Updated Stripe account replacement behavior to preserve existing local account rows when possible, so relink/refresh flows do not unnecessarily break attached Actual account links.
+
 ## [0.19.0] - 2026-05-07
 
 ### Added
