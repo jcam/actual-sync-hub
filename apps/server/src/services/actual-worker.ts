@@ -12,9 +12,24 @@ import { resolveActualCategoryId } from "./category-matching.js";
 
 type ActualModule = typeof ActualApi;
 type ActualImportTransaction = Parameters<ActualModule["importTransactions"]>[1][number];
-type ActualTransaction = Awaited<ReturnType<ActualModule["getTransactions"]>>[number];
 type ActualModuleWithExternalSync = ActualModule & {
   linkExternalSyncAccount?: (accountId: string, metadata: ActualExternalSyncMetadataInput) => Promise<unknown>;
+  getExternalSyncAccount?: (
+    accountId: string
+  ) => Promise<{
+    id: string;
+    linked: boolean;
+    syncSource: "external" | null;
+    providerAccountId: string | null;
+    institutionName: string | null;
+    institutionExternalId: string | null;
+    mask: string | null;
+    officialName: string | null;
+    balanceCurrent: number | null;
+    balanceAvailable: number | null;
+    balanceLimit: number | null;
+    lastSync: string | null;
+  }>;
   unlinkExternalSyncAccount?: (accountId: string) => Promise<unknown>;
 };
 
@@ -54,6 +69,10 @@ type ActualExternalSyncMetadataInput = {
   lastSync?: string | null;
 }
 
+type ActualCapabilities = {
+  externalSyncWritebackEnabled: boolean;
+}
+
 type ReconcileTransactionInput = {
   date: string;
   amount: number;
@@ -66,6 +85,30 @@ type ReconcileTransactionInput = {
   resolved_category_id?: string;
   transfer_actual_account_id?: string;
 }
+
+type PreviewExistingTransaction = {
+  id: string;
+  imported_id?: string | null;
+  imported_payee?: string | null;
+  notes?: string | null;
+  cleared?: boolean | null;
+  payee?: string | null;
+  payee_name?: string | null;
+};
+
+type PreviewImportResult = {
+  added: string[];
+  updated: string[];
+  errors: Array<{ message: string }>;
+  updatedPreview: Array<{
+    transaction: {
+      imported_id?: string | null;
+    };
+    existing?: PreviewExistingTransaction | false;
+    ignored?: boolean;
+    tombstone?: boolean;
+  }>;
+};
 
 const MIN_SYNC_INTERVAL_MS = 3_000;
 const require = createRequire(import.meta.url);
@@ -85,6 +128,10 @@ type WorkerCommand =
     }
   | {
       id: string;
+      operation: "getCapabilities";
+    }
+  | {
+      id: string;
       operation: "linkExternalSyncAccount";
       accountId: string;
       metadata: ActualExternalSyncMetadataInput;
@@ -96,9 +143,10 @@ type WorkerCommand =
     }
   | {
       id: string;
-      operation: "listTransactionsByImportedIds";
+      operation: "listTransactionsByDateRange";
       accountId: string;
-      importedIds: string[];
+      startDate: string;
+      endDate: string;
     }
   | {
       id: string;
@@ -118,6 +166,7 @@ type WorkerCommand =
       accountId: string;
       transactions: ReconcileTransactionInput[];
       removedImportedIds: string[];
+      removedActualTransactionIds: string[];
     };
 
 type WorkerResponse =
@@ -155,21 +204,18 @@ function isActualBankSyncSource(value: string | null | undefined): value is Actu
   return value === "simpleFin" || value === "goCardless" || value === "pluggyai" || value === "external";
 }
 
-function tryGetActualInternalApi(actual: ActualModule) {
-  const internal = (actual as ActualModule & {
-    internal?: {
-      send?: (name: string, args?: unknown) => Promise<unknown>;
-    };
-  }).internal;
+function getActualCapabilities(actual: ActualModule): ActualCapabilities {
+  const api = actual as ActualModuleWithExternalSync;
+  const linkExternalSyncAccount = (api as Record<string, unknown>).linkExternalSyncAccount;
+  const unlinkExternalSyncAccount = (api as Record<string, unknown>).unlinkExternalSyncAccount;
 
-  if (!internal?.send) {
-    return null;
-  }
-
-  return internal;
+  return {
+    externalSyncWritebackEnabled:
+      typeof linkExternalSyncAccount === "function" && typeof unlinkExternalSyncAccount === "function"
+  };
 }
 
-function getActualExternalSyncApi(actual: ActualModule) {
+function getActualExternalSyncWritebackApi(actual: ActualModule) {
   const api = actual as ActualModuleWithExternalSync;
 
   if (!api.linkExternalSyncAccount || !api.unlinkExternalSyncAccount) {
@@ -179,8 +225,14 @@ function getActualExternalSyncApi(actual: ActualModule) {
   return api;
 }
 
-function isMissingBanksTableError(error: unknown) {
-  return error instanceof Error && error.message.includes('Table "banks" does not exist in the schema');
+function getActualExternalSyncReadApi(actual: ActualModule) {
+  const api = actual as ActualModuleWithExternalSync;
+
+  if (!api.getExternalSyncAccount) {
+    throw new Error("Installed Actual API runtime does not expose external-sync account read methods.");
+  }
+
+  return api;
 }
 
 async function fetchActualServerVersion(serverURL: string) {
@@ -408,136 +460,53 @@ async function main() {
 
         case "listBankSyncLinks": {
           await syncIfNeeded();
-          const internal = tryGetActualInternalApi(actual);
           const publicAccounts = await actual.getAccounts();
-          const publicAccountsById = new Map(publicAccounts.map(account => [account.id, account]));
-          const accounts = internal
-            ? ((await internal.send("accounts-get")) as unknown as Array<{
-                id: string;
-                name: string;
-                official_name?: string | null;
-                account_id?: string | null;
-                account_sync_source?: string | null;
-                last_sync?: string | null;
-                closed?: boolean | 0 | 1;
-                offbudget?: boolean | 0 | 1;
-                tombstone?: boolean | 0 | 1;
-                bank?: string | null;
-                bankName?: string | null;
-                bankId?: string | null;
-                mask?: string | null;
-                balance_current?: number | null;
-                balance_available?: number | null;
-                balance_limit?: number | null;
-              }>)
-            : (
-                (await actual.aqlQuery(
-                  actual
-                    .q("accounts")
-                    .select([
-                      "id",
-                      "name",
-                      "official_name",
-                      "account_id",
-                      "account_sync_source",
-                      "last_sync",
-                      "closed",
-                      "offbudget"
-                    ])
-                    .withDead() as unknown as Parameters<ActualModule["aqlQuery"]>[0]
-                )) as {
-                  data: Array<{
-                    id: string;
-                    name: string;
-                    official_name?: string | null;
-                    account_id?: string | null;
-                    account_sync_source?: string | null;
-                    last_sync?: string | null;
-                    closed?: boolean | 0 | 1;
-                    offbudget?: boolean | 0 | 1;
-                    tombstone?: boolean;
-                  }>;
-                }
-              ).data;
-          const bankRows = (await (async () => {
-            try {
-              return (await actual.aqlQuery(
-                actual.q("banks").select(["id", "bank_id", "name"]).withDead() as unknown as Parameters<
-                  ActualModule["aqlQuery"]
-                >[0]
-              )) as {
-                data: Array<{
-                  id: string;
-                  bank_id?: string | null;
-                  name?: string | null;
-                  tombstone?: boolean;
-                }>;
-              };
-            } catch (error) {
-              if (isMissingBanksTableError(error)) {
-                return {
-                  data: []
-                };
-              }
-
-              throw error;
-            }
-          })()) as {
-            data: Array<{
-              id: string;
-              bank_id?: string | null;
-              name?: string | null;
-              tombstone?: boolean;
-            }>;
-          };
-          const bankById = new Map(
-            bankRows.data.filter(bank => !bank.tombstone).map(bank => [bank.id, bank])
+          const externalSyncApi = getActualExternalSyncReadApi(actual);
+          const accountLinks = await Promise.all(
+            publicAccounts.map(async account => ({
+              account,
+              externalSync: await externalSyncApi.getExternalSyncAccount!(account.id)
+            }))
           );
 
           return {
             id: command.id,
             ok: true,
-            result: accounts
-              .filter(account => !account.tombstone)
-              .filter(account => Boolean(account.account_id) && isActualBankSyncSource(account.account_sync_source))
-              .map(account => {
-                const bankId = "bank" in account ? account.bank ?? null : null;
-                const bankName = "bankName" in account ? account.bankName ?? null : null;
-                const balanceCurrent =
-                  "balance_current" in account && typeof account.balance_current === "number"
-                    ? account.balance_current
-                    : publicAccountsById.get(account.id)?.balance_current ?? null;
-
+            result: accountLinks
+              .filter(({ externalSync }) => externalSync.linked && isActualBankSyncSource(externalSync.syncSource))
+              .map(({ account, externalSync }) => {
                 return {
                   actualAccountId: account.id,
                   actualAccountName: account.name,
-                  actualOfficialName: account.official_name ?? null,
-                  accountSyncSource: account.account_sync_source as ActualBankSyncSource,
-                  externalAccountId: account.account_id as string,
-                  actualBankId: bankId,
-                  actualBankName: bankName ?? (bankId ? bankById.get(bankId)?.name ?? null : null),
-                  actualBankExternalId: bankId ? bankById.get(bankId)?.bank_id ?? null : null,
-                  mask: "mask" in account ? account.mask ?? null : null,
-                  balanceCurrent: integerToAmount(balanceCurrent),
-                  balanceAvailable:
-                    "balance_available" in account && typeof account.balance_available === "number"
-                      ? integerToAmount(account.balance_available)
-                      : null,
-                  balanceLimit:
-                    "balance_limit" in account && typeof account.balance_limit === "number"
-                      ? integerToAmount(account.balance_limit)
-                      : null,
+                  actualOfficialName: externalSync.officialName ?? null,
+                  accountSyncSource: externalSync.syncSource as ActualBankSyncSource,
+                  externalAccountId: externalSync.providerAccountId as string,
+                  actualBankId: null,
+                  actualBankName: externalSync.institutionName ?? null,
+                  actualBankExternalId: externalSync.institutionExternalId ?? null,
+                  mask: externalSync.mask ?? null,
+                  balanceCurrent: integerToAmount(externalSync.balanceCurrent),
+                  balanceAvailable: integerToAmount(externalSync.balanceAvailable),
+                  balanceLimit: integerToAmount(externalSync.balanceLimit),
                   closed: Boolean(account.closed),
                   offbudget: Boolean(account.offbudget),
-                  lastSyncedAt: account.last_sync ?? null
+                  lastSyncedAt: externalSync.lastSync ?? null
                 };
               })
           };
         }
 
+        case "getCapabilities": {
+          return {
+            id: command.id,
+            ok: true,
+            result: getActualCapabilities(actual)
+          };
+        }
+
         case "linkExternalSyncAccount": {
           await syncIfNeeded();
-          await getActualExternalSyncApi(actual).linkExternalSyncAccount!(command.accountId, {
+          await getActualExternalSyncWritebackApi(actual).linkExternalSyncAccount!(command.accountId, {
             syncSource: "external",
             providerAccountId: command.metadata.providerAccountId,
             institutionName: command.metadata.institutionName,
@@ -563,7 +532,7 @@ async function main() {
 
         case "unlinkExternalSyncAccount": {
           await syncIfNeeded();
-          await getActualExternalSyncApi(actual).unlinkExternalSyncAccount!(command.accountId);
+          await getActualExternalSyncWritebackApi(actual).unlinkExternalSyncAccount!(command.accountId);
           await syncIfNeeded(true);
 
           return {
@@ -573,36 +542,14 @@ async function main() {
           };
         }
 
-        case "listTransactionsByImportedIds": {
+        case "listTransactionsByDateRange": {
           await syncIfNeeded();
-          if (command.importedIds.length === 0) {
-            return {
-              id: command.id,
-              ok: true,
-              result: []
-            };
-          }
-
-          const query = actual.q("transactions")
-            .select(["id", "date", "amount", "category", "payee", "imported_payee", "notes", "cleared", "imported_id"])
-            .filter({
-              account: command.accountId,
-              $or: command.importedIds.map(imported_id => ({ imported_id }))
-            })
-            .withDead();
-          const matching = (await actual.aqlQuery(query as unknown as Parameters<ActualModule["aqlQuery"]>[0])) as {
-            data: Array<
-              Pick<
-                ActualTransaction,
-                "id" | "date" | "amount" | "imported_id" | "category" | "imported_payee" | "notes" | "cleared"
-              >
-            >;
-          };
+          const matching = await actual.getTransactions(command.accountId, command.startDate, command.endDate);
 
           return {
             id: command.id,
             ok: true,
-            result: matching.data.map(transaction => ({
+            result: matching.map(transaction => ({
               id: transaction.id,
               date: transaction.date,
               amount: integerToAmount(transaction.amount),
@@ -700,49 +647,7 @@ async function main() {
         case "reconcileTransactions": {
           await syncIfNeeded();
 
-          const importedIds = [
-            ...new Set([
-              ...command.transactions.map(transaction => transaction.imported_id),
-              ...command.removedImportedIds
-            ])
-          ];
-          const existingByImportedId = new Map<
-            string,
-            Pick<
-              ActualTransaction,
-              "id" | "imported_id" | "cleared" | "amount" | "payee" | "imported_payee" | "category" | "notes"
-            >
-          >();
-
-          if (importedIds.length > 0) {
-            const importedQuery = actual.q("transactions")
-              .select(["id", "imported_id", "cleared", "amount", "payee", "imported_payee", "category", "notes"])
-              .filter({
-                account: command.accountId,
-                $or: importedIds.map(imported_id => ({ imported_id }))
-              })
-              .withDead();
-            const existing = (await actual.aqlQuery(
-              importedQuery as unknown as Parameters<ActualModule["aqlQuery"]>[0]
-            )) as {
-              data: Array<
-                Pick<
-                  ActualTransaction,
-                  "id" | "imported_id" | "cleared" | "amount" | "payee" | "imported_payee" | "category" | "notes"
-                >
-              >;
-            };
-
-            for (const transaction of existing.data) {
-              const typedTransaction = transaction;
-              if (typedTransaction.imported_id) {
-                existingByImportedId.set(typedTransaction.imported_id, typedTransaction);
-              }
-            }
-          }
-
           const categories = (await actual.getCategories()).filter(isActualCategory);
-
           const payees = await actual.getPayees();
           const transferPayeeByAccountId = new Map(
             payees
@@ -755,27 +660,9 @@ async function main() {
                 }
               ])
           );
-          const payeeById = new Map(payees.map(payee => [payee.id, payee]));
-
-          let added = 0;
-          let updated = 0;
           let removed = 0;
           let renamedPayees = 0;
-          const toImport: ImportTransactionInput[] = [];
-
-          for (const importedId of command.removedImportedIds) {
-            const existing = existingByImportedId.get(importedId);
-            if (!existing) {
-              continue;
-            }
-
-            await actual.deleteTransaction(existing.id);
-            existingByImportedId.delete(importedId);
-            removed += 1;
-          }
-
-          for (const transaction of command.transactions) {
-            const existing = existingByImportedId.get(transaction.imported_id);
+          const resolvedTransactions = command.transactions.map(transaction => {
             const resolvedCategoryId = transaction.resolved_category_id || resolveActualCategoryId({
               categoryNames: transaction.category_names,
               actualCategories: categories.map(category => ({
@@ -787,66 +674,56 @@ async function main() {
               ? transferPayeeByAccountId.get(transaction.transfer_actual_account_id)
               : undefined;
 
-            if (!existing) {
-              toImport.push({
-                date: transaction.date,
-                amount: transaction.amount,
-                payee: resolvedTransferPayee?.id,
-                payee_name: transaction.payee_name,
-                imported_payee: transaction.imported_payee,
-                notes: transaction.notes,
-                imported_id: transaction.imported_id,
-                cleared: transaction.cleared,
-                category: resolvedCategoryId
-              });
-              added += 1;
+            return {
+              date: transaction.date,
+              amount: transaction.amount,
+              payee: resolvedTransferPayee?.id,
+              payee_name: transaction.payee_name,
+              imported_payee: transaction.imported_payee,
+              notes: transaction.notes,
+              imported_id: transaction.imported_id,
+              cleared: transaction.cleared,
+              category: resolvedCategoryId
+            } satisfies ImportTransactionInput;
+          });
+
+          for (const existingId of command.removedActualTransactionIds) {
+            if (!existingId) {
               continue;
             }
 
-            const patch: Partial<ActualTransaction> = {};
-            const nextAmount = amountToInteger(transaction.amount);
-            if (typeof existing.amount === "number" && existing.amount !== nextAmount) {
-              patch.amount = nextAmount;
-            }
-
-            if (typeof transaction.cleared === "boolean" && existing.cleared !== transaction.cleared) {
-              patch.cleared = transaction.cleared;
-            }
-
-            if (resolvedTransferPayee?.id && existing.payee !== resolvedTransferPayee.id) {
-              patch.payee = resolvedTransferPayee.id;
-            }
-
-            if (!existing.category && resolvedCategoryId) {
-              patch.category = resolvedCategoryId;
-            }
-
-            if (!existing.notes && transaction.notes) {
-              patch.notes = transaction.notes;
-            }
-
-            if (Object.keys(patch).length > 0) {
-              await actual.updateTransaction(existing.id, patch);
-              updated += 1;
-            }
-
-            if (existing.payee && transaction.payee_name && transaction.imported_payee) {
-              const existingPayee = payeeById.get(existing.payee);
-              if (
-                existingPayee &&
-                existing.imported_payee === existingPayee.name &&
-                transaction.payee_name !== existing.imported_payee
-              ) {
-                await actual.updatePayee(existingPayee.id, {
-                  name: transaction.payee_name
-                });
-                renamedPayees += 1;
-              }
-            }
+            await actual.deleteTransaction(existingId);
+            removed += 1;
           }
 
-          if (toImport.length > 0) {
-            await actual.importTransactions(command.accountId, toImport.map(transaction => ({
+          let previewResult: PreviewImportResult = {
+            added: [],
+            updated: [],
+            errors: [],
+            updatedPreview: []
+          };
+          if (resolvedTransactions.length > 0) {
+            previewResult = (await actual.importTransactions(command.accountId, resolvedTransactions.map(transaction => ({
+              account: command.accountId,
+              date: transaction.date,
+              amount: amountToInteger(transaction.amount),
+              payee: transaction.payee,
+              payee_name: transaction.payee_name,
+              imported_payee: transaction.imported_payee,
+              notes: transaction.notes,
+              imported_id: transaction.imported_id,
+              cleared: transaction.cleared ?? true,
+              category: transaction.category
+            })), {
+              defaultCleared: true,
+              dryRun: true
+            })) as PreviewImportResult;
+
+            if (previewResult.errors.length > 0) {
+              throw new Error(previewResult.errors[0]?.message || "Actual reconcile preview failed");
+            }
+
+            const importResult = await actual.importTransactions(command.accountId, resolvedTransactions.map(transaction => ({
               account: command.accountId,
               date: transaction.date,
               amount: amountToInteger(transaction.amount),
@@ -860,6 +737,64 @@ async function main() {
             })), {
               defaultCleared: true
             });
+
+            if (importResult.errors.length > 0) {
+              throw new Error(importResult.errors[0]?.message || "Actual reconcile import failed");
+            }
+
+            const renamedPayeeIds = new Set<string>();
+            previewResult.updatedPreview.forEach((preview, index) => {
+              const existing = preview.existing || null;
+              const transaction = command.transactions[index];
+              if (!existing || !transaction || preview.ignored) {
+                return;
+              }
+
+              if (
+                existing.payee &&
+                existing.payee_name &&
+                transaction.payee_name &&
+                transaction.imported_payee &&
+                existing.imported_payee === existing.payee_name &&
+                transaction.payee_name !== transaction.imported_payee &&
+                !renamedPayeeIds.has(existing.payee)
+              ) {
+                renamedPayeeIds.add(existing.payee);
+              }
+            });
+
+            for (const payeeId of renamedPayeeIds) {
+              const matchingPreview = previewResult.updatedPreview.find(preview => {
+                const existing = preview.existing || null;
+                return existing?.payee === payeeId;
+              });
+              const transaction = matchingPreview
+                ? command.transactions[previewResult.updatedPreview.indexOf(matchingPreview)]
+                : null;
+              if (!transaction?.payee_name) {
+                continue;
+              }
+
+              await actual.updatePayee(payeeId, {
+                name: transaction.payee_name
+              });
+              renamedPayees += 1;
+            }
+
+            await syncIfNeeded(true);
+
+            return {
+              id: command.id,
+              ok: true,
+              result: {
+                added: importResult.added.length,
+                updated: importResult.updated.length,
+                removed,
+                renamedPayees,
+                addedIds: importResult.added,
+                updatedIds: importResult.updated
+              }
+            };
           }
 
           await syncIfNeeded(true);
@@ -868,10 +803,12 @@ async function main() {
             id: command.id,
             ok: true,
             result: {
-              added,
-              updated,
+              added: 0,
+              updated: 0,
               removed,
-              renamedPayees
+              renamedPayees,
+              addedIds: [],
+              updatedIds: []
             }
           };
         }

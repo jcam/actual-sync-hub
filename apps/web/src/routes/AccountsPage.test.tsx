@@ -115,5 +115,6 @@ describe("AccountsPage", () => {
 
     expect(await screen.findByText("Checking")).toBeInTheDocument();
     expect(screen.getByText("Imported 2 transactions.")).toBeInTheDocument();
+    expect(screen.getByText("Native external sync writeback: disabled")).toBeInTheDocument();
   });
 });

@@ -59,7 +59,7 @@ describe.sequential("app service", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn()
       } as never,
@@ -171,7 +171,7 @@ describe.sequential("app service", () => {
             lastSyncedAt: null
           }
         ]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn(),
         previewImportTransactions: vi.fn()
@@ -265,6 +265,9 @@ describe.sequential("app service", () => {
     const service = createAppService({
       prisma,
       actualService: {
+        getCapabilities: vi.fn().mockResolvedValue({
+          externalSyncWritebackEnabled: true
+        }),
         listAccounts: vi.fn().mockResolvedValue([
           {
             id: "actual-1",
@@ -282,7 +285,6 @@ describe.sequential("app service", () => {
         liveSandboxMode: false,
         actualServerUrl: "http://actual.local",
         actualBudgetSyncIdConfigured: true,
-        actualExternalSyncWritebackEnabled: true,
         automaticSyncBackoffBaseMinutes: 5,
         automaticSyncBackoffMaxMinutes: 60
       }
@@ -356,6 +358,11 @@ describe.sequential("app service", () => {
 
   it("reports unified provider readiness details in runtime info", async () => {
     const service = createAppService({
+      actualService: {
+        getCapabilities: vi.fn().mockResolvedValue({
+          externalSyncWritebackEnabled: false
+        })
+      } as never,
       providerSettingsService: {
         getAll: vi.fn().mockResolvedValue({
           PLAID: {
@@ -412,7 +419,6 @@ describe.sequential("app service", () => {
         liveSandboxMode: true,
         actualServerUrl: "http://127.0.0.1:5007",
         actualBudgetSyncIdConfigured: true,
-        actualExternalSyncWritebackEnabled: false,
         automaticSyncBackoffBaseMinutes: 5,
         automaticSyncBackoffMaxMinutes: 60
       }
@@ -536,13 +542,12 @@ describe.sequential("app service", () => {
 
     const linkExternalSyncAccount = vi.fn().mockResolvedValue(undefined);
     const unlinkExternalSyncAccount = vi.fn().mockResolvedValue(undefined);
-
     const service = createAppService({
       prisma,
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn(),
         linkExternalSyncAccount,
@@ -553,7 +558,6 @@ describe.sequential("app service", () => {
         liveSandboxMode: false,
         actualServerUrl: "http://127.0.0.1:5007",
         actualBudgetSyncIdConfigured: true,
-        actualExternalSyncWritebackEnabled: true,
         automaticSyncBackoffBaseMinutes: 5,
         automaticSyncBackoffMaxMinutes: 60
       }
@@ -577,12 +581,91 @@ describe.sequential("app service", () => {
       institutionExternalId: "platypus-bank",
       mask: "1234",
       officialName: "Household Checking",
-      balanceCurrent: 1500.25,
-      balanceAvailable: 1400,
+      balanceCurrent: 150025,
+      balanceAvailable: 140000,
       balanceLimit: null,
       lastSync: null
     });
     expect(unlinkExternalSyncAccount).not.toHaveBeenCalled();
+  });
+
+  it("writes external-sync metadata even when the local link is disabled", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Plaid Household",
+        institutionId: "platypus-bank",
+        institutionName: "First Platypus Bank",
+        providerItemId: "item-123",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "ext-checking",
+        name: "Checking",
+        officialName: "Household Checking",
+        mask: "1234",
+        type: "depository",
+        currentBalance: 1500.25,
+        availableBalance: 1400
+      }
+    });
+
+    const linkExternalSyncAccount = vi.fn().mockResolvedValue(undefined);
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        getCapabilities: vi.fn().mockResolvedValue({
+          externalSyncWritebackEnabled: true
+        }),
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions: vi.fn(),
+        linkExternalSyncAccount,
+        unlinkExternalSyncAccount: vi.fn().mockResolvedValue(undefined)
+      } as never,
+      runtime: {
+        instanceLabel: "Dev Sandbox",
+        liveSandboxMode: false,
+        actualServerUrl: "http://127.0.0.1:5007",
+        actualBudgetSyncIdConfigured: true,
+        automaticSyncBackoffBaseMinutes: 5,
+        automaticSyncBackoffMaxMinutes: 60
+      }
+    });
+
+    await service.upsertAccountLink("actual-1", {
+      actualAccountName: "Household Checking",
+      assetType: "BANK",
+      provider: "PLAID",
+      connectionId: connection.id,
+      connectionAccountId: connectionAccount.id,
+      syncFrequency: "MANUAL",
+      isEnabled: false,
+      categoryMappings: []
+    });
+
+    expect(linkExternalSyncAccount).toHaveBeenCalledWith("actual-1", {
+      syncSource: "external",
+      providerAccountId: "ext-checking",
+      institutionName: "First Platypus Bank",
+      institutionExternalId: "platypus-bank",
+      mask: "1234",
+      officialName: "Household Checking",
+      balanceCurrent: 150025,
+      balanceAvailable: 140000,
+      balanceLimit: null,
+      lastSync: null
+    });
   });
 
   it("imports matching existing Actual SimpleFIN links into local account links", async () => {
@@ -696,7 +779,7 @@ describe.sequential("app service", () => {
             lastSyncedAt: null
           }
         ]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn(),
         previewImportTransactions: vi.fn()
@@ -774,7 +857,7 @@ describe.sequential("app service", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn()
       } as never,
@@ -923,7 +1006,6 @@ describe.sequential("app service", () => {
         liveSandboxMode: false,
         actualServerUrl: "http://127.0.0.1:5006",
         actualBudgetSyncIdConfigured: true,
-        actualExternalSyncWritebackEnabled: false,
         automaticSyncBackoffBaseMinutes: 5,
         automaticSyncBackoffMaxMinutes: 60
       }
@@ -986,7 +1068,6 @@ describe.sequential("app service", () => {
         liveSandboxMode: false,
         actualServerUrl: "http://127.0.0.1:5006",
         actualBudgetSyncIdConfigured: true,
-        actualExternalSyncWritebackEnabled: false,
         automaticSyncBackoffBaseMinutes: 5,
         automaticSyncBackoffMaxMinutes: 60
       },
@@ -1089,7 +1170,7 @@ describe.sequential("app service", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn()
       } as never,
@@ -1187,7 +1268,8 @@ describe.sequential("app service", () => {
       }
     ];
     const now = new Date("2026-05-04T12:00:00.000Z");
-
+    const linkExternalSyncAccount = vi.fn().mockResolvedValue(undefined);
+    const unlinkExternalSyncAccount = vi.fn().mockResolvedValue(undefined);
     const service = createAppService({
       prisma,
       actualService: {
@@ -1195,9 +1277,11 @@ describe.sequential("app service", () => {
         listCategories: vi.fn().mockResolvedValue([
           { id: "cat-food", name: "Food" }
         ]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
-        reconcileTransactions
+        reconcileTransactions,
+        linkExternalSyncAccount,
+        unlinkExternalSyncAccount
       } as never,
       plaidService: {
         syncAccountLink: vi.fn().mockResolvedValue({
@@ -1211,6 +1295,14 @@ describe.sequential("app service", () => {
           }
         })
       } as never,
+      runtime: {
+        instanceLabel: "Dev Sandbox",
+        liveSandboxMode: false,
+        actualServerUrl: "http://127.0.0.1:5007",
+        actualBudgetSyncIdConfigured: true,
+        automaticSyncBackoffBaseMinutes: 5,
+        automaticSyncBackoffMaxMinutes: 60
+      },
       now: () => now
     });
 
@@ -1240,7 +1332,7 @@ describe.sequential("app service", () => {
         resolved_category_id: "cat-food",
         transfer_actual_account_id: undefined
       }
-    ], []);
+    ], [], []);
     expect(link.lastSyncedAt?.toISOString()).toBe(now.toISOString());
     expect(link.configJson).toContain("\"cursor\":\"cursor-2\"");
     expect(runs).toHaveLength(1);
@@ -1252,6 +1344,128 @@ describe.sequential("app service", () => {
       primarySourceCategory: "Food And Drink",
       appliedCategoryId: "cat-food",
       observedCategoryId: "cat-food"
+    });
+  });
+
+  it("writes lastSync through external writeback metadata updates", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary",
+        institutionId: "platypus-bank",
+        institutionName: "First Platypus Bank",
+        providerItemId: "item-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "ext-1",
+        name: "Checking",
+        officialName: "Plaid checking",
+        mask: "1234",
+        type: "depository",
+        currentBalance: 500,
+        availableBalance: 442
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    const now = new Date("2026-05-04T12:00:00.000Z");
+    const linkExternalSyncAccount = vi.fn().mockResolvedValue(undefined);
+    const service = createAppService({
+      prisma,
+      actualService: {
+        getCapabilities: vi.fn().mockResolvedValue({
+          externalSyncWritebackEnabled: true
+        }),
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        listBankSyncLinks: vi.fn().mockResolvedValue([
+          {
+            actualAccountId: "actual-1",
+            actualAccountName: "Household Checking",
+            actualOfficialName: "Plaid checking",
+            accountSyncSource: "external",
+            externalAccountId: "ext-1",
+            actualBankId: null,
+            actualBankName: "First Platypus Bank",
+            actualBankExternalId: "platypus-bank",
+            mask: "1234",
+            balanceCurrent: 400,
+            balanceAvailable: 300,
+            balanceLimit: null,
+            closed: false,
+            offbudget: false,
+            lastSyncedAt: "1715000000000"
+          }
+        ]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions: vi.fn().mockResolvedValue({
+          added: 0,
+          updated: 0,
+          removed: 0,
+          renamedPayees: 0,
+          addedIds: [],
+          updatedIds: []
+        }),
+        linkExternalSyncAccount,
+        unlinkExternalSyncAccount: vi.fn().mockResolvedValue(undefined)
+      } as never,
+      plaidService: {
+        syncAccountLink: vi.fn().mockResolvedValue({
+          imported: 0,
+          transactions: [],
+          removedImportedIds: [],
+          configPatch: {
+            providerSyncState: {
+              cursor: "cursor-2"
+            }
+          }
+        })
+      } as never,
+      runtime: {
+        instanceLabel: "Dev Sandbox",
+        liveSandboxMode: false,
+        actualServerUrl: "http://127.0.0.1:5007",
+        actualBudgetSyncIdConfigured: true,
+        automaticSyncBackoffBaseMinutes: 5,
+        automaticSyncBackoffMaxMinutes: 60
+      },
+      now: () => now
+    });
+
+    await service.runAccountSync("actual-1");
+
+    expect(linkExternalSyncAccount).toHaveBeenCalledWith("actual-1", {
+      syncSource: "external",
+      providerAccountId: "ext-1",
+      institutionName: "First Platypus Bank",
+      institutionExternalId: "platypus-bank",
+      mask: "1234",
+      officialName: "Plaid checking",
+      balanceCurrent: 50000,
+      balanceAvailable: 44200,
+      balanceLimit: null,
+      lastSync: String(now.getTime())
     });
   });
 
@@ -1307,7 +1521,7 @@ describe.sequential("app service", () => {
         listCategories: vi.fn().mockResolvedValue([
           { id: "cat-food", name: "Food" }
         ]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([
           {
             id: "txn-existing",
             imported_id: "plaid-1",
@@ -1451,7 +1665,7 @@ describe.sequential("app service", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions
       } as never,
@@ -1489,7 +1703,7 @@ describe.sequential("app service", () => {
         resolved_category_id: undefined,
         transfer_actual_account_id: "actual-savings"
       })
-    ], []);
+    ], [], []);
   });
 
   it("learns a category mapping from recent Actual recategorizations without storing full transactions", async () => {
@@ -1536,6 +1750,7 @@ describe.sequential("app service", () => {
         {
           accountLinkId: link.id,
           importedId: "old-1",
+          transactionDate: "2026-05-01",
           primarySourceCategory: "Groceries",
           appliedCategoryId: null,
           observedCategoryId: null
@@ -1543,6 +1758,7 @@ describe.sequential("app service", () => {
         {
           accountLinkId: link.id,
           importedId: "old-2",
+          transactionDate: "2026-05-02",
           primarySourceCategory: "Groceries",
           appliedCategoryId: null,
           observedCategoryId: null
@@ -1564,7 +1780,7 @@ describe.sequential("app service", () => {
         listCategories: vi.fn().mockResolvedValue([
           { id: "cat-groceries", name: "Groceries" }
         ]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([
           {
             id: "txn-1",
             imported_id: "old-1",
@@ -1616,7 +1832,7 @@ describe.sequential("app service", () => {
         imported_id: "new-1",
         resolved_category_id: "cat-groceries"
       })
-    ], []);
+    ], [], []);
 
     const refreshedLink = await prisma.accountLink.findUniqueOrThrow({
       where: {
@@ -1685,7 +1901,7 @@ describe.sequential("app service", () => {
         listCategories: vi.fn().mockResolvedValue([
           { id: "cat-groceries", name: "Groceries" }
         ]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn().mockResolvedValue({
           added: 1,
@@ -1789,7 +2005,7 @@ describe.sequential("app service", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions
       } as never,
@@ -1809,7 +2025,7 @@ describe.sequential("app service", () => {
 
     await service.runAccountSync("actual-1");
 
-    expect(reconcileTransactions).toHaveBeenCalledWith("actual-1", [], ["gone-1"]);
+    expect(reconcileTransactions).toHaveBeenCalledWith("actual-1", [], ["gone-1"], []);
     expect(await prisma.importedTransaction.count()).toBe(0);
   });
 
@@ -1853,7 +2069,7 @@ describe.sequential("app service", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn().mockRejectedValue(new Error("Actual import failed"))
       } as never,

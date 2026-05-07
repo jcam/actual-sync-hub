@@ -99,6 +99,8 @@ async function initializeSchema(prisma: PrismaClient) {
       "id" TEXT NOT NULL PRIMARY KEY,
       "accountLinkId" TEXT NOT NULL,
       "importedId" TEXT NOT NULL,
+      "transactionDate" TEXT,
+      "actualTransactionId" TEXT,
       "primarySourceCategory" TEXT,
       "appliedCategoryId" TEXT,
       "observedCategoryId" TEXT,
@@ -108,7 +110,8 @@ async function initializeSchema(prisma: PrismaClient) {
       CONSTRAINT "ImportedTransaction_accountLinkId_fkey" FOREIGN KEY ("accountLinkId") REFERENCES "AccountLink" ("id") ON DELETE CASCADE ON UPDATE CASCADE
     );`,
     `CREATE UNIQUE INDEX "ImportedTransaction_accountLinkId_importedId_key" ON "ImportedTransaction"("accountLinkId", "importedId");`,
-    `CREATE INDEX "ImportedTransaction_accountLinkId_lastSeenAt_idx" ON "ImportedTransaction"("accountLinkId", "lastSeenAt");`
+    `CREATE INDEX "ImportedTransaction_accountLinkId_lastSeenAt_idx" ON "ImportedTransaction"("accountLinkId", "lastSeenAt");`,
+    `CREATE INDEX "ImportedTransaction_accountLinkId_transactionDate_idx" ON "ImportedTransaction"("accountLinkId", "transactionDate");`
   ];
 
   for (const statement of statements) {

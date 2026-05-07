@@ -9,7 +9,7 @@ const IMPORTED_TRANSACTION_RETENTION_DAYS = 180;
 const IMPORTED_TRANSACTION_MAX_ROWS_PER_LINK = 2_000;
 
 type ImportedTransactionStore = Pick<PrismaClient, "importedTransaction">;
-type ActualTransactionLookup = Pick<ActualService, "listTransactionsByImportedIds">;
+type ActualTransactionLookup = Pick<ActualService, "listTransactionsByDateRange">;
 
 export async function learnCategoryMappingsFromHistory({
   database,
@@ -49,13 +49,25 @@ export async function learnCategoryMappingsFromHistory({
     return linkConfig;
   }
 
-  const currentTransactions = await actual.listTransactionsByImportedIds(
-    link.actualAccountId,
-    recentImportedTransactions.map(transaction => transaction.importedId)
+  const datedTransactions = recentImportedTransactions.filter(
+    transaction => Boolean(transaction.transactionDate)
   );
+  if (datedTransactions.length === 0) {
+    return linkConfig;
+  }
+
+  const sortedDates = datedTransactions
+    .map(transaction => transaction.transactionDate as string)
+    .sort((left, right) => left.localeCompare(right));
+  const currentTransactions = await actual.listTransactionsByDateRange(
+    link.actualAccountId,
+    sortedDates[0]!,
+    sortedDates[sortedDates.length - 1]!
+  );
+  const importedIds = new Set(recentImportedTransactions.map(transaction => transaction.importedId));
   const currentCategoryByImportedId = new Map(
     currentTransactions
-      .filter(transaction => transaction.imported_id)
+      .filter(transaction => transaction.imported_id && importedIds.has(transaction.imported_id))
       .map(transaction => [transaction.imported_id as string, transaction.category ?? null])
   );
 

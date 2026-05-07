@@ -100,7 +100,6 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
         liveSandboxMode: true,
         actualServerUrl: container.serverURL,
         actualBudgetSyncIdConfigured: true,
-        actualExternalSyncWritebackEnabled: false,
         automaticSyncBackoffBaseMinutes: 5,
         automaticSyncBackoffMaxMinutes: 60
       }

@@ -51,10 +51,15 @@ export function AccountsPage() {
           Each card shows one Actual account, its active provider link, and the sync settings that control imports.
         </p>
         {runtime ? (
-          <p className="muted">
-            {runtime.instanceLabel} · Actual server {runtime.actual.serverUrl}
-            {runtime.liveSandboxMode ? " · docker fixture active" : ""}
-          </p>
+          <>
+            <p className="muted">
+              {runtime.instanceLabel} · Actual server {runtime.actual.serverUrl}
+              {runtime.liveSandboxMode ? " · docker fixture active" : ""}
+            </p>
+            <p className="muted">
+              Native external sync writeback: {runtime.actual.externalSyncWritebackEnabled ? "enabled" : "disabled"}
+            </p>
+          </>
         ) : null}
         <div className="button-row">
           <button className="ghost-button" onClick={() => void load()}>

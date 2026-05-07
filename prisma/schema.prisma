@@ -150,6 +150,8 @@ model ImportedTransaction {
   id                    String      @id @default(cuid())
   accountLinkId         String
   importedId            String
+  transactionDate       String?
+  actualTransactionId   String?
   primarySourceCategory String?
   appliedCategoryId     String?
   observedCategoryId    String?
@@ -160,4 +162,5 @@ model ImportedTransaction {
 
   @@unique([accountLinkId, importedId])
   @@index([accountLinkId, lastSeenAt])
+  @@index([accountLinkId, transactionDate])
 }

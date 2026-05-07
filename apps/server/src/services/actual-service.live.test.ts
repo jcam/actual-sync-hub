@@ -172,7 +172,7 @@ describe.skipIf(!liveEnabled)("actual service live docker", () => {
       }
     ]);
 
-    const transactions = await service.listTransactionsByImportedIds(seed.accountId, ["live-test-1"]);
+    const transactions = await service.listTransactionsByDateRange(seed.accountId, "2026-05-02", "2026-05-02");
     expect(transactions.some(transaction => transaction.imported_payee === "LIVE TEST GROCERIES")).toBe(true);
   }, 120_000);
 

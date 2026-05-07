@@ -58,7 +58,7 @@ describe.sequential("sync review service", () => {
         }),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn(),
-        listTransactionsByImportedIds: vi.fn()
+        listTransactionsByDateRange: vi.fn()
       },
       currentLinkStatuses: ["ACTIVE", "MIGRATING"],
       getProviderAdapter: () =>
@@ -123,5 +123,97 @@ describe.sequential("sync review service", () => {
         seenCategoryNames: []
       })
     );
+  });
+
+  it("completes native external sync writeback after reviewed sync commit", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    await prisma.accountLink.create({
+      data: {
+        id: "link-1",
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "SIMPLEFIN",
+        syncFrequency: "MANUAL",
+        isEnabled: true,
+        configJson: serializeLinkConfig({
+          health: null,
+          categoryMappings: [],
+          seenCategoryNames: []
+        })
+      }
+    });
+
+    const syncActualExternalWriteback = vi.fn().mockResolvedValue(undefined);
+    const syncReviewService = createSyncReviewService({
+      database: prisma,
+      actual: {
+        listCategories: vi.fn().mockResolvedValue([]),
+        previewImportTransactions: vi.fn(),
+        importTransactions: vi.fn(),
+        reconcileTransactions: vi.fn().mockResolvedValue({
+          added: 1,
+          updated: 0,
+          removed: 0,
+          addedIds: ["tx-1"],
+          updatedIds: []
+        }),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([
+          {
+            id: "tx-1",
+            imported_id: "sf-1"
+          }
+        ])
+      },
+      currentLinkStatuses: ["ACTIVE", "MIGRATING"],
+      getProviderAdapter: () =>
+        ({
+          provider: "SIMPLEFIN",
+          syncAccountLink: vi.fn().mockResolvedValue({
+            imported: 1,
+            transactions: [
+              {
+                importedId: "sf-1",
+                date: "2026-05-05",
+                amount: -12.34,
+                payeeName: "Merchant",
+                importedPayee: "MERCHANT",
+                cleared: true,
+                categoryNames: [],
+                searchText: ["Merchant"]
+              }
+            ],
+            removedImportedIds: [],
+            configPatch: {}
+          })
+        }) as never,
+      buildSiblingLinks: vi.fn().mockResolvedValue([]),
+      buildReconcileTransactions: vi.fn().mockReturnValue([
+        {
+          date: "2026-05-05",
+          amount: -12.34,
+          payee_name: "Merchant",
+          imported_payee: "MERCHANT",
+          imported_id: "sf-1",
+          cleared: true,
+          category_names: [],
+          resolved_category_id: undefined,
+          transfer_actual_account_id: undefined
+        }
+      ]),
+      syncActualExternalWriteback,
+      now: () => new Date("2026-05-06T12:00:00.000Z")
+    });
+
+    await syncReviewService.commitAccountSyncReview("actual-1", {
+      importedIds: ["sf-1"]
+    });
+
+    expect(syncActualExternalWriteback).toHaveBeenCalledWith({
+      actualAccountId: "actual-1",
+      lastSync: "1778068800000"
+    });
   });
 });

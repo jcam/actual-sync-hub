@@ -127,7 +127,7 @@ describe.sequential("app service automatic sync", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn().mockResolvedValue({
           added: 0,
@@ -239,7 +239,7 @@ describe.sequential("app service automatic sync", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn().mockResolvedValue({
           added: 0,
@@ -324,7 +324,7 @@ describe.sequential("app service automatic sync", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn(),
         previewImportTransactions: vi.fn()
@@ -356,7 +356,7 @@ describe.sequential("app service automatic sync", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn(),
         previewImportTransactions: vi.fn()
@@ -423,7 +423,7 @@ describe.sequential("app service automatic sync", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn(),
         previewImportTransactions: vi.fn()
@@ -589,7 +589,7 @@ describe.sequential("app service automatic sync", () => {
       actualService: {
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
-        listTransactionsByImportedIds: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn().mockResolvedValue({
           added: 0,
@@ -610,7 +610,6 @@ describe.sequential("app service automatic sync", () => {
         liveSandboxMode: false,
         actualServerUrl: "http://127.0.0.1:5006",
         actualBudgetSyncIdConfigured: true,
-        actualExternalSyncWritebackEnabled: false,
         automaticSyncBackoffBaseMinutes: 5,
         automaticSyncBackoffMaxMinutes: 60
       }

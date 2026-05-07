@@ -24,7 +24,10 @@ import { prisma } from "../db.js";
 import { env } from "../env.js";
 import { encryptString } from "../lib/crypto.js";
 import { actualService } from "./actual-service.js";
-import type { ActualExternalSyncMetadataInput, ReconcileTransactionInput } from "./actual-service.js";
+import type {
+  ActualExternalSyncMetadataInput,
+  ReconcileTransactionInput
+} from "./actual-service.js";
 import { getTellerMetadata, parseConnectionMetadata } from "./connection-metadata.js";
 import { learnCategoryMappingsFromHistory, pruneImportedTransactionLedger } from "./imported-transaction-ledger.js";
 import { CURRENT_LINK_STATUSES, linkIdentityChanged, parseLinkConfig, selectCurrentLink, serializeLinkConfig, toLinkDto } from "./link-config.js";
@@ -98,6 +101,39 @@ function toPrismaProvider(provider: Provider | null | undefined): PrismaProvider
   return provider as PrismaProvider | null | undefined;
 }
 
+function toActualLastSyncValue(value: Date | string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return String(value.getTime());
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? String(parsed) : value;
+}
+
+function toActualAmountInteger(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.round(value * 100);
+}
+
+function getDateRangeBounds(dates: string[]) {
+  if (dates.length === 0) {
+    return null;
+  }
+
+  const sorted = [...dates].sort((left, right) => left.localeCompare(right));
+  return {
+    startDate: sorted[0]!,
+    endDate: sorted[sorted.length - 1]!
+  };
+}
+
 export type AppService = {
   getRuntimeInfo(): Promise<RuntimeInfoDto>;
   listConnections(): Promise<ConnectionDto[]>;
@@ -136,7 +172,6 @@ export function createAppService({
     liveSandboxMode: env.liveSandboxMode,
     actualServerUrl: env.ACTUAL_SERVER_URL,
     actualBudgetSyncIdConfigured: Boolean(env.ACTUAL_BUDGET_SYNC_ID),
-    actualExternalSyncWritebackEnabled: env.actualExternalSyncWritebackEnabled,
     automaticSyncBackoffBaseMinutes: env.AUTOMATIC_SYNC_BACKOFF_BASE_MINUTES,
     automaticSyncBackoffMaxMinutes: env.AUTOMATIC_SYNC_BACKOFF_MAX_MINUTES
   },
@@ -153,7 +188,6 @@ export function createAppService({
     liveSandboxMode: boolean;
     actualServerUrl: string;
     actualBudgetSyncIdConfigured: boolean;
-    actualExternalSyncWritebackEnabled: boolean;
     automaticSyncBackoffBaseMinutes: number;
     automaticSyncBackoffMaxMinutes: number;
   };
@@ -166,6 +200,26 @@ export function createAppService({
   } satisfies Record<Provider, ProviderAdapter>;
   const providerBackgroundSyncGates = new Map<Provider, ProviderBackgroundSyncGate>();
   const getEffectiveProviderSettings = () => settings.getAll();
+  let actualCapabilitiesPromise: Promise<{
+    externalSyncWritebackEnabled: boolean;
+  }> | null = null;
+
+  const getActualCapabilities = () => {
+    if (!actualCapabilitiesPromise) {
+      actualCapabilitiesPromise = (async () => {
+        if (typeof actual.getCapabilities === "function") {
+          return await actual.getCapabilities();
+        }
+
+        return {
+          externalSyncWritebackEnabled:
+            typeof actual.linkExternalSyncAccount === "function" && typeof actual.unlinkExternalSyncAccount === "function"
+        };
+      })();
+    }
+
+    return actualCapabilitiesPromise;
+  };
 
   const getProviderAdapter = (provider: Provider | null | undefined) => {
     if (!provider) {
@@ -293,6 +347,35 @@ export function createAppService({
     });
   };
 
+  const listActualTransactionsForImportedIdsByDateRange = async ({
+    actualAccountId,
+    transactions
+  }: {
+    actualAccountId: string;
+    transactions: Array<{
+      importedId: string;
+      transactionDate: string;
+    }>;
+  }) => {
+    const bounds = getDateRangeBounds(transactions.map(transaction => transaction.transactionDate));
+    if (!bounds) {
+      return new Map<string, Awaited<ReturnType<typeof actual.listTransactionsByDateRange>>[number]>();
+    }
+
+    const importedIds = new Set(transactions.map(transaction => transaction.importedId));
+    const matchingTransactions = await actual.listTransactionsByDateRange(
+      actualAccountId,
+      bounds.startDate,
+      bounds.endDate
+    );
+
+    return new Map(
+      matchingTransactions
+        .filter(transaction => transaction.imported_id && importedIds.has(transaction.imported_id))
+        .map(transaction => [transaction.imported_id as string, transaction])
+    );
+  };
+
   const buildReconcileTransactions = ({
     actualAccountId,
     actualCategories,
@@ -366,7 +449,7 @@ export function createAppService({
   };
 
   const reconcileActualExternalUnlinks = async (actualAccountIds?: string[]) => {
-    if (!runtime.actualExternalSyncWritebackEnabled) {
+    if (!(await getActualCapabilities()).externalSyncWritebackEnabled) {
       return;
     }
 
@@ -538,7 +621,7 @@ export function createAppService({
       ]
     });
 
-    if (!link || !link.isEnabled || !link.provider || !link.connection || !link.connectionAccount) {
+    if (!link || !link.provider || !link.connection || !link.connectionAccount) {
       return null;
     }
 
@@ -549,10 +632,10 @@ export function createAppService({
       institutionExternalId: link.connection.institutionId ?? null,
       mask: link.connectionAccount.mask ?? null,
       officialName: link.connectionAccount.officialName ?? null,
-      balanceCurrent: link.connectionAccount.currentBalance ?? null,
-      balanceAvailable: link.connectionAccount.availableBalance ?? null,
+      balanceCurrent: toActualAmountInteger(link.connectionAccount.currentBalance),
+      balanceAvailable: toActualAmountInteger(link.connectionAccount.availableBalance),
       balanceLimit: null,
-      lastSync: link.lastSyncedAt?.toISOString() ?? null
+      lastSync: toActualLastSyncValue(link.lastSyncedAt)
     };
 
     return {
@@ -567,12 +650,8 @@ export function createAppService({
   }: {
     actualAccountId: string;
     lastSync?: string | null;
-  }) => {
-    if (
-      !runtime.actualExternalSyncWritebackEnabled ||
-      typeof actual.linkExternalSyncAccount !== "function" ||
-      typeof actual.unlinkExternalSyncAccount !== "function"
-    ) {
+  }): Promise<void> => {
+    if (!(await getActualCapabilities()).externalSyncWritebackEnabled) {
       return;
     }
 
@@ -720,34 +799,49 @@ export function createAppService({
       category: transaction.resolved_category_id,
       transfer_actual_account_id: transaction.transfer_actual_account_id
     }));
-    const existingImportedIds = !migrating && reconcileTransactions.length > 0
-      ? new Set(
-          (
-            await actual.listTransactionsByImportedIds(
-              link.actualAccountId,
-              reconcileTransactions.map(transaction => transaction.imported_id)
-            )
-          )
-            .map(transaction => transaction.imported_id)
-            .filter((importedId): importedId is string => Boolean(importedId))
-        )
-      : new Set<string>();
     const migrationResult = migrating ? await actual.importTransactions(link.actualAccountId, migrationImportPayload) : null;
     if (migrationResult?.errors.length) {
       throw new Error(migrationResult.errors[0]?.message || "Actual migration import failed");
     }
+    const removedActualTransactionIds = !migrating && removedImportedIds.length > 0
+      ? (
+          await database.importedTransaction.findMany({
+            where: {
+              accountLinkId: link.id,
+              importedId: {
+                in: removedImportedIds
+              },
+              actualTransactionId: {
+                not: null
+              }
+            },
+            select: {
+              actualTransactionId: true
+            }
+          })
+        )
+          .map(transaction => transaction.actualTransactionId)
+          .filter((transactionId): transactionId is string => Boolean(transactionId))
+      : [];
     const reconcileResult = !migrating && (reconcileTransactions.length || removedImportedIds.length)
-      ? await actual.reconcileTransactions(link.actualAccountId, reconcileTransactions, removedImportedIds)
+      ? await actual.reconcileTransactions(
+          link.actualAccountId,
+          reconcileTransactions,
+          removedImportedIds,
+          removedActualTransactionIds
+        )
       : !migrating
-        ? { added: 0, updated: 0, removed: 0, renamedPayees: 0 }
+        ? { added: 0, updated: 0, removed: 0, renamedPayees: 0, addedIds: [], updatedIds: [] }
         : null;
-    const refreshedTransactions =
-      !migrating && reconcileTransactions.length > 0
-        ? await actual.listTransactionsByImportedIds(
-            link.actualAccountId,
-            reconcileTransactions.map(transaction => transaction.imported_id)
-          )
-        : [];
+    const importedTransactionByImportedId = reconcileTransactions.length > 0
+      ? await listActualTransactionsForImportedIdsByDateRange({
+          actualAccountId: link.actualAccountId,
+          transactions: reconcileTransactions.map(transaction => ({
+            importedId: transaction.imported_id,
+            transactionDate: transaction.date
+          }))
+        })
+      : new Map<string, Awaited<ReturnType<typeof actual.listTransactionsByDateRange>>[number]>();
 
     if (reconcileTransactions.length > 0) {
       await Promise.all(
@@ -760,6 +854,8 @@ export function createAppService({
               }
             },
             update: {
+              transactionDate: transaction.date,
+              actualTransactionId: importedTransactionByImportedId.get(transaction.imported_id)?.id ?? null,
               primarySourceCategory: getPrimarySourceCategory(syncResult.transactions[index]!),
               appliedCategoryId: transaction.resolved_category_id ?? null,
               lastSeenAt: now()
@@ -767,6 +863,8 @@ export function createAppService({
             create: {
               accountLinkId: link.id,
               importedId: transaction.imported_id,
+              transactionDate: transaction.date,
+              actualTransactionId: importedTransactionByImportedId.get(transaction.imported_id)?.id ?? null,
               primarySourceCategory: getPrimarySourceCategory(syncResult.transactions[index]!),
               appliedCategoryId: transaction.resolved_category_id ?? null,
               observedCategoryId: transaction.resolved_category_id ?? null,
@@ -820,7 +918,7 @@ export function createAppService({
 
     await syncActualExternalWriteback({
       actualAccountId: link.actualAccountId,
-      lastSync: syncCompletedAt.toISOString()
+      lastSync: toActualLastSyncValue(syncCompletedAt)
     });
 
     const summary = migrating
@@ -828,18 +926,10 @@ export function createAppService({
       : `Imported ${reconcileResult?.added ?? 0} transactions, updated ${reconcileResult?.updated ?? 0}, removed ${reconcileResult?.removed ?? 0}.`;
     const newTransactions = migrating
       ? migrationResult?.added ?? []
-      : refreshedTransactions
-          .filter(
-            transaction => transaction.imported_id && !existingImportedIds.has(transaction.imported_id)
-          )
-          .map(transaction => transaction.id);
+      : reconcileResult?.addedIds ?? [];
     const matchedTransactions = migrating
       ? migrationResult?.updated ?? []
-      : refreshedTransactions
-          .filter(
-            transaction => transaction.imported_id && existingImportedIds.has(transaction.imported_id)
-          )
-          .map(transaction => transaction.id);
+      : reconcileResult?.updatedIds ?? [];
     const updatedAccounts =
       newTransactions.length > 0 || matchedTransactions.length > 0 || removedImportedIds.length > 0
         ? [link.actualAccountId]
@@ -1196,12 +1286,14 @@ export function createAppService({
     getProviderAdapter,
     buildSiblingLinks,
     buildReconcileTransactions,
+    syncActualExternalWriteback,
     now
   });
 
   const appService: AppService = {
     async getRuntimeInfo(): Promise<RuntimeInfoDto> {
       const effectiveSettings = await getEffectiveProviderSettings();
+      const actualCapabilities = await getActualCapabilities();
       const providers = await getProviderRuntimeInfo();
       const activePlaidSettings = getActivePlaidEnvironmentSettings(effectiveSettings.PLAID);
       const plaidEnabled = Boolean(activePlaidSettings.clientId && activePlaidSettings.secret);
@@ -1237,7 +1329,7 @@ export function createAppService({
         actual: {
           serverUrl: runtime.actualServerUrl,
           budgetSyncIdConfigured: runtime.actualBudgetSyncIdConfigured,
-          externalSyncWritebackEnabled: runtime.actualExternalSyncWritebackEnabled
+          externalSyncWritebackEnabled: actualCapabilities.externalSyncWritebackEnabled
         }
       };
     },
@@ -1656,7 +1748,7 @@ export function createAppService({
 
       await adapter.refreshConnection(connectionId);
 
-      if (runtime.actualExternalSyncWritebackEnabled) {
+      if ((await getActualCapabilities()).externalSyncWritebackEnabled) {
         const linkedAccounts = await database.accountLink.findMany({
           where: {
             connectionId,

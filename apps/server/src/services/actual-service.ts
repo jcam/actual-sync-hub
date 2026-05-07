@@ -22,6 +22,10 @@ export type ActualConfig = {
   apiVersionMatchMode?: "off" | "auto" | "strict";
 }
 
+export type ActualCapabilities = {
+  externalSyncWritebackEnabled: boolean;
+}
+
 type ActualModule = typeof ActualApi;
 type ActualImportTransaction = Parameters<ActualModule["importTransactions"]>[1][number];
 type ActualTransaction = Awaited<ReturnType<ActualModule["getTransactions"]>>[number];
@@ -134,18 +138,22 @@ type WorkerCommandPayload =
       operation: "listBankSyncLinks";
     }
   | {
+      operation: "getCapabilities";
+    }
+  | {
       operation: "linkExternalSyncAccount";
       accountId: string;
       metadata: ActualExternalSyncMetadataInput;
     }
+    | {
+        operation: "unlinkExternalSyncAccount";
+        accountId: string;
+      }
   | {
-      operation: "unlinkExternalSyncAccount";
+      operation: "listTransactionsByDateRange";
       accountId: string;
-    }
-  | {
-      operation: "listTransactionsByImportedIds";
-      accountId: string;
-      importedIds: string[];
+      startDate: string;
+      endDate: string;
     }
   | {
       operation: "importTransactions";
@@ -162,6 +170,7 @@ type WorkerCommandPayload =
       accountId: string;
       transactions: ReconcileTransactionInput[];
       removedImportedIds: string[];
+      removedActualTransactionIds: string[];
     };
 
 type WorkerCommand = WorkerCommandPayload & {
@@ -229,12 +238,13 @@ function toError(error: unknown) {
 
 export type ActualService = {
   shutdown?(): Promise<void>;
+  getCapabilities?(): Promise<ActualCapabilities>;
   listAccounts(): Promise<ActualAccountRecord[]>;
   listCategories(): Promise<ActualCategoryRecord[]>;
   listBankSyncLinks(): Promise<ActualBankSyncLinkRecord[]>;
   linkExternalSyncAccount(accountId: string, metadata: ActualExternalSyncMetadataInput): Promise<void>;
   unlinkExternalSyncAccount(accountId: string): Promise<void>;
-  listTransactionsByImportedIds(accountId: string, importedIds: string[]): Promise<ActualTransactionRecord[]>;
+  listTransactionsByDateRange(accountId: string, startDate: string, endDate: string): Promise<ActualTransactionRecord[]>;
   importTransactions(accountId: string, transactions: ImportTransactionInput[]): Promise<{
     added: string[];
     updated: string[];
@@ -246,11 +256,18 @@ export type ActualService = {
     errors: Array<{ message: string }>;
     updatedPreview: PreviewImportMatchRecord[];
   }>;
-  reconcileTransactions(accountId: string, transactions: ReconcileTransactionInput[], removedImportedIds?: string[]): Promise<{
+  reconcileTransactions(
+    accountId: string,
+    transactions: ReconcileTransactionInput[],
+    removedImportedIds?: string[],
+    removedActualTransactionIds?: string[]
+  ): Promise<{
     added: number;
     updated: number;
     removed: number;
     renamedPayees: number;
+    addedIds?: string[];
+    updatedIds?: string[];
   }>;
 }
 
@@ -272,6 +289,7 @@ export function createActualService({
   let workerChild: ChildProcess | null = null;
   let accountsCache: { expiresAt: number; value: ActualAccountRecord[] } | null = null;
   let categoriesCache: { expiresAt: number; value: ActualCategoryRecord[] } | null = null;
+  let capabilitiesCache: ActualCapabilities | null = null;
 
   function clearReadCaches() {
     accountsCache = null;
@@ -457,7 +475,19 @@ export function createActualService({
   return {
     async shutdown() {
       clearReadCaches();
+      capabilitiesCache = null;
       stopWorker();
+    },
+    async getCapabilities(): Promise<ActualCapabilities> {
+      if (capabilitiesCache) {
+        return capabilitiesCache;
+      }
+
+      const result = await runWorker<ActualCapabilities>({
+        operation: "getCapabilities"
+      });
+      capabilitiesCache = result;
+      return result;
     },
     async listAccounts(): Promise<ActualAccountRecord[]> {
       if (accountsCache && accountsCache.expiresAt > Date.now()) {
@@ -512,15 +542,12 @@ export function createActualService({
       clearReadCaches();
     },
 
-    async listTransactionsByImportedIds(accountId: string, importedIds: string[]): Promise<ActualTransactionRecord[]> {
-      if (importedIds.length === 0) {
-        return [];
-      }
-
+    async listTransactionsByDateRange(accountId: string, startDate: string, endDate: string): Promise<ActualTransactionRecord[]> {
       return runWorker<ActualTransactionRecord[]>({
-        operation: "listTransactionsByImportedIds",
+        operation: "listTransactionsByDateRange",
         accountId,
-        importedIds
+        startDate,
+        endDate
       });
     },
 
@@ -551,17 +578,25 @@ export function createActualService({
       });
     },
 
-    async reconcileTransactions(accountId: string, transactions: ReconcileTransactionInput[], removedImportedIds: string[] = []) {
+    async reconcileTransactions(
+      accountId: string,
+      transactions: ReconcileTransactionInput[],
+      removedImportedIds: string[] = [],
+      removedActualTransactionIds: string[] = []
+    ) {
       const result = await runWorker<{
         added: number;
         updated: number;
         removed: number;
         renamedPayees: number;
+        addedIds?: string[];
+        updatedIds?: string[];
       }>({
         operation: "reconcileTransactions",
         accountId,
         transactions,
-        removedImportedIds
+        removedImportedIds,
+        removedActualTransactionIds
       });
       clearReadCaches();
       return result;

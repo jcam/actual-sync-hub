@@ -8,12 +8,15 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
     prisma: {} as never,
     actualService: {
       shutdown: vi.fn(),
+      getCapabilities: vi.fn().mockResolvedValue({
+        externalSyncWritebackEnabled: false
+      }),
       listAccounts: vi.fn(),
       listCategories: vi.fn(),
       listBankSyncLinks: vi.fn(),
       linkExternalSyncAccount: vi.fn(),
       unlinkExternalSyncAccount: vi.fn(),
-      listTransactionsByImportedIds: vi.fn(),
+      listTransactionsByDateRange: vi.fn(),
       importTransactions: vi.fn(),
       previewImportTransactions: vi.fn(),
       reconcileTransactions: vi.fn(),

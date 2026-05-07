@@ -22,7 +22,7 @@ type DatabaseClient = typeof prisma;
 type ReviewDatabase = Pick<DatabaseClient, "accountLink" | "syncRun" | "importedTransaction">;
 type ReviewActualService = Pick<
   ActualService,
-  "listCategories" | "previewImportTransactions" | "importTransactions" | "reconcileTransactions" | "listTransactionsByImportedIds"
+  "listCategories" | "previewImportTransactions" | "importTransactions" | "reconcileTransactions" | "listTransactionsByDateRange"
 >;
 
 type ReviewableLink = {
@@ -36,6 +36,10 @@ type ReviewableLink = {
   migrationCompletedAt: Date | null;
 };
 
+function toActualLastSyncValue(timestamp: Date): string {
+  return timestamp.getTime().toString();
+}
+
 export function createSyncReviewService<TSiblingLinks>({
   database,
   actual,
@@ -43,6 +47,7 @@ export function createSyncReviewService<TSiblingLinks>({
   getProviderAdapter,
   buildSiblingLinks,
   buildReconcileTransactions,
+  syncActualExternalWriteback,
   now
 }: {
   database: ReviewDatabase;
@@ -57,8 +62,21 @@ export function createSyncReviewService<TSiblingLinks>({
     siblingLinks: TSiblingLinks;
     transactions: ProviderSyncTransaction[];
   }) => ReconcileTransactionInput[];
+  syncActualExternalWriteback?: (args: { actualAccountId: string; lastSync?: string | null }) => Promise<void>;
   now: () => Date;
 }) {
+  function getDateRangeBounds(dates: string[]) {
+    if (dates.length === 0) {
+      return null;
+    }
+
+    const sorted = [...dates].sort((left, right) => left.localeCompare(right));
+    return {
+      startDate: sorted[0]!,
+      endDate: sorted[sorted.length - 1]!
+    };
+  }
+
   async function loadCurrentReviewableLink(actualAccountId: string): Promise<ReviewableLink> {
     return database.accountLink.findFirstOrThrow({
       where: {
@@ -234,9 +252,49 @@ export function createSyncReviewService<TSiblingLinks>({
         if (migrationResult?.errors.length) {
           throw new Error(migrationResult.errors[0]?.message || "Actual sync review import failed");
         }
+        const removedActualTransactionIds = !migrating && removedImportedIds.length > 0
+          ? (
+              await database.importedTransaction.findMany({
+                where: {
+                  accountLinkId: link.id,
+                  importedId: {
+                    in: removedImportedIds
+                  },
+                  actualTransactionId: {
+                    not: null
+                  }
+                },
+                select: {
+                  actualTransactionId: true
+                }
+              })
+            )
+              .map(transaction => transaction.actualTransactionId)
+              .filter((transactionId): transactionId is string => Boolean(transactionId))
+          : [];
         const reconcileResult = !migrating
-          ? await actual.reconcileTransactions(actualAccountId, reconcileTransactions, removedImportedIds)
+          ? await actual.reconcileTransactions(
+              actualAccountId,
+              reconcileTransactions,
+              removedImportedIds,
+              removedActualTransactionIds
+            )
           : null;
+        const bounds = getDateRangeBounds(reconcileTransactions.map(transaction => transaction.date));
+        const importedTransactionByImportedId =
+          bounds && reconcileTransactions.length > 0
+            ? new Map(
+                (
+                  await actual.listTransactionsByDateRange(actualAccountId, bounds.startDate, bounds.endDate)
+                )
+                  .filter(
+                    transaction =>
+                      transaction.imported_id &&
+                      reconcileTransactions.some(candidate => candidate.imported_id === transaction.imported_id)
+                  )
+                  .map(transaction => [transaction.imported_id as string, transaction])
+              )
+            : new Map<string, Awaited<ReturnType<typeof actual.listTransactionsByDateRange>>[number]>();
 
         if (reconcileTransactions.length > 0) {
           await Promise.all(
@@ -246,9 +304,11 @@ export function createSyncReviewService<TSiblingLinks>({
                   accountLinkId_importedId: {
                     accountLinkId: link.id,
                     importedId: transaction.imported_id
-                  }
+                }
                 },
                 update: {
+                  transactionDate: transaction.date,
+                  actualTransactionId: importedTransactionByImportedId.get(transaction.imported_id)?.id ?? null,
                   primarySourceCategory: getPrimarySourceCategory(selectedTransactions[index]!),
                   appliedCategoryId: transaction.resolved_category_id ?? null,
                   lastSeenAt: now()
@@ -256,6 +316,8 @@ export function createSyncReviewService<TSiblingLinks>({
                 create: {
                   accountLinkId: link.id,
                   importedId: transaction.imported_id,
+                  transactionDate: transaction.date,
+                  actualTransactionId: importedTransactionByImportedId.get(transaction.imported_id)?.id ?? null,
                   primarySourceCategory: getPrimarySourceCategory(selectedTransactions[index]!),
                   appliedCategoryId: transaction.resolved_category_id ?? null,
                   observedCategoryId: transaction.resolved_category_id ?? null,
@@ -304,6 +366,14 @@ export function createSyncReviewService<TSiblingLinks>({
             })
           }
         });
+
+        const actualLastSync = toActualLastSyncValue(syncCompletedAt);
+        if (syncActualExternalWriteback) {
+          await syncActualExternalWriteback({
+            actualAccountId: link.actualAccountId,
+            lastSync: actualLastSync
+          });
+        }
 
         await database.syncRun.update({
           where: {
