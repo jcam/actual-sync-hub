@@ -365,17 +365,23 @@ export function createAppService({
     return Number.isFinite(backoffUntilMs) && backoffUntilMs > now().getTime();
   };
 
-  const loadCurrentSyncLink = async (actualAccountId: string): Promise<SyncableLink> =>
-    database.accountLink.findFirstOrThrow({
+  const reconcileActualExternalUnlinks = async (actualAccountIds?: string[]) => {
+    if (!runtime.actualExternalSyncWritebackEnabled) {
+      return;
+    }
+
+    const links = await database.accountLink.findMany({
       where: {
-        actualAccountId,
         status: {
           in: [...CURRENT_LINK_STATUSES]
-        }
-      },
-      include: {
-        connection: true,
-        connectionAccount: true
+        },
+        ...(actualAccountIds
+          ? {
+              actualAccountId: {
+                in: actualAccountIds
+              }
+            }
+          : {})
       },
       orderBy: [
         {
@@ -390,30 +396,113 @@ export function createAppService({
       ]
     });
 
+    const linksByActualId = new Map<string, typeof links>();
+    for (const link of links) {
+      const group = linksByActualId.get(link.actualAccountId) || [];
+      group.push(link);
+      linksByActualId.set(link.actualAccountId, group);
+    }
+
+    const trackedCurrentLinks = [...linksByActualId.values()]
+      .map(group => selectCurrentLink(group))
+      .filter((link): link is NonNullable<typeof link> => Boolean(link))
+      .filter(link => parseLinkConfig(link.configJson).actualExternalLinked === true);
+
+    if (trackedCurrentLinks.length === 0) {
+      return;
+    }
+
+    const actualBankSyncLinks = await actual.listBankSyncLinks();
+    const actualExternalLinkedAccountIds = new Set(
+      actualBankSyncLinks
+        .filter(link => link.accountSyncSource === "external")
+        .map(link => link.actualAccountId)
+    );
+
+    await Promise.all(
+      trackedCurrentLinks
+        .filter(link => !actualExternalLinkedAccountIds.has(link.actualAccountId))
+        .map(link => {
+          const linkConfig = parseLinkConfig(link.configJson);
+          return database.accountLink.update({
+            where: {
+              id: link.id
+            },
+            data: {
+              isEnabled: false,
+              configJson: serializeLinkConfig({
+                ...linkConfig,
+                actualExternalLinked: false,
+                health: {
+                  state: "ATTENTION_REQUIRED",
+                  scope: "ACTUAL_BACKEND",
+                  action: "NONE",
+                  code: "ACTUAL_UNLINKED",
+                  message: "This account was unlinked in Actual. Re-link it here to resume sync.",
+                  updatedAt: now().toISOString()
+                },
+                categoryMappings: linkConfig.categoryMappings || [],
+                seenCategoryNames: linkConfig.seenCategoryNames || []
+              })
+            }
+          });
+        })
+    );
+  };
+
+  const loadCurrentSyncLink = async (actualAccountId: string): Promise<SyncableLink> =>
+    reconcileActualExternalUnlinks([actualAccountId]).then(() =>
+      database.accountLink.findFirstOrThrow({
+        where: {
+          actualAccountId,
+          status: {
+            in: [...CURRENT_LINK_STATUSES]
+          }
+        },
+        include: {
+          connection: true,
+          connectionAccount: true
+        },
+        orderBy: [
+          {
+            status: "asc"
+          },
+          {
+            updatedAt: "desc"
+          },
+          {
+            createdAt: "desc"
+          }
+        ]
+      })
+    );
+
   const findCurrentSyncLink = async (actualAccountId: string): Promise<SyncableLink | null> =>
-    database.accountLink.findFirst({
-      where: {
-        actualAccountId,
-        status: {
-          in: [...CURRENT_LINK_STATUSES]
-        }
-      },
-      include: {
-        connection: true,
-        connectionAccount: true
-      },
-      orderBy: [
-        {
-          status: "asc"
+    reconcileActualExternalUnlinks([actualAccountId]).then(() =>
+      database.accountLink.findFirst({
+        where: {
+          actualAccountId,
+          status: {
+            in: [...CURRENT_LINK_STATUSES]
+          }
         },
-        {
-          updatedAt: "desc"
+        include: {
+          connection: true,
+          connectionAccount: true
         },
-        {
-          createdAt: "desc"
-        }
-      ]
-    });
+        orderBy: [
+          {
+            status: "asc"
+          },
+          {
+            updatedAt: "desc"
+          },
+          {
+            createdAt: "desc"
+          }
+        ]
+      })
+    );
 
   const createSyncRunForLink = async (link: Pick<SyncableLink, "id" | "connectionId">) =>
     database.syncRun.create({
@@ -449,7 +538,7 @@ export function createAppService({
       ]
     });
 
-    if (!link || !link.provider || !link.connection || !link.connectionAccount) {
+    if (!link || !link.isEnabled || !link.provider || !link.connection || !link.connectionAccount) {
       return null;
     }
 
@@ -479,13 +568,23 @@ export function createAppService({
     actualAccountId: string;
     lastSync?: string | null;
   }) => {
-    if (!runtime.actualExternalSyncWritebackEnabled) {
+    if (
+      !runtime.actualExternalSyncWritebackEnabled ||
+      typeof actual.linkExternalSyncAccount !== "function" ||
+      typeof actual.unlinkExternalSyncAccount !== "function"
+    ) {
       return;
     }
 
     const current = await getCurrentLinkedWritebackState(actualAccountId);
     if (!current) {
-      await actual.unlinkExternalSyncAccount(actualAccountId);
+      try {
+        await actual.unlinkExternalSyncAccount(actualAccountId);
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes("is not externally linked")) {
+          throw error;
+        }
+      }
       return;
     }
 
@@ -493,6 +592,24 @@ export function createAppService({
       ...current.metadata,
       lastSync: lastSync ?? current.metadata.lastSync ?? null
     });
+
+    const currentConfig = parseLinkConfig(current.link.configJson);
+    if (!currentConfig.actualExternalLinked) {
+      await database.accountLink.update({
+        where: {
+          id: current.link.id
+        },
+        data: {
+          configJson: serializeLinkConfig({
+            ...currentConfig,
+            health: currentConfig.health?.code === "ACTUAL_UNLINKED" ? null : currentConfig.health ?? null,
+            actualExternalLinked: true,
+            categoryMappings: currentConfig.categoryMappings || [],
+            seenCategoryNames: currentConfig.seenCategoryNames || []
+          })
+        }
+      });
+    }
   };
 
   const markSyncRunFailure = async ({
@@ -1193,6 +1310,7 @@ export function createAppService({
     },
 
     async listActualAccounts(): Promise<ActualAccountDto[]> {
+      await reconcileActualExternalUnlinks();
       const [actualAccounts, actualCategories, links, connections] = await Promise.all([
       actual.listAccounts(),
       actual.listCategories(),
@@ -1275,6 +1393,7 @@ export function createAppService({
     },
 
     async listActualBankSyncLinks(): Promise<ActualBankSyncLinkDto[]> {
+      await reconcileActualExternalUnlinks();
       const [actualBankSyncLinks, links] = await Promise.all([
         actual.listBankSyncLinks(),
         database.accountLink.findMany({

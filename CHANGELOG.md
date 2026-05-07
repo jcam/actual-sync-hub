@@ -7,7 +7,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
-- No unreleased changes yet.
+### Added
+- Optional live Teller and SimpleFIN adapter smoke tests alongside the existing Plaid live validation flow.
+- A provider-sync sanitization pass that drops malformed transactions, dedupes repeated imported IDs and search/category text, and prevents removed IDs from conflicting with still-imported rows.
+
+### Changed
+- Hardened Plaid, Teller, and SimpleFIN sync result handling so provider payload quirks do not leak directly into Actual reconciliation.
+- Added detection for native Actual `external` unlink actions so previously written-back links are disabled locally and surfaced with `ACTUAL_UNLINKED` attention state instead of silently continuing to sync.
+- Documented the remaining TODO to honor Actual account-level non-mapping bank-sync prefs from the bridge-managed sync path.
 
 ## [0.13.0] - 2026-05-06
 

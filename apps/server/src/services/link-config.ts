@@ -15,6 +15,7 @@ export type LinkConfigData = {
   seenCategoryNames?: string[];
   automaticSyncBackoffUntil?: string | null;
   automaticSyncFailureCount?: number;
+  actualExternalLinked?: boolean;
 }
 
 export const CURRENT_LINK_STATUSES = ["ACTIVE", "MIGRATING"] as const satisfies AccountLinkStatus[];
@@ -61,7 +62,8 @@ export function parseLinkConfig(configJson: string | null | undefined): LinkConf
       automaticSyncFailureCount:
         typeof parsed.automaticSyncFailureCount === "number" && Number.isFinite(parsed.automaticSyncFailureCount)
           ? parsed.automaticSyncFailureCount
-          : 0
+          : 0,
+      actualExternalLinked: parsed.actualExternalLinked === true
     };
   } catch {
     return {};
@@ -91,7 +93,8 @@ export function serializeLinkConfig(config: LinkConfigData) {
     automaticSyncFailureCount:
       typeof config.automaticSyncFailureCount === "number" && config.automaticSyncFailureCount > 0
         ? config.automaticSyncFailureCount
-        : undefined
+        : undefined,
+    actualExternalLinked: config.actualExternalLinked === true ? true : undefined
   };
 
   return JSON.stringify(nextConfig);

@@ -2,6 +2,16 @@
 
 This document captures the smallest upstream Actual change set that would let this app integrate as a generic external sync bridge without teaching Actual about Plaid, Teller, or SimpleFIN.
 
+## TODOs In This Repo
+
+- TODO: when syncing through this bridge, read and honor Actual account-level synced prefs for non-mapping bank-sync options where practical:
+  - `sync-import-pending-${accountId}`
+  - `sync-import-notes-${accountId}`
+  - `sync-reimport-deleted-${accountId}`
+  - `sync-import-transactions-${accountId}` (`Investment Account`)
+  - `sync-update-dates-${accountId}`
+- TODO: do not attempt to support `custom-sync-mappings-${accountId}` unless the bridge also adopts Actual-native raw bank-sync payload conventions, including `raw_synced_data`.
+
 ## Rollout Phases
 
 ### Phase 1: Accept external linkage metadata

@@ -224,6 +224,100 @@ describe.sequential("app service", () => {
     ]);
   });
 
+  it("disables a tracked local link when Actual unlinks the native external account", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "SIMPLEFIN",
+        label: "Primary SimpleFIN",
+        providerItemId: "simplefin-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "acct-1",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Checking",
+        assetType: "BANK",
+        provider: "SIMPLEFIN",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "MANUAL",
+        isEnabled: true,
+        configJson: JSON.stringify({
+          actualExternalLinked: true
+        })
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn().mockResolvedValue([
+          {
+            id: "actual-1",
+            name: "Checking",
+            balance: 0,
+            offbudget: false,
+            closed: false
+          }
+        ]),
+        listCategories: vi.fn().mockResolvedValue([]),
+        listBankSyncLinks: vi.fn().mockResolvedValue([])
+      } as never,
+      runtime: {
+        instanceLabel: "test",
+        liveSandboxMode: false,
+        actualServerUrl: "http://actual.local",
+        actualBudgetSyncIdConfigured: true,
+        actualExternalSyncWritebackEnabled: true,
+        automaticSyncBackoffBaseMinutes: 5,
+        automaticSyncBackoffMaxMinutes: 60
+      }
+    });
+
+    const accounts = await service.listActualAccounts();
+
+    expect(accounts).toEqual([
+      expect.objectContaining({
+        id: "actual-1",
+        link: expect.objectContaining({
+          isEnabled: false,
+          health: expect.objectContaining({
+            state: "ATTENTION_REQUIRED",
+            code: "ACTUAL_UNLINKED"
+          })
+        })
+      })
+    ]);
+
+    const persisted = await prisma.accountLink.findFirstOrThrow({
+      where: {
+        actualAccountId: "actual-1"
+      }
+    });
+    const config = JSON.parse(persisted.configJson || "{}");
+
+    expect(persisted.isEnabled).toBe(false);
+    expect(config.actualExternalLinked).toBeUndefined();
+    expect(config.health).toMatchObject({
+      state: "ATTENTION_REQUIRED",
+      code: "ACTUAL_UNLINKED"
+    });
+  });
+
   it("surfaces persisted Teller user ids in connection listings", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
