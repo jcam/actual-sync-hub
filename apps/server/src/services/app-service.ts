@@ -79,6 +79,23 @@ type AppliedSyncOutcome = {
   lastSync: string;
 };
 
+const currentLinkOrderBy = [
+  {
+    status: "asc"
+  },
+  {
+    updatedAt: "desc"
+  },
+  {
+    createdAt: "desc"
+  }
+] satisfies Prisma.AccountLinkOrderByWithRelationInput[];
+
+const currentLinkInclude = {
+  connection: true,
+  connectionAccount: true
+} satisfies Prisma.AccountLinkInclude;
+
 function createConcurrencyGate(limit: number) {
   let active = 0;
   const queue: Array<() => void> = [];
@@ -135,6 +152,18 @@ function getDateRangeBounds(dates: string[]) {
     startDate: sorted[0]!,
     endDate: sorted[sorted.length - 1]!
   };
+}
+
+function groupLinksByActualAccountId<T extends { actualAccountId: string }>(links: T[]) {
+  const linksByActualId = new Map<string, T[]>();
+
+  for (const link of links) {
+    const group = linksByActualId.get(link.actualAccountId) || [];
+    group.push(link);
+    linksByActualId.set(link.actualAccountId, group);
+  }
+
+  return linksByActualId;
 }
 
 export type AppService = {
@@ -240,6 +269,21 @@ export function createAppService({
     }
 
     return (await actual.getExternalSyncAccount(actualAccountId)).prefs;
+  };
+
+  const isProviderConfigured = async (provider: Provider) => {
+    const providerSettings = await getEffectiveProviderSettings();
+
+    if (provider === "PLAID") {
+      const activePlaidSettings = getActivePlaidEnvironmentSettings(providerSettings.PLAID);
+      return Boolean(activePlaidSettings.clientId && activePlaidSettings.secret);
+    }
+
+    if (provider === "TELLER") {
+      return Boolean(getActiveTellerEnvironmentSettings(providerSettings.TELLER).appId);
+    }
+
+    return true;
   };
 
   const getProviderRuntimeInfo = async (): Promise<RuntimeInfoDto["providers"]> => {
@@ -360,6 +404,30 @@ export function createAppService({
     });
   };
 
+  const listCurrentSyncLinks = (where: Prisma.AccountLinkWhereInput = {}) =>
+    database.accountLink.findMany({
+      where: {
+        status: {
+          in: [...CURRENT_LINK_STATUSES]
+        },
+        ...where
+      },
+      include: currentLinkInclude,
+      orderBy: currentLinkOrderBy
+    });
+
+  const findCurrentSyncLinkRecord = (actualAccountId: string) =>
+    database.accountLink.findFirst({
+      where: {
+        actualAccountId,
+        status: {
+          in: [...CURRENT_LINK_STATUSES]
+        }
+      },
+      include: currentLinkInclude,
+      orderBy: currentLinkOrderBy
+    });
+
   const listActualTransactionsForImportedIdsByDateRange = async ({
     actualAccountId,
     transactions
@@ -479,25 +547,10 @@ export function createAppService({
             }
           : {})
       },
-      orderBy: [
-        {
-          status: "asc"
-        },
-        {
-          updatedAt: "desc"
-        },
-        {
-          createdAt: "desc"
-        }
-      ]
+      orderBy: currentLinkOrderBy
     });
 
-    const linksByActualId = new Map<string, typeof links>();
-    for (const link of links) {
-      const group = linksByActualId.get(link.actualAccountId) || [];
-      group.push(link);
-      linksByActualId.set(link.actualAccountId, group);
-    }
+    const linksByActualId = groupLinksByActualAccountId(links);
 
     const trackedCurrentLinks = [...linksByActualId.values()]
       .map(group => selectCurrentLink(group))
@@ -555,50 +608,13 @@ export function createAppService({
             in: [...CURRENT_LINK_STATUSES]
           }
         },
-        include: {
-          connection: true,
-          connectionAccount: true
-        },
-        orderBy: [
-          {
-            status: "asc"
-          },
-          {
-            updatedAt: "desc"
-          },
-          {
-            createdAt: "desc"
-          }
-        ]
+        include: currentLinkInclude,
+        orderBy: currentLinkOrderBy
       })
     );
 
   const findCurrentSyncLink = async (actualAccountId: string): Promise<SyncableLink | null> =>
-    reconcileActualExternalUnlinks([actualAccountId]).then(() =>
-      database.accountLink.findFirst({
-        where: {
-          actualAccountId,
-          status: {
-            in: [...CURRENT_LINK_STATUSES]
-          }
-        },
-        include: {
-          connection: true,
-          connectionAccount: true
-        },
-        orderBy: [
-          {
-            status: "asc"
-          },
-          {
-            updatedAt: "desc"
-          },
-          {
-            createdAt: "desc"
-          }
-        ]
-      })
-    );
+    reconcileActualExternalUnlinks([actualAccountId]).then(() => findCurrentSyncLinkRecord(actualAccountId));
 
   const createSyncRunForLink = async (link: Pick<SyncableLink, "id" | "connectionId">) =>
     database.syncRun.create({
@@ -1192,16 +1208,7 @@ export function createAppService({
       };
     }
 
-    const providerSettings = await getEffectiveProviderSettings();
-    const configured =
-      link.provider === "PLAID"
-        ? Boolean(
-            getActivePlaidEnvironmentSettings(providerSettings.PLAID).clientId &&
-              getActivePlaidEnvironmentSettings(providerSettings.PLAID).secret
-          )
-        : link.provider === "TELLER"
-          ? Boolean(getActiveTellerEnvironmentSettings(providerSettings.TELLER).appId)
-          : true;
+    const configured = await isProviderConfigured(link.provider);
 
     if (!configured) {
       return {
@@ -1430,82 +1437,63 @@ export function createAppService({
     async listActualAccounts(): Promise<ActualAccountDto[]> {
       await reconcileActualExternalUnlinks();
       const [actualAccounts, actualCategories, links, connections] = await Promise.all([
-      actual.listAccounts(),
-      actual.listCategories(),
-      database.accountLink.findMany({
-        where: {
-          status: {
-            in: [...CURRENT_LINK_STATUSES]
+        actual.listAccounts(),
+        actual.listCategories(),
+        listCurrentSyncLinks(),
+        database.connection.findMany({
+          include: {
+            accounts: true
           }
-        },
-        orderBy: [
-          {
-            updatedAt: "desc"
-          },
-          {
-            createdAt: "desc"
-          }
-        ]
-      }),
-      database.connection.findMany({
-        include: {
-          accounts: true
-        }
-      })
-    ]);
+        })
+      ]);
 
-    const linksByActualId = new Map<string, typeof links>();
-    for (const link of links) {
-      const group = linksByActualId.get(link.actualAccountId) || [];
-      group.push(link);
-      linksByActualId.set(link.actualAccountId, group);
-    }
-    const options: ConnectionAccountOptionDto[] = connections.flatMap(connection =>
-      connection.accounts.map(account => {
-        const metadata = parseConnectionMetadata(connection.metadataJson);
-        const simplefinRaw = connection.provider === "SIMPLEFIN" ? parseSimpleFinAccountRawJson(account.rawJson) : {};
-        return {
-          connectionId: connection.id,
-          connectionLabel: connection.label,
-          connectionStatus: connection.status,
-          connectionHealth: metadata.health ?? null,
-          connectionAccountId: account.id,
-          externalAccountId: account.externalAccountId,
-          provider: connection.provider,
-          institutionName: connection.institutionName,
-          accountName: account.name,
-          mask: account.mask,
-          type: account.type,
-          subtype: account.subtype,
-          providerConnectionId: account.providerConnectionId ?? simplefinRaw.connId ?? null,
-          providerConnectionName: account.providerConnectionName ?? simplefinRaw.connName ?? null,
-          providerInstitutionName: simplefinRaw.institution ?? simplefinRaw.connOrgName ?? null
-        };
-      })
-    );
-    const categoryOptions: ActualCategoryDto[] = actualCategories.map(category => ({
-      id: category.id,
-      name: category.name
-    }));
+      const linksByActualId = groupLinksByActualAccountId(links);
+      const options: ConnectionAccountOptionDto[] = connections.flatMap(connection =>
+        connection.accounts.map(account => {
+          const metadata = parseConnectionMetadata(connection.metadataJson);
+          const simplefinRaw = connection.provider === "SIMPLEFIN" ? parseSimpleFinAccountRawJson(account.rawJson) : {};
+          return {
+            connectionId: connection.id,
+            connectionLabel: connection.label,
+            connectionStatus: connection.status,
+            connectionHealth: metadata.health ?? null,
+            connectionAccountId: account.id,
+            externalAccountId: account.externalAccountId,
+            provider: connection.provider,
+            institutionName: connection.institutionName,
+            accountName: account.name,
+            mask: account.mask,
+            type: account.type,
+            subtype: account.subtype,
+            providerConnectionId: account.providerConnectionId ?? simplefinRaw.connId ?? null,
+            providerConnectionName: account.providerConnectionName ?? simplefinRaw.connName ?? null,
+            providerInstitutionName: simplefinRaw.institution ?? simplefinRaw.connOrgName ?? null
+          };
+        })
+      );
+      const categoryOptions: ActualCategoryDto[] = actualCategories.map(category => ({
+        id: category.id,
+        name: category.name
+      }));
 
-    const results: ActualAccountDto[] = [];
-    for (const account of actualAccounts) {
-      const link = selectCurrentLink(linksByActualId.get(account.id) || []) ?? null;
+      const results: ActualAccountDto[] = [];
+      for (const account of actualAccounts) {
+        const link = selectCurrentLink(linksByActualId.get(account.id) || []) ?? null;
 
-      results.push({
-        id: account.id,
-        name: account.name,
-        balance: account.balance,
-        offbudget: account.offbudget,
-        closed: account.closed,
-        link: toLinkDto(link, {
-          actualAccountId: account.id,
-          actualAccountName: account.name
-        }),
-        options,
-        actualCategories: categoryOptions
-      });
-    }
+        results.push({
+          id: account.id,
+          name: account.name,
+          balance: account.balance,
+          offbudget: account.offbudget,
+          closed: account.closed,
+          link: toLinkDto(link, {
+            actualAccountId: account.id,
+            actualAccountName: account.name
+          }),
+          options,
+          actualCategories: categoryOptions
+        });
+      }
 
       return results;
     },
@@ -1514,29 +1502,10 @@ export function createAppService({
       await reconcileActualExternalUnlinks();
       const [actualBankSyncLinks, links] = await Promise.all([
         actual.listBankSyncLinks(),
-        database.accountLink.findMany({
-          where: {
-            status: {
-              in: [...CURRENT_LINK_STATUSES]
-            }
-          },
-          orderBy: [
-            {
-              updatedAt: "desc"
-            },
-            {
-              createdAt: "desc"
-            }
-          ]
-        })
+        listCurrentSyncLinks()
       ]);
 
-      const linksByActualId = new Map<string, typeof links>();
-      for (const link of links) {
-        const group = linksByActualId.get(link.actualAccountId) || [];
-        group.push(link);
-        linksByActualId.set(link.actualAccountId, group);
-      }
+      const linksByActualId = groupLinksByActualAccountId(links);
 
       return actualBankSyncLinks.map(link => {
         const currentLink = selectCurrentLink(linksByActualId.get(link.actualAccountId) || []) ?? null;
@@ -1991,10 +1960,7 @@ export function createAppService({
             in: [...CURRENT_LINK_STATUSES]
           }
         },
-        include: {
-          connection: true,
-          connectionAccount: true
-        },
+        include: currentLinkInclude,
         orderBy: [
           {
             provider: "asc"
