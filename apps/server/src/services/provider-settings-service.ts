@@ -291,5 +291,3 @@ export function createProviderSettingsService({
     }
   };
 }
-
-export const providerSettingsService = createProviderSettingsService();

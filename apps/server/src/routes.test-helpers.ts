@@ -14,6 +14,7 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       listAccounts: vi.fn(),
       listCategories: vi.fn(),
       listBankSyncLinks: vi.fn(),
+      getExternalSyncAccount: vi.fn(),
       linkExternalSyncAccount: vi.fn(),
       unlinkExternalSyncAccount: vi.fn(),
       listTransactionsByDateRange: vi.fn(),
@@ -53,7 +54,8 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
             environment: "sandbox",
             sandbox: {
               appId: "",
-              sandboxAccessToken: ""
+              sandboxAccessToken: "",
+              webhookSigningSecrets: []
             },
             development: {
               appId: "",
@@ -70,7 +72,8 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
             transactionsInitialDays: 90,
             transactionsOverlapDays: 10,
             automaticSyncConcurrency: 2,
-            webhookSyncDebounceSeconds: 30
+            webhookSyncDebounceSeconds: 30,
+            webhookToleranceSeconds: 180
           },
           SIMPLEFIN: {
             mode: "sandbox",
@@ -143,7 +146,8 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           environment: "sandbox",
           sandbox: {
             appId: "",
-            sandboxAccessToken: ""
+            sandboxAccessToken: "",
+            webhookSigningSecrets: []
           },
           development: {
             appId: "",
@@ -160,7 +164,8 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           transactionsInitialDays: 90,
           transactionsOverlapDays: 10,
           automaticSyncConcurrency: 2,
-          webhookSyncDebounceSeconds: 30
+          webhookSyncDebounceSeconds: 30,
+          webhookToleranceSeconds: 180
         },
         SIMPLEFIN: {
           mode: "sandbox",

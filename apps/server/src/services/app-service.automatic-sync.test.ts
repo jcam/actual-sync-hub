@@ -98,8 +98,15 @@ describe.sequential("app service automatic sync", () => {
       providerSettingsService: {
         getAll: vi.fn().mockResolvedValue({
           PLAID: {
-            clientId: "",
-            secret: "",
+            environment: "sandbox",
+            sandbox: {
+              clientId: "",
+              secret: ""
+            },
+            production: {
+              clientId: "",
+              secret: ""
+            },
             countryCodes: ["US"],
             products: ["transactions"],
             transactionsDaysRequested: 365,
@@ -107,18 +114,35 @@ describe.sequential("app service automatic sync", () => {
             automaticSyncConcurrency: 2
           },
           TELLER: {
-            appId: "",
             environment: "sandbox",
-            sandboxAccessToken: "",
-            certificatePem: "",
-            keyPem: "",
-            webhookSigningSecrets: [],
+            sandbox: {
+              appId: "",
+              sandboxAccessToken: "",
+              webhookSigningSecrets: []
+            },
+            development: {
+              appId: "",
+              certificatePem: "",
+              keyPem: "",
+              webhookSigningSecrets: []
+            },
+            production: {
+              appId: "",
+              certificatePem: "",
+              keyPem: "",
+              webhookSigningSecrets: []
+            },
             transactionsInitialDays: 90,
             transactionsOverlapDays: 10,
             automaticSyncConcurrency: 1,
-            webhookSyncDebounceSeconds: 30
+            webhookSyncDebounceSeconds: 30,
+            webhookToleranceSeconds: 180
           },
           SIMPLEFIN: {
+            mode: "sandbox",
+            development: {
+              serverUrl: ""
+            },
             transactionsInitialDays: 45,
             automaticSyncConcurrency: 1
           }

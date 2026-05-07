@@ -9,6 +9,7 @@ import type {
 } from "@actual-sync/shared";
 import type { APIAccountEntity, APICategoryEntity, APICategoryGroupEntity, APIPayeeEntity } from "@actual-app/api/models";
 import { resolveActualCategoryId } from "./category-matching.js";
+import { DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS } from "./provider-sync-helpers.js";
 
 type ActualModule = typeof ActualApi;
 type ActualImportTransaction = Parameters<ActualModule["importTransactions"]>[1][number];
@@ -225,6 +226,37 @@ function isActualBankSyncSource(value: string | null | undefined): value is Actu
   return value === "simpleFin" || value === "goCardless" || value === "pluggyai" || value === "external";
 }
 
+function getExternalSyncInfoFromAccount(account: APIAccountEntity) {
+  const accountWithSync = account as APIAccountEntity & {
+    account_id?: string | null;
+    bankName?: string | null;
+    bankId?: string | null;
+    mask?: string | null;
+    official_name?: string | null;
+    balance_current?: number | null;
+    balance_available?: number | null;
+    balance_limit?: number | null;
+    account_sync_source?: string | null;
+    last_sync?: string | null;
+  };
+
+  return {
+    id: account.id,
+    linked: isActualBankSyncSource(accountWithSync.account_sync_source) && Boolean(accountWithSync.account_id),
+    syncSource: accountWithSync.account_sync_source === "external" ? "external" : null,
+    providerAccountId: accountWithSync.account_id ?? null,
+    institutionName: accountWithSync.bankName ?? null,
+    institutionExternalId: accountWithSync.bankId ?? null,
+    mask: accountWithSync.mask ?? null,
+    officialName: accountWithSync.official_name ?? null,
+    balanceCurrent: accountWithSync.balance_current ?? null,
+    balanceAvailable: accountWithSync.balance_available ?? null,
+    balanceLimit: accountWithSync.balance_limit ?? null,
+    lastSync: accountWithSync.last_sync ?? null,
+    prefs: DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS
+  };
+}
+
 function collectDateUpdates({
   updatedPreview,
   transactions,
@@ -263,11 +295,14 @@ function collectDateUpdates({
 function getActualCapabilities(actual: ActualModule): ActualCapabilities {
   const api = actual as ActualModuleWithExternalSync;
   const linkExternalSyncAccount = (api as Record<string, unknown>).linkExternalSyncAccount;
+  const getExternalSyncAccount = (api as Record<string, unknown>).getExternalSyncAccount;
   const unlinkExternalSyncAccount = (api as Record<string, unknown>).unlinkExternalSyncAccount;
 
   return {
     externalSyncWritebackEnabled:
-      typeof linkExternalSyncAccount === "function" && typeof unlinkExternalSyncAccount === "function"
+      typeof linkExternalSyncAccount === "function" &&
+      typeof getExternalSyncAccount === "function" &&
+      typeof unlinkExternalSyncAccount === "function"
   };
 }
 
@@ -276,16 +311,6 @@ function getActualExternalSyncWritebackApi(actual: ActualModule) {
 
   if (!api.linkExternalSyncAccount || !api.unlinkExternalSyncAccount) {
     throw new Error("Installed Actual API runtime does not expose external-sync account link methods.");
-  }
-
-  return api;
-}
-
-function getActualExternalSyncReadApi(actual: ActualModule) {
-  const api = actual as ActualModuleWithExternalSync;
-
-  if (!api.getExternalSyncAccount) {
-    throw new Error("Installed Actual API runtime does not expose external-sync account read methods.");
   }
 
   return api;
@@ -517,13 +542,22 @@ async function main() {
         case "listBankSyncLinks": {
           await syncIfNeeded();
           const publicAccounts = await actual.getAccounts();
-          const externalSyncApi = getActualExternalSyncReadApi(actual);
-          const accountLinks = await Promise.all(
-            publicAccounts.map(async account => ({
+          const accountLinks = await (async () => {
+            const externalSyncApi = (actual as ActualModuleWithExternalSync).getExternalSyncAccount;
+            if (typeof externalSyncApi === "function") {
+              return Promise.all(
+                publicAccounts.map(async account => ({
+                  account,
+                  externalSync: await externalSyncApi(account.id)
+                }))
+              );
+            }
+
+            return publicAccounts.map(account => ({
               account,
-              externalSync: await externalSyncApi.getExternalSyncAccount!(account.id)
-            }))
-          );
+              externalSync: getExternalSyncInfoFromAccount(account)
+            }));
+          })();
 
           return {
             id: command.id,
@@ -562,7 +596,16 @@ async function main() {
 
         case "getExternalSyncAccount": {
           await syncIfNeeded();
-          const externalSync = await getActualExternalSyncReadApi(actual).getExternalSyncAccount!(command.accountId);
+          const externalSyncApi = (actual as ActualModuleWithExternalSync).getExternalSyncAccount;
+          const externalSync = typeof externalSyncApi === "function"
+            ? await externalSyncApi(command.accountId)
+            : await actual.getAccounts().then(accounts => {
+                const found = accounts.find(entry => entry.id === command.accountId);
+                if (!found) {
+                  throw new Error(`Actual account not found: ${command.accountId}`);
+                }
+                return getExternalSyncInfoFromAccount(found);
+              });
           return {
             id: command.id,
             ok: true,

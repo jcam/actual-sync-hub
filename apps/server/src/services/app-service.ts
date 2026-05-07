@@ -216,7 +216,9 @@ export function createAppService({
 
         return {
           externalSyncWritebackEnabled:
-            typeof actual.linkExternalSyncAccount === "function" && typeof actual.unlinkExternalSyncAccount === "function"
+            typeof actual.linkExternalSyncAccount === "function" &&
+            typeof actual.getExternalSyncAccount === "function" &&
+            typeof actual.unlinkExternalSyncAccount === "function"
         };
       })();
     }

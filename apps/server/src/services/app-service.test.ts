@@ -545,6 +545,9 @@ describe.sequential("app service", () => {
     const service = createAppService({
       prisma,
       actualService: {
+        getCapabilities: vi.fn().mockResolvedValue({
+          externalSyncWritebackEnabled: true
+        }),
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
         listTransactionsByDateRange: vi.fn().mockResolvedValue([]),

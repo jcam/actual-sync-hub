@@ -228,12 +228,6 @@ Those were part of earlier larger plans. They are not part of the slimmed-down b
 
 ## TODOs In This Repo
 
-- TODO: when syncing through this bridge, read and honor the returned synced-account prefs where practical:
-  - `prefs.importPending`
-  - `prefs.importNotes`
-  - `prefs.reimportDeleted`
-  - `prefs.importTransactions`
-  - `prefs.updateDates`
 - TODO: do not attempt to support `custom-sync-mappings-${accountId}` unless the bridge also adopts Actual-native raw bank-sync payload conventions, including `raw_synced_data`
 
 ## Type Changes
