@@ -472,6 +472,24 @@ describe.sequential("app service", () => {
             personalFinanceCategoryVersion: "v2",
             automaticSyncConcurrency: 2
           },
+          STRIPE: {
+            environment: "test",
+            test: {
+              publishableKey: "",
+              secretKey: "",
+              webhookSigningSecrets: []
+            },
+            live: {
+              publishableKey: "",
+              secretKey: "",
+              webhookSigningSecrets: []
+            },
+            countryCodes: ["US"],
+            permissions: ["balances", "transactions"],
+            prefetch: ["balances", "transactions"],
+            transactionsInitialDays: 90,
+            automaticSyncConcurrency: 2
+          },
           TELLER: {
             environment: "development",
             sandbox: {
@@ -571,6 +589,24 @@ describe.sequential("app service", () => {
             products: ["transactions"],
             transactionsDaysRequested: 365,
             personalFinanceCategoryVersion: "v2",
+            automaticSyncConcurrency: 2
+          },
+          STRIPE: {
+            environment: "test",
+            test: {
+              publishableKey: "",
+              secretKey: "",
+              webhookSigningSecrets: []
+            },
+            live: {
+              publishableKey: "",
+              secretKey: "",
+              webhookSigningSecrets: []
+            },
+            countryCodes: ["US"],
+            permissions: ["balances", "transactions"],
+            prefetch: ["balances", "transactions"],
+            transactionsInitialDays: 90,
             automaticSyncConcurrency: 2
           },
           TELLER: {
@@ -1354,6 +1390,365 @@ describe.sequential("app service", () => {
     });
     const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
     expect(metadata.teller.lastWebhookSkipReason).toBe("debounced");
+  });
+
+  it("marks Stripe connections as reauth-required when a deactivation webhook indicates relink", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "STRIPE",
+        label: "Primary Stripe",
+        providerItemId: "fcauth_123",
+        accessTokenCiphertext: "",
+        metadataJson: JSON.stringify({
+          stripe: {
+            authorizationId: "fcauth_123"
+          }
+        })
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      stripeService: {
+        provider: "STRIPE",
+        isConfigured: vi.fn().mockReturnValue(true),
+        createConnectSession: vi.fn(),
+        createReauthSession: vi.fn(),
+        finalizeAccounts: vi.fn(),
+        finalizeReauthSession: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection: vi.fn(),
+        syncAccountLink: vi.fn(),
+        webhooksConfigured: vi.fn().mockReturnValue(true),
+        constructWebhookEvent: vi.fn(),
+        getAuthorization: vi.fn().mockResolvedValue({
+          id: "fcauth_123",
+          status: "inactive",
+          status_details: {
+            inactive: {
+              action: "relink_required"
+            }
+          }
+        })
+      } as never
+    });
+
+    await service.handleStripeWebhook({
+      id: "evt_1",
+      type: "financial_connections.account.deactivated",
+      created: Math.floor(new Date("2026-05-05T00:00:00.000Z").getTime() / 1000),
+      data: {
+        object: {
+          id: "fca_123",
+          object: "financial_connections.account",
+          authorization: "fcauth_123"
+        }
+      }
+    } as never);
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+
+    expect(updatedConnection.status).toBe("ERROR");
+    expect(metadata.health).toMatchObject({
+      state: "REAUTH_REQUIRED",
+      scope: "BANK_AUTH",
+      action: "MANUAL_RECONNECT",
+      code: "ACCOUNT_RELINK_REQUIRED"
+    });
+    expect(metadata.stripe.lastWebhookType).toBe("financial_connections.account.deactivated");
+    expect(metadata.stripe.accountIds).toEqual(["fca_123"]);
+  });
+
+  it("clears Stripe webhook health when a connection is reactivated", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "STRIPE",
+        label: "Primary Stripe",
+        providerItemId: "fcauth_123",
+        accessTokenCiphertext: "",
+        status: "ERROR",
+        metadataJson: JSON.stringify({
+          stripe: {
+            authorizationId: "fcauth_123"
+          },
+          health: {
+            state: "REAUTH_REQUIRED",
+            scope: "BANK_AUTH",
+            action: "MANUAL_RECONNECT",
+            code: "ACCOUNT_RELINK_REQUIRED",
+            message: "Stripe account needs to be reauthenticated.",
+            updatedAt: "2026-05-04T00:00:00.000Z"
+          }
+        })
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      stripeService: {
+        provider: "STRIPE",
+        isConfigured: vi.fn().mockReturnValue(true),
+        createConnectSession: vi.fn(),
+        createReauthSession: vi.fn(),
+        finalizeAccounts: vi.fn(),
+        finalizeReauthSession: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection: vi.fn(),
+        syncAccountLink: vi.fn(),
+        webhooksConfigured: vi.fn().mockReturnValue(true),
+        constructWebhookEvent: vi.fn(),
+        getAuthorization: vi.fn()
+      } as never,
+      now: () => new Date("2026-05-05T03:00:00.000Z")
+    });
+
+    await service.handleStripeWebhook({
+      id: "evt_2",
+      type: "financial_connections.account.reactivated",
+      created: Math.floor(new Date("2026-05-05T01:00:00.000Z").getTime() / 1000),
+      data: {
+        object: {
+          id: "fca_123",
+          object: "financial_connections.account",
+          authorization: "fcauth_123"
+        }
+      }
+    } as never);
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+
+    expect(updatedConnection.status).toBe("ACTIVE");
+    expect(metadata.health).toBeNull();
+    expect(metadata.stripe.lastReactivatedAt).toBe("2026-05-05T01:00:00.000Z");
+  });
+
+  it("disables active Stripe links when a disconnected webhook arrives", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "STRIPE",
+        label: "Primary Stripe",
+        providerItemId: "fcauth_123",
+        accessTokenCiphertext: ""
+      }
+    });
+
+    const link = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Checking",
+        assetType: "BANK",
+        provider: "STRIPE",
+        connectionId: connection.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      stripeService: {
+        provider: "STRIPE",
+        isConfigured: vi.fn().mockReturnValue(true),
+        createConnectSession: vi.fn(),
+        createReauthSession: vi.fn(),
+        finalizeAccounts: vi.fn(),
+        finalizeReauthSession: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection: vi.fn(),
+        syncAccountLink: vi.fn(),
+        webhooksConfigured: vi.fn().mockReturnValue(true),
+        constructWebhookEvent: vi.fn(),
+        getAuthorization: vi.fn()
+      } as never,
+      now: () => new Date("2026-05-05T03:00:00.000Z")
+    });
+
+    await service.handleStripeWebhook({
+      id: "evt_3",
+      type: "financial_connections.account.disconnected",
+      created: Math.floor(new Date("2026-05-05T02:00:00.000Z").getTime() / 1000),
+      data: {
+        object: {
+          id: "fca_123",
+          object: "financial_connections.account",
+          authorization: "fcauth_123"
+        }
+      }
+    } as never);
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const updatedLink = await prisma.accountLink.findUniqueOrThrow({
+      where: {
+        id: link.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+
+    expect(updatedConnection.status).toBe("DISCONNECTED");
+    expect(updatedLink.isEnabled).toBe(false);
+    expect(metadata.health).toMatchObject({
+      state: "REAUTH_REQUIRED",
+      scope: "CONNECTION_AUTH",
+      action: "MANUAL_RECONNECT",
+      code: "ACCOUNT_DISCONNECTED"
+    });
+  });
+
+  it("runs incremental Stripe syncs from refreshed-transactions webhooks without waiting for scheduled refreshes", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "STRIPE",
+        label: "Primary Stripe",
+        providerItemId: "fcauth_123",
+        accessTokenCiphertext: ""
+      }
+    });
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "fca_123",
+        name: "Checking",
+        type: "cash"
+      }
+    });
+    const link = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Checking",
+        assetType: "BANK",
+        provider: "STRIPE",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true,
+        configJson: JSON.stringify({
+          providerSyncState: {
+            cursor: "fctxnrefresh_old",
+            windowStartDate: null,
+            windowEndDate: null
+          }
+        })
+      }
+    });
+
+    const syncAccountLinkFromWebhook = vi.fn().mockResolvedValue({
+      imported: 0,
+      transactions: [],
+      removedImportedIds: [],
+      configPatch: {
+        providerSyncState: {
+          cursor: "fctxnrefresh_new",
+          windowStartDate: null,
+          windowEndDate: null
+        }
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listCategories: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
+        reconcileTransactions: vi.fn().mockResolvedValue({
+          added: 0,
+          updated: 0,
+          removed: 0,
+          renamedPayees: 0,
+          addedIds: [],
+          updatedIds: []
+        }),
+        importTransactions: vi.fn(),
+        previewImportTransactions: vi.fn(),
+        getExternalSyncAccount: vi.fn().mockResolvedValue({
+          prefs: {
+            reimportDeleted: false,
+            updateDates: false
+          }
+        }),
+        linkExternalSyncAccount: vi.fn(),
+        unlinkExternalSyncAccount: vi.fn()
+      } as never,
+      stripeService: {
+        provider: "STRIPE",
+        isConfigured: vi.fn().mockReturnValue(true),
+        createConnectSession: vi.fn(),
+        createReauthSession: vi.fn(),
+        finalizeAccounts: vi.fn(),
+        finalizeReauthSession: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection: vi.fn(),
+        syncAccountLink: vi.fn(),
+        syncAccountLinkFromWebhook,
+        webhooksConfigured: vi.fn().mockReturnValue(true),
+        constructWebhookEvent: vi.fn(),
+        getAuthorization: vi.fn()
+      } as never,
+      now: () => new Date("2026-05-05T03:00:00.000Z")
+    });
+
+    await service.handleStripeWebhook({
+      id: "evt_4",
+      type: "financial_connections.account.refreshed_transactions",
+      created: Math.floor(new Date("2026-05-05T03:00:00.000Z").getTime() / 1000),
+      data: {
+        object: {
+          id: "fca_123",
+          object: "financial_connections.account",
+          authorization: "fcauth_123",
+          transaction_refresh: {
+            id: "fctxnrefresh_new",
+            status: "succeeded"
+          }
+        }
+      }
+    } as never);
+
+    expect(syncAccountLinkFromWebhook).toHaveBeenCalledTimes(1);
+    expect(syncAccountLinkFromWebhook).toHaveBeenCalledWith(link.id);
+
+    const updatedLink = await prisma.accountLink.findUniqueOrThrow({
+      where: {
+        id: link.id
+      }
+    });
+    const nextConfig = JSON.parse(updatedLink.configJson || "{}");
+    expect(nextConfig.providerSyncState.cursor).toBe("fctxnrefresh_new");
+    expect(updatedLink.lastSyncedAt).not.toBeNull();
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+    expect(metadata.stripe.lastTransactionWebhookSyncRefreshId).toBe("fctxnrefresh_new");
+    expect(metadata.stripe.lastTransactionWebhookSyncedAt).toBe("2026-05-05T03:00:00.000Z");
   });
 
   it("creates a migrating replacement link when a synced provider link is switched", async () => {

@@ -27,8 +27,10 @@ type StripeSettingsDraft = {
   environment: "test" | "live";
   testPublishableKey: string;
   testSecretKey: string;
+  testWebhookSigningSecrets: string;
   livePublishableKey: string;
   liveSecretKey: string;
+  liveWebhookSigningSecrets: string;
   countryCodes: string;
   permissions: string;
   prefetch: string;
@@ -249,8 +251,10 @@ function toDraft<T extends Provider>(
         environment: stripeSettings.environment ?? "test",
         testPublishableKey: stripeSettings.test?.publishableKey ?? "",
         testSecretKey: stripeSettings.test?.secretKey ?? "",
+        testWebhookSigningSecrets: (stripeSettings.test?.webhookSigningSecrets ?? []).join("\n"),
         livePublishableKey: stripeSettings.live?.publishableKey ?? "",
         liveSecretKey: stripeSettings.live?.secretKey ?? "",
+        liveWebhookSigningSecrets: (stripeSettings.live?.webhookSigningSecrets ?? []).join("\n"),
         countryCodes: (stripeSettings.countryCodes ?? []).join(", "),
         permissions: (stripeSettings.permissions ?? []).join(", "),
         prefetch: (stripeSettings.prefetch ?? []).join(", "),
@@ -357,11 +361,13 @@ function toPayload<T extends Provider>(
         environment: stripeDraft.environment,
         test: {
           publishableKey: stripeDraft.testPublishableKey.trim(),
-          secretKey: stripeDraft.testSecretKey
+          secretKey: stripeDraft.testSecretKey,
+          webhookSigningSecrets: splitLineOrCsvField(stripeDraft.testWebhookSigningSecrets)
         },
         live: {
           publishableKey: stripeDraft.livePublishableKey.trim(),
-          secretKey: stripeDraft.liveSecretKey
+          secretKey: stripeDraft.liveSecretKey,
+          webhookSigningSecrets: splitLineOrCsvField(stripeDraft.liveWebhookSigningSecrets)
         },
         countryCodes: splitCsvField(stripeDraft.countryCodes).map(code => code.toUpperCase()),
         permissions: splitLineOrCsvField(stripeDraft.permissions) as ProviderSettingsByProviderDto<"STRIPE">["permissions"],
@@ -688,6 +694,27 @@ export function ProviderSettingsPanel<T extends Provider>({
                   }));
                 }}
                 placeholder="sk_test_..."
+              />
+            </label>
+            <label className="provider-settings-textarea">
+              <span>{stripeDraft.environment === "test" ? "Test webhook signing secrets" : "Live webhook signing secrets"}</span>
+              <textarea
+                rows={3}
+                value={
+                  stripeDraft.environment === "test"
+                    ? stripeDraft.testWebhookSigningSecrets
+                    : stripeDraft.liveWebhookSigningSecrets
+                }
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as StripeSettingsDraft),
+                    ...(stripeDraft.environment === "test"
+                      ? { testWebhookSigningSecrets: next }
+                      : { liveWebhookSigningSecrets: next })
+                  }));
+                }}
+                placeholder="One secret per line"
               />
             </label>
             <label>

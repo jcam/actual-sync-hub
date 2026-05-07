@@ -268,6 +268,112 @@ describe("server webhook and account-link routes", () => {
     expect(handleTellerWebhook).toHaveBeenCalledWith(payload);
   });
 
+  it("rejects Stripe webhooks when webhook verification is not configured", async () => {
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          stripeService: {
+            webhooksConfigured: vi.fn().mockReturnValue(false)
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/stripe",
+      headers: {
+        "content-type": "application/json",
+        "stripe-signature": "t=123,v1=deadbeef"
+      },
+      payload: JSON.stringify({
+        id: "evt_1",
+        type: "financial_connections.account.deactivated",
+        data: {
+          object: {
+            id: "fca_123",
+            object: "financial_connections.account"
+          }
+        }
+      })
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({
+      error: "Stripe webhooks are not configured"
+    });
+  });
+
+  it("accepts a verified Stripe webhook and delegates it to the app service", async () => {
+    const handleStripeWebhook = vi.fn().mockResolvedValue(undefined);
+    const constructWebhookEvent = vi.fn().mockResolvedValue({
+      id: "evt_2",
+      type: "financial_connections.account.reactivated",
+      created: 1_778_000_000,
+      data: {
+        object: {
+          id: "fca_123",
+          object: "financial_connections.account",
+          authorization: "fcauth_123"
+        }
+      }
+    });
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          appService: {
+            handleStripeWebhook
+          },
+          stripeService: {
+            webhooksConfigured: vi.fn().mockReturnValue(true),
+            constructWebhookEvent
+          }
+        })
+      })
+    );
+
+    const payload = JSON.stringify({
+      id: "evt_2",
+      type: "financial_connections.account.reactivated",
+      data: {
+        object: {
+          id: "fca_123",
+          object: "financial_connections.account",
+          authorization: "fcauth_123"
+        }
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/stripe",
+      headers: {
+        "content-type": "application/json",
+        "stripe-signature": "t=123,v1=deadbeef"
+      },
+      payload
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      ok: true
+    });
+    expect(constructWebhookEvent).toHaveBeenCalledWith(expect.any(Buffer), "t=123,v1=deadbeef");
+    expect(handleStripeWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "evt_2",
+        type: "financial_connections.account.reactivated"
+      })
+    );
+  });
+
   it("saves an account link through the route layer", async () => {
     const upsertAccountLink = vi.fn().mockResolvedValue(undefined);
 

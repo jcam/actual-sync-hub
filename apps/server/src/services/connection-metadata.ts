@@ -15,3 +15,7 @@ export function parseConnectionMetadata(json: string | null | undefined): { heal
 export function getTellerMetadata(metadata: Record<string, unknown>) {
   return typeof metadata.teller === "object" && metadata.teller ? (metadata.teller as Record<string, unknown>) : {};
 }
+
+export function getStripeMetadata(metadata: Record<string, unknown>) {
+  return typeof metadata.stripe === "object" && metadata.stripe ? (metadata.stripe as Record<string, unknown>) : {};
+}

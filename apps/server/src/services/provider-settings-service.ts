@@ -31,7 +31,8 @@ const plaidSettingsSchema = z.object({
 
 const stripeEnvironmentSettingsSchema = z.object({
   publishableKey: z.string(),
-  secretKey: z.string()
+  secretKey: z.string(),
+  webhookSigningSecrets: z.array(z.string().min(1)).default([])
 });
 
 const stripeSettingsSchema = z.object({
@@ -127,11 +128,13 @@ function defaultProviderSettings(): ProviderSettingsDto {
       environment: "test",
       test: {
         publishableKey: "",
-        secretKey: ""
+        secretKey: "",
+        webhookSigningSecrets: []
       },
       live: {
         publishableKey: "",
-        secretKey: ""
+        secretKey: "",
+        webhookSigningSecrets: []
       },
       countryCodes: ["US"],
       permissions: ["balances", "transactions"],

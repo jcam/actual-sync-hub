@@ -163,6 +163,7 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       runAccountSync: vi.fn(),
       runScheduledLinkSyncs: vi.fn(),
       handleTellerWebhook: vi.fn(),
+      handleStripeWebhook: vi.fn(),
       previewAccountSyncReview: vi.fn(),
       commitAccountSyncReview: vi.fn(),
       listSyncRuns: vi.fn(),
@@ -192,11 +193,13 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           environment: "test",
           test: {
             publishableKey: "",
-            secretKey: ""
+            secretKey: "",
+            webhookSigningSecrets: []
           },
           live: {
             publishableKey: "",
-            secretKey: ""
+            secretKey: "",
+            webhookSigningSecrets: []
           },
           countryCodes: ["US"],
           permissions: ["balances", "transactions"],
@@ -273,6 +276,10 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
     stripeService: {
       provider: "STRIPE" as const,
       isConfigured: vi.fn().mockReturnValue(false),
+      webhooksConfigured: vi.fn().mockReturnValue(false),
+      constructWebhookEvent: vi.fn().mockReturnValue(null),
+      getAuthorization: vi.fn(),
+      syncAccountLinkFromWebhook: vi.fn(),
       createConnectSession: vi.fn(),
       createReauthSession: vi.fn(),
       finalizeAccounts: vi.fn(),

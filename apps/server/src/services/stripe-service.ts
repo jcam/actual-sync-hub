@@ -14,6 +14,7 @@ type DatabaseClient = typeof prisma;
 type StripeEnvironmentConfig = {
   publishableKey: string;
   secretKey: string;
+  webhookSigningSecrets: string[];
 };
 
 type StripeConfig = {
@@ -31,6 +32,15 @@ type StripeAccount = Stripe.FinancialConnections.Account;
 type StripeAuthorization = Stripe.FinancialConnections.Authorization;
 type StripeTransaction = Stripe.FinancialConnections.Transaction;
 type StripeRefreshFeature = "balance" | "ownership" | "transactions";
+type StripeWebhookEventType =
+  | "financial_connections.account.created"
+  | "financial_connections.account.deactivated"
+  | "financial_connections.account.disconnected"
+  | "financial_connections.account.reactivated"
+  | "financial_connections.account.refreshed_balance"
+  | "financial_connections.account.refreshed_ownership"
+  | "financial_connections.account.refreshed_transactions";
+export type StripeWebhookEvent = Extract<Stripe.Event, { type: StripeWebhookEventType }>;
 
 type StripeConnectionMetadata = {
   stripe?: {
@@ -394,6 +404,10 @@ export type StripeService = {
     clientSecret: string;
     publishableKey: string;
   }>;
+  webhooksConfigured(): Promise<boolean>;
+  constructWebhookEvent(rawBody: Buffer | string, signatureHeader: string | string[] | undefined): Promise<StripeWebhookEvent | Stripe.Event | null>;
+  getAuthorization(authorizationId: string): Promise<StripeAuthorization>;
+  syncAccountLinkFromWebhook(linkId: string): Promise<ProviderSyncResult>;
   finalizeReauthSession(args: {
     connectionId: string;
     accountIds: string[];
@@ -413,11 +427,13 @@ export function createStripeService({
     environment: "test",
     test: {
       publishableKey: "",
-      secretKey: ""
+      secretKey: "",
+      webhookSigningSecrets: []
     },
     live: {
       publishableKey: "",
-      secretKey: ""
+      secretKey: "",
+      webhookSigningSecrets: []
     },
     countryCodes: ["US"],
     permissions: ["balances", "transactions"],
@@ -437,11 +453,13 @@ export function createStripeService({
       environment: settings.environment,
       test: {
         publishableKey: settings.test.publishableKey,
-        secretKey: settings.test.secretKey
+        secretKey: settings.test.secretKey,
+        webhookSigningSecrets: settings.test.webhookSigningSecrets
       },
       live: {
         publishableKey: settings.live.publishableKey,
-        secretKey: settings.live.secretKey
+        secretKey: settings.live.secretKey,
+        webhookSigningSecrets: settings.live.webhookSigningSecrets
       },
       countryCodes: settings.countryCodes,
       permissions: settings.permissions,
@@ -498,11 +516,170 @@ export function createStripeService({
     };
   };
 
+  const syncStripeAccountLink = async ({
+    linkId,
+    skipRefresh
+  }: {
+    linkId: string;
+    skipRefresh: boolean;
+  }): Promise<ProviderSyncResult> => {
+    const effectiveConfig = await getEffectiveConfig();
+    const stripe = getStripeClient(effectiveConfig);
+    const link = await database.accountLink.findUniqueOrThrow({
+      where: {
+        id: linkId
+      },
+      include: {
+        connection: true,
+        connectionAccount: true
+      }
+    });
+
+    if (!link.connection || !link.connectionAccount) {
+      return {
+        imported: 0,
+        transactions: [],
+        removedImportedIds: [],
+        configPatch: {}
+      };
+    }
+
+    try {
+      const connectionMetadata = parseConnectionMetadata(link.connection.metadataJson);
+      const account = await retrieveStripeAccount(stripe, link.connectionAccount.externalAccountId);
+      const syncedAccount = skipRefresh
+        ? account
+        : await refreshStripeAccountData({
+            stripe,
+            account,
+            includeBalance: Boolean(account.permissions?.includes("balances")),
+            includeTransactions: true
+          });
+
+      await database.connectionAccount.update({
+        where: {
+          id: link.connectionAccount.id
+        },
+        data: {
+          name: syncedAccount.display_name || syncedAccount.institution_name || link.connectionAccount.name,
+          mask: syncedAccount.last4 || null,
+          type: syncedAccount.category || link.connectionAccount.type,
+          subtype: syncedAccount.subcategory || null,
+          currentBalance: getPrimaryBalanceValue(syncedAccount.balance?.current),
+          availableBalance: getPrimaryBalanceValue(syncedAccount.balance?.cash?.available),
+          rawJson: JSON.stringify(syncedAccount)
+        }
+      });
+
+      const existingConfig = parseLinkConfig(link.configJson);
+      const transactions = await listStripeTransactions({
+        stripe,
+        accountId: syncedAccount.id,
+        afterRefreshId: existingConfig.providerSyncState?.cursor ?? null,
+        initialDays: effectiveConfig.transactionsInitialDays
+      });
+      const removedImportedIds = transactions
+        .filter(transaction => transaction.status === "void")
+        .map(transaction => transaction.id);
+      const syncedTransactions = transactions
+        .map(transaction => normalizeStripeTransaction(transaction))
+        .filter((transaction): transaction is ProviderSyncTransaction => Boolean(transaction));
+
+      await database.connection.update({
+        where: {
+          id: link.connection.id
+        },
+        data: {
+          status: "ACTIVE",
+          lastRefreshedAt: new Date(),
+          metadataJson: JSON.stringify({
+            ...connectionMetadata,
+            health: clearSyncHealth()
+          } satisfies StripeConnectionMetadata)
+        }
+      });
+
+      return sanitizeProviderSyncResult({
+        imported: syncedTransactions.length,
+        transactions: syncedTransactions,
+        removedImportedIds,
+        configPatch: {
+          providerSyncState: {
+            cursor: syncedAccount.transaction_refresh?.id ?? existingConfig.providerSyncState?.cursor ?? null,
+            windowStartDate: null,
+            windowEndDate: null
+          }
+        }
+      });
+    } catch (error) {
+      const metadata = parseConnectionMetadata(link.connection.metadataJson);
+      const health = toSyncHealth(classifyStripeError(error));
+      await database.connection.update({
+        where: {
+          id: link.connection.id
+        },
+        data: {
+          status: "ERROR",
+          metadataJson: JSON.stringify({
+            ...metadata,
+            health
+          } satisfies StripeConnectionMetadata)
+        }
+      });
+      throw classifyStripeError(error);
+    }
+  };
+
   return {
     provider: "STRIPE",
 
     isConfigured() {
       return false;
+    },
+
+    async webhooksConfigured() {
+      const effectiveConfig = await getEffectiveConfig();
+      const activeConfig = getActiveStripeEnvironmentSettings(effectiveConfig);
+      return activeConfig.webhookSigningSecrets.length > 0;
+    },
+
+    async constructWebhookEvent(rawBody: Buffer | string, signatureHeader: string | string[] | undefined) {
+      const effectiveConfig = await getEffectiveConfig();
+      const activeConfig = getActiveStripeEnvironmentSettings(effectiveConfig);
+      if (activeConfig.webhookSigningSecrets.length === 0) {
+        return null;
+      }
+
+      const signatureValue = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+      if (!signatureValue) {
+        return null;
+      }
+
+      const stripe = getStripeClient(effectiveConfig);
+      const payload = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody, "utf8");
+
+      for (const secret of activeConfig.webhookSigningSecrets) {
+        try {
+          return stripe.webhooks.constructEvent(payload, signatureValue, secret);
+        } catch {
+          continue;
+        }
+      }
+
+      return null;
+    },
+
+    async getAuthorization(authorizationId: string) {
+      const effectiveConfig = await getEffectiveConfig();
+      const stripe = getStripeClient(effectiveConfig);
+      return retrieveStripeAuthorization(stripe, authorizationId);
+    },
+
+    async syncAccountLinkFromWebhook(linkId: string) {
+      return syncStripeAccountLink({
+        linkId,
+        skipRefresh: true
+      });
     },
 
     async createConnectSession(userId: string) {
@@ -902,109 +1079,10 @@ export function createStripeService({
     },
 
     async syncAccountLink(linkId: string): Promise<ProviderSyncResult> {
-      const effectiveConfig = await getEffectiveConfig();
-      const stripe = getStripeClient(effectiveConfig);
-      const link = await database.accountLink.findUniqueOrThrow({
-        where: {
-          id: linkId
-        },
-        include: {
-          connection: true,
-          connectionAccount: true
-        }
+      return syncStripeAccountLink({
+        linkId,
+        skipRefresh: false
       });
-
-      if (!link.connection || !link.connectionAccount) {
-        return {
-          imported: 0,
-          transactions: [],
-          removedImportedIds: [],
-          configPatch: {}
-        };
-      }
-
-      try {
-        const connectionMetadata = parseConnectionMetadata(link.connection.metadataJson);
-        const account = await retrieveStripeAccount(stripe, link.connectionAccount.externalAccountId);
-        const refreshedAccount = await refreshStripeAccountData({
-          stripe,
-          account,
-          includeBalance: Boolean(account.permissions?.includes("balances")),
-          includeTransactions: true
-        });
-
-        await database.connectionAccount.update({
-          where: {
-            id: link.connectionAccount.id
-          },
-          data: {
-            name: refreshedAccount.display_name || refreshedAccount.institution_name || link.connectionAccount.name,
-            mask: refreshedAccount.last4 || null,
-            type: refreshedAccount.category || link.connectionAccount.type,
-            subtype: refreshedAccount.subcategory || null,
-            currentBalance: getPrimaryBalanceValue(refreshedAccount.balance?.current),
-            availableBalance: getPrimaryBalanceValue(refreshedAccount.balance?.cash?.available),
-            rawJson: JSON.stringify(refreshedAccount)
-          }
-        });
-
-        const existingConfig = parseLinkConfig(link.configJson);
-        const transactions = await listStripeTransactions({
-          stripe,
-          accountId: refreshedAccount.id,
-          afterRefreshId: existingConfig.providerSyncState?.cursor ?? null,
-          initialDays: effectiveConfig.transactionsInitialDays
-        });
-        const removedImportedIds = transactions
-          .filter(transaction => transaction.status === "void")
-          .map(transaction => transaction.id);
-        const syncedTransactions = transactions
-          .map(transaction => normalizeStripeTransaction(transaction))
-          .filter((transaction): transaction is ProviderSyncTransaction => Boolean(transaction));
-
-        await database.connection.update({
-          where: {
-            id: link.connection.id
-          },
-          data: {
-            status: "ACTIVE",
-            lastRefreshedAt: new Date(),
-            metadataJson: JSON.stringify({
-              ...connectionMetadata,
-              health: clearSyncHealth()
-            } satisfies StripeConnectionMetadata)
-          }
-        });
-
-        return sanitizeProviderSyncResult({
-          imported: syncedTransactions.length,
-          transactions: syncedTransactions,
-          removedImportedIds,
-          configPatch: {
-            providerSyncState: {
-              cursor: refreshedAccount.transaction_refresh?.id ?? existingConfig.providerSyncState?.cursor ?? null,
-              windowStartDate: null,
-              windowEndDate: null
-            }
-          }
-        });
-      } catch (error) {
-        const metadata = parseConnectionMetadata(link.connection.metadataJson);
-        const health = toSyncHealth(classifyStripeError(error));
-        await database.connection.update({
-          where: {
-            id: link.connection.id
-          },
-          data: {
-            status: "ERROR",
-            metadataJson: JSON.stringify({
-              ...metadata,
-              health
-            } satisfies StripeConnectionMetadata)
-          }
-        });
-        throw classifyStripeError(error);
-      }
     }
   };
 }

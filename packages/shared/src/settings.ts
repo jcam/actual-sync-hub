@@ -35,10 +35,12 @@ export type StripeProviderSettingsDto = {
   test: {
     publishableKey: string;
     secretKey: string;
+    webhookSigningSecrets: string[];
   };
   live: {
     publishableKey: string;
     secretKey: string;
+    webhookSigningSecrets: string[];
   };
   countryCodes: string[];
   permissions: StripeFinancialConnectionsPermission[];

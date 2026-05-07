@@ -32,7 +32,7 @@ import type {
   ActualExternalSyncMetadataInput,
   ReconcileTransactionInput
 } from "./actual-service.js";
-import { getTellerMetadata, parseConnectionMetadata } from "./connection-metadata.js";
+import { getStripeMetadata, getTellerMetadata, parseConnectionMetadata } from "./connection-metadata.js";
 import { learnCategoryMappingsFromHistory, pruneImportedTransactionLedger } from "./imported-transaction-ledger.js";
 import { CURRENT_LINK_STATUSES, linkIdentityChanged, parseLinkConfig, selectCurrentLink, serializeLinkConfig, toLinkDto } from "./link-config.js";
 import type { LinkConfigData } from "./link-config.js";
@@ -62,6 +62,7 @@ import type { ProviderAdapter, ProviderSyncOutcome, ProviderSyncResult, Provider
 import { clearSyncHealth, isBlockingSyncHealth, isRateLimitedSyncError, toSyncHealth } from "./sync-health.js";
 import { homeValuesService } from "./home-values-service.js";
 import type { HomeValuesService } from "./home-values-service.js";
+import type Stripe from "stripe";
 
 type DatabaseClient = typeof prisma;
 type ActualService = typeof actualService;
@@ -204,6 +205,7 @@ export type AppService = {
   runAccountSync(actualAccountId: string): Promise<AppliedSyncOutcome | void>;
   runScheduledLinkSyncs(linkIds: string[]): Promise<void>;
   handleTellerWebhook(event: TellerWebhookEvent): Promise<void>;
+  handleStripeWebhook(event: Stripe.Event): Promise<void>;
   previewAccountSyncReview(actualAccountId: string): Promise<MigrationPreviewDto>;
   commitAccountSyncReview(actualAccountId: string, payload: CommitMigrationPayload): Promise<void>;
   listSyncRuns(limit?: number): Promise<SyncRunDto[]>;
@@ -440,6 +442,44 @@ export function createAppService({
         ]
       }
     ];
+  };
+
+  const getStripeWebhookTimestamp = (event: Stripe.Event) =>
+    Number.isFinite(event.created) ? new Date(event.created * 1000).toISOString() : now().toISOString();
+
+  const findStripeConnectionForWebhook = async (account: Stripe.FinancialConnections.Account) => {
+    if (!account.id && !account.authorization) {
+      return null;
+    }
+
+    return database.connection.findFirst({
+      where: {
+        provider: "STRIPE",
+        OR: [
+          ...(account.authorization
+            ? [
+                {
+                  providerItemId: account.authorization
+                }
+              ]
+            : []),
+          ...(account.id
+            ? [
+                {
+                  accounts: {
+                    some: {
+                      externalAccountId: account.id
+                    }
+                  }
+                }
+              ]
+            : [])
+        ]
+      },
+      include: {
+        accounts: true
+      }
+    });
   };
 
   const runWithProviderBackgroundGate = async <T>(provider: Provider, task: () => Promise<T>) => {
@@ -2392,6 +2432,305 @@ export function createAppService({
       });
 
       await this.runScheduledLinkSyncs(eligibleLinks.map(link => link.id));
+    },
+
+    async handleStripeWebhook(event: Stripe.Event) {
+      if (!event.type.startsWith("financial_connections.account.")) {
+        return;
+      }
+
+      const account = event.data.object;
+      if (!account || typeof account !== "object" || !("object" in account) || account.object !== "financial_connections.account") {
+        return;
+      }
+
+      const connection = await findStripeConnectionForWebhook(account);
+      if (!connection) {
+        return;
+      }
+
+      const metadata = parseConnectionMetadata(connection.metadataJson);
+      const stripeMetadata = getStripeMetadata(metadata);
+      const existingAccountIds = Array.isArray(stripeMetadata.accountIds)
+        ? stripeMetadata.accountIds.filter((value): value is string => typeof value === "string" && value.length > 0)
+        : [];
+      const nextAccountIds = account.id ? [...new Set([...existingAccountIds, account.id])] : existingAccountIds;
+      const webhookTimestamp = getStripeWebhookTimestamp(event);
+      const nextStripeMetadata = {
+        ...stripeMetadata,
+        accountIds: nextAccountIds,
+        authorizationId:
+          typeof account.authorization === "string"
+            ? account.authorization
+            : typeof stripeMetadata.authorizationId === "string"
+              ? stripeMetadata.authorizationId
+              : connection.providerItemId ?? null,
+        lastWebhookAt: webhookTimestamp,
+        lastWebhookEventId: event.id,
+        lastWebhookType: event.type
+      };
+
+      if (event.type === "financial_connections.account.deactivated") {
+        const authorization =
+          typeof account.authorization === "string" ? await stripe.getAuthorization(account.authorization) : null;
+        const relinkRequired =
+          authorization?.status === "inactive" &&
+          authorization.status_details.inactive?.action === "relink_required";
+
+        await database.connection.update({
+          where: {
+            id: connection.id
+          },
+          data: {
+            status: "ERROR",
+            metadataJson: JSON.stringify({
+              ...metadata,
+              stripe: {
+                ...nextStripeMetadata,
+                lastDeactivatedAt: webhookTimestamp
+              },
+              health: {
+                state: relinkRequired ? "REAUTH_REQUIRED" : "ATTENTION_REQUIRED",
+                scope: "BANK_AUTH",
+                action: "MANUAL_RECONNECT",
+                code: relinkRequired ? "ACCOUNT_RELINK_REQUIRED" : "ACCOUNT_INACTIVE",
+                message: relinkRequired
+                  ? "Stripe account needs to be reauthenticated."
+                  : "Stripe Financial Connections account became inactive.",
+                updatedAt: webhookTimestamp
+              }
+            })
+          }
+        });
+        return;
+      }
+
+      if (event.type === "financial_connections.account.reactivated") {
+        await database.connection.update({
+          where: {
+            id: connection.id
+          },
+          data: {
+            status: "ACTIVE",
+            metadataJson: JSON.stringify({
+              ...metadata,
+              stripe: {
+                ...nextStripeMetadata,
+                lastReactivatedAt: webhookTimestamp
+              },
+              health: clearSyncHealth()
+            })
+          }
+        });
+        return;
+      }
+
+      if (event.type === "financial_connections.account.disconnected") {
+        await database.connection.update({
+          where: {
+            id: connection.id
+          },
+          data: {
+            status: "DISCONNECTED",
+            metadataJson: JSON.stringify({
+              ...metadata,
+              stripe: {
+                ...nextStripeMetadata,
+                lastDisconnectedAt: webhookTimestamp
+              },
+              health: {
+                state: "REAUTH_REQUIRED",
+                scope: "CONNECTION_AUTH",
+                action: "MANUAL_RECONNECT",
+                code: "ACCOUNT_DISCONNECTED",
+                message: "Stripe Financial Connections account was disconnected.",
+                updatedAt: webhookTimestamp
+              }
+            })
+          }
+        });
+
+        await database.accountLink.updateMany({
+          where: {
+            connectionId: connection.id,
+            status: {
+              in: ["ACTIVE", "MIGRATING"]
+            }
+          },
+          data: {
+            isEnabled: false
+          }
+        });
+        return;
+      }
+
+      if (event.type === "financial_connections.account.created") {
+        await database.connection.update({
+          where: {
+            id: connection.id
+          },
+          data: {
+            metadataJson: JSON.stringify({
+              ...metadata,
+              stripe: {
+                ...nextStripeMetadata,
+                lastCreatedAt: webhookTimestamp
+              }
+            })
+          }
+        });
+        return;
+      }
+
+      const refreshMetadata =
+        event.type === "financial_connections.account.refreshed_balance"
+          ? {
+              lastBalanceRefreshWebhookAt: webhookTimestamp,
+              lastBalanceRefreshStatus: account.balance_refresh?.status ?? null
+            }
+          : event.type === "financial_connections.account.refreshed_ownership"
+            ? {
+                lastOwnershipRefreshWebhookAt: webhookTimestamp,
+                lastOwnershipRefreshStatus: account.ownership_refresh?.status ?? null
+              }
+            : event.type === "financial_connections.account.refreshed_transactions"
+              ? {
+                  lastTransactionRefreshWebhookAt: webhookTimestamp,
+                  lastTransactionRefreshId: account.transaction_refresh?.id ?? null,
+                  lastTransactionRefreshStatus: account.transaction_refresh?.status ?? null
+                }
+              : null;
+
+      if (!refreshMetadata) {
+        return;
+      }
+
+      await database.connection.update({
+        where: {
+          id: connection.id
+        },
+        data: {
+          metadataJson: JSON.stringify({
+            ...metadata,
+            stripe: {
+              ...nextStripeMetadata,
+              ...refreshMetadata
+            }
+          })
+        }
+      });
+
+      if (event.type !== "financial_connections.account.refreshed_transactions" || account.transaction_refresh?.status !== "succeeded") {
+        return;
+      }
+
+      const refreshId = account.transaction_refresh?.id ?? null;
+      if (!refreshId) {
+        return;
+      }
+
+      const eligibleLinks = await database.accountLink.findMany({
+        where: {
+          connectionId: connection.id,
+          provider: "STRIPE",
+          status: "ACTIVE",
+          isEnabled: true,
+          syncFrequency: {
+            not: "MANUAL"
+          },
+          connectionAccount: {
+            is: {
+              externalAccountId: account.id
+            }
+          }
+        },
+        include: currentLinkInclude
+      });
+
+      const pendingLinks = eligibleLinks.filter(link => parseLinkConfig(link.configJson).providerSyncState?.cursor !== refreshId);
+      if (pendingLinks.length === 0) {
+        await database.connection.update({
+          where: {
+            id: connection.id
+          },
+          data: {
+            metadataJson: JSON.stringify({
+              ...metadata,
+              stripe: {
+                ...nextStripeMetadata,
+                ...refreshMetadata,
+                lastTransactionWebhookSyncSkippedAt: now().toISOString(),
+                lastTransactionWebhookSyncSkipReason: "cursor_already_applied"
+              }
+            })
+          }
+        });
+        return;
+      }
+
+      const webhookSyncStartedAt = now().toISOString();
+      await database.connection.update({
+        where: {
+          id: connection.id
+        },
+        data: {
+          metadataJson: JSON.stringify({
+            ...metadata,
+            stripe: {
+              ...nextStripeMetadata,
+              ...refreshMetadata,
+              lastTransactionWebhookSyncStartedAt: webhookSyncStartedAt,
+              lastTransactionWebhookSyncRefreshId: refreshId
+            }
+          })
+        }
+      });
+
+      for (const link of pendingLinks) {
+        const syncRun = await createSyncRunForLink(link);
+
+        try {
+          const syncResult = await runWithProviderBackgroundGate("STRIPE", () => stripe.syncAccountLinkFromWebhook(link.id));
+          await applySyncResultToLink({
+            link,
+            syncRunId: syncRun.id,
+            syncResult
+          });
+        } catch (error) {
+          await markSyncRunFailure({
+            link,
+            syncRunId: syncRun.id,
+            error,
+            automatic: true
+          });
+        }
+      }
+
+      const latestConnection = await database.connection.findUniqueOrThrow({
+        where: {
+          id: connection.id
+        },
+        select: {
+          metadataJson: true
+        }
+      });
+      const latestMetadata = parseConnectionMetadata(latestConnection.metadataJson);
+
+      await database.connection.update({
+        where: {
+          id: connection.id
+        },
+        data: {
+          metadataJson: JSON.stringify({
+            ...latestMetadata,
+            stripe: {
+              ...getStripeMetadata(latestMetadata),
+              lastTransactionWebhookSyncedAt: now().toISOString(),
+              lastTransactionWebhookSyncRefreshId: refreshId
+            }
+          })
+        }
+      });
     },
 
     getExternalSyncBridgeStatus,

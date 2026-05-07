@@ -195,6 +195,37 @@ export async function registerRoutes(
     };
   });
 
+  await app.register(async stripeWebhookApp => {
+    stripeWebhookApp.addContentTypeParser("application/json", { parseAs: "buffer" }, (_request, body, done) => {
+      done(null, body);
+    });
+
+    stripeWebhookApp.post("/api/webhooks/stripe", async (request, reply) => {
+      const stripeService = context.stripeService;
+      if (!stripeService || !(await stripeService.webhooksConfigured())) {
+        return reply.status(503).send({
+          error: "Stripe webhooks are not configured"
+        });
+      }
+
+      const rawBody = Buffer.isBuffer(request.body)
+        ? request.body
+        : Buffer.from(typeof request.body === "string" ? request.body : "", "utf8");
+      const event = await stripeService.constructWebhookEvent(rawBody, request.headers["stripe-signature"]);
+
+      if (!event) {
+        return reply.status(401).send({
+          error: "Invalid Stripe webhook signature"
+        });
+      }
+
+      await context.appService.handleStripeWebhook(event);
+      return {
+        ok: true
+      };
+    });
+  });
+
   app.get("/api/auth/session", async request => ({
     authenticated: Boolean(request.session.user),
     username: request.session.user?.username
