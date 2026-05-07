@@ -515,7 +515,7 @@ async function main() {
             result: accounts.map((account: APIAccountEntity) => ({
               id: account.id,
               name: account.name,
-              balance: integerToAmount(account.balance_current),
+              balance: integerToAmount(account.balance_current) ?? 0,
               offbudget: account.offbudget,
               closed: account.closed
             }))

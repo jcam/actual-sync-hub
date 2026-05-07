@@ -15,6 +15,7 @@ export function AccountCard({
   account: ActualAccountDto;
   onRefresh: () => Promise<void>;
 }) {
+  const displayBalance = typeof account.balance === "number" && Number.isFinite(account.balance) ? account.balance : 0;
   const [form, setForm] = useState<Pick<
     UpdateAccountLinkPayload,
     "provider" | "connectionId" | "connectionAccountId" | "syncFrequency" | "syncHour" | "syncDayOfWeek" | "isEnabled"
@@ -71,7 +72,7 @@ export function AccountCard({
         <div>
           <p className="eyebrow">Actual account</p>
           <h3>{account.name}</h3>
-          <p className="balance">${account.balance.toFixed(2)}</p>
+          <p className="balance">${displayBalance.toFixed(2)}</p>
         </div>
         <div className="status-row">
           {account.link.status === "MIGRATING" ? <span className="pill">Migrating</span> : null}

@@ -128,6 +128,20 @@ describe("AccountCard", () => {
     );
   });
 
+  it("renders a zero balance when the account balance is missing", async () => {
+    renderWithRouter(
+      <AccountCard
+        account={{
+          ...account,
+          balance: null as never
+        }}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
+  });
+
   it("shows a migration review link when the current link is migrating", async () => {
     renderWithRouter(
       <AccountCard
