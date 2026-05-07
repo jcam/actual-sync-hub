@@ -7,7 +7,7 @@ import { parseLinkConfig } from "./link-config.js";
 import { providerFixtureCache } from './provider-fixture-cache.js';
 import type { ProviderFixtureCache } from './provider-fixture-cache.js';
 import type { ProviderAdapter, ProviderSyncOutcome, ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
-import { buildImportedTransactionNotes } from "./provider-sync-helpers.js";
+import { buildImportedTransactionNotes, sanitizeProviderSyncResult } from "./provider-sync-helpers.js";
 import { createProviderSettingsService } from './provider-settings-service.js';
 import type { ProviderSettingsService } from './provider-settings-service.js';
 import { clearSyncHealth, ProviderOperationError, toSyncHealth } from "./sync-health.js";
@@ -718,7 +718,7 @@ export function createSimpleFinService({
               startDate: plan.startDate
             });
             outcomes.set(plan.link.id, {
-              result: {
+              result: sanitizeProviderSyncResult({
                 imported: transactions.length,
                 transactions,
                 removedImportedIds: [],
@@ -729,7 +729,7 @@ export function createSimpleFinService({
                     windowEndDate: plan.endDate
                   }
                 }
-              }
+              })
             });
           }
         } catch (error) {

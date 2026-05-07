@@ -132,7 +132,7 @@ describe.sequential("teller service", () => {
         importedPayee: "Coffee Shop",
         notes: undefined,
         payeeName: "Coffee Shop",
-        searchText: ["Coffee Shop", "Coffee Shop", "card_payment"]
+        searchText: ["Coffee Shop", "card_payment"]
       },
       {
         amount: 250,

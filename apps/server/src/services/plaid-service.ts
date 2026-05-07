@@ -15,7 +15,7 @@ import { parseLinkConfig } from "./link-config.js";
 import { createProviderSettingsService } from "./provider-settings-service.js";
 import type { ProviderSettingsService } from "./provider-settings-service.js";
 import type { ProviderAdapter, ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
-import { buildImportedTransactionNotes } from "./provider-sync-helpers.js";
+import { buildImportedTransactionNotes, sanitizeProviderSyncResult } from "./provider-sync-helpers.js";
 import { clearSyncHealth, ProviderOperationError, toSyncHealth } from "./sync-health.js";
 type DatabaseClient = typeof prisma;
 
@@ -578,7 +578,7 @@ export function createPlaidService({
         }
       });
 
-      return {
+      return sanitizeProviderSyncResult({
         imported: relevant.length,
         transactions: relevant,
         removedImportedIds: [...removedImportedIds],
@@ -589,7 +589,7 @@ export function createPlaidService({
             windowEndDate: null
           }
         }
-      };
+      });
     },
 
     async seedSandboxConnection(label?: string) {

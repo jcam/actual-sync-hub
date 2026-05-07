@@ -147,15 +147,27 @@ Coverage includes:
 - Scheduler unit tests for sync cadence logic
 - Frontend component/page tests with React Testing Library
 
-Plaid testing is split into two layers:
+Provider live validation is split into two layers:
 
 - Default mocked tests for routes and service orchestration. These are fast, deterministic, and always run in `npm test`.
-- Optional live Sandbox tests for the Plaid adapter itself. These only run when `PLAID_TEST_RUN_LIVE=1` and Sandbox credentials are provided.
+- Optional live provider smoke tests for the Plaid, Teller, and SimpleFIN adapters. These only run when their `*_TEST_RUN_LIVE=1` gate is enabled and the required provider credentials are present.
 
 Run the optional live Plaid test:
 
 ```bash
 npm run test:plaid-live
+```
+
+Run the optional live Teller test:
+
+```bash
+npm run test:teller-live
+```
+
+Run the optional live SimpleFIN test:
+
+```bash
+npm run test:simplefin-live
 ```
 
 Run the full end-to-end live sync test:
@@ -171,6 +183,19 @@ Environment for live Plaid tests:
 - `PLAID_TEST_SECRET`
 - `PLAID_TEST_ENV=sandbox`
 - `FULL_SYNC_TEST_RUN_LIVE=1` for the cross-system end-to-end sync test
+
+Environment for live Teller tests:
+
+- `TELLER_TEST_RUN_LIVE=1`
+- `TELLER_TEST_APP_ID`
+- `TELLER_TEST_SANDBOX_ACCESS_TOKEN`
+- optional `TELLER_TEST_ACCOUNT_ID` to target a specific provider account
+
+Environment for live SimpleFIN tests:
+
+- `SIMPLEFIN_TEST_RUN_LIVE=1`
+- `SIMPLEFIN_TEST_ACCESS_KEY`
+- optional `SIMPLEFIN_TEST_ACCOUNT_ID` to target a specific provider account
 
 As of May 4, 2026, Plaid’s official guidance is to use Sandbox for automated development testing and to bypass Link in automated tests with `/sandbox/public_token/create`, rather than scripting the Link UI. For testing with real bank data, Plaid recommends Limited Production or Production instead of Sandbox.
 

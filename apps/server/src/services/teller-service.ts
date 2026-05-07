@@ -12,7 +12,7 @@ import type { ProviderFixtureCache } from './provider-fixture-cache.js';
 import { createProviderSettingsService } from './provider-settings-service.js';
 import type { ProviderSettingsService } from './provider-settings-service.js';
 import type { ProviderAdapter, ProviderSyncResult } from "./provider-adapter.js";
-import { buildImportedTransactionNotes } from "./provider-sync-helpers.js";
+import { buildImportedTransactionNotes, sanitizeProviderSyncResult } from "./provider-sync-helpers.js";
 import { clearSyncHealth, ProviderOperationError, toSyncHealth } from "./sync-health.js";
 
 type DatabaseClient = typeof prisma;
@@ -922,7 +922,7 @@ export function createTellerService({
           }
         });
 
-        return {
+        return sanitizeProviderSyncResult({
           imported: tellerTransactions.length,
           transactions: tellerTransactions.map(transaction => {
             const counterpartyName = transaction.details?.counterparty?.name?.trim() || undefined;
@@ -953,7 +953,7 @@ export function createTellerService({
               windowEndDate: endDate
             }
           }
-        };
+        });
       } catch (error) {
         const metadata = parseConnectionMetadata(link.connection.metadataJson);
         const health = toSyncHealth(classifyTellerError(error));

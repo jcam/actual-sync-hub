@@ -1,6 +1,6 @@
 import type { ActualCategoryDto, CategoryMappingDto } from "@actual-sync/shared";
 import type { ImportTransactionInput, PreviewImportMatchRecord, ReconcileTransactionInput } from "./actual-service.js";
-import type { ProviderSyncTransaction } from "./provider-adapter.js";
+import type { ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
 import { resolveActualCategoryId } from "./category-matching.js";
 
 function normalizeMatchText(value: string) {
@@ -54,6 +54,56 @@ export function buildImportedTransactionNotes({
   });
 
   return parts.length > 0 ? parts.join("\n") : undefined;
+}
+
+export function sanitizeProviderSyncResult(result: ProviderSyncResult): ProviderSyncResult {
+  const sanitizedTransactions: ProviderSyncTransaction[] = [];
+  const indexByImportedId = new Map<string, number>();
+
+  for (const transaction of result.transactions) {
+    const importedId = transaction.importedId.trim();
+    const date = transaction.date.trim();
+    const payeeName = transaction.payeeName.trim();
+
+    if (!importedId || !date || !payeeName) {
+      continue;
+    }
+
+    const sanitizedTransaction = {
+      ...transaction,
+      importedId,
+      date,
+      payeeName,
+      importedPayee: transaction.importedPayee?.trim() || undefined,
+      notes: transaction.notes?.trim() || undefined,
+      categoryNames: transaction.categoryNames
+        ? [...new Set(transaction.categoryNames.map(value => value.trim()).filter(Boolean))]
+        : undefined,
+      searchText: transaction.searchText
+        ? [...new Set(transaction.searchText.map(value => value.trim()).filter(Boolean))]
+        : undefined
+    } satisfies ProviderSyncTransaction;
+
+    const existingIndex = indexByImportedId.get(importedId);
+    if (existingIndex == null) {
+      indexByImportedId.set(importedId, sanitizedTransactions.length);
+      sanitizedTransactions.push(sanitizedTransaction);
+    } else {
+      sanitizedTransactions[existingIndex] = sanitizedTransaction;
+    }
+  }
+
+  const keptImportedIds = new Set(sanitizedTransactions.map(transaction => transaction.importedId));
+  const removedImportedIds = [
+    ...new Set(result.removedImportedIds.map(importedId => importedId.trim()).filter(Boolean))
+  ].filter(importedId => !keptImportedIds.has(importedId));
+
+  return {
+    ...result,
+    imported: sanitizedTransactions.length,
+    transactions: sanitizedTransactions,
+    removedImportedIds
+  };
 }
 
 export function getPrimarySourceCategory(transaction: ProviderSyncTransaction) {
