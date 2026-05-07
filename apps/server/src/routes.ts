@@ -17,7 +17,7 @@ const connectionIdParamsSchema = z.object({
 });
 
 const providerParamsSchema = z.object({
-  provider: z.enum(["PLAID", "TELLER", "SIMPLEFIN", "SALT_EDGE", "HOME_VALUES"])
+  provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "SALT_EDGE", "HOME_VALUES"])
 });
 
 const externalSyncStatusQuerySchema = z.object({
@@ -101,7 +101,7 @@ function wrapActualBridgeResponse<T>(data: T) {
 
 export async function registerRoutes(
   app: FastifyInstance,
-  context: Pick<AppContext, "authService" | "appService" | "plaidService" | "providerSettingsService" | "simplefinService" | "tellerService">
+  context: Pick<AppContext, "authService" | "appService" | "plaidService" | "providerSettingsService" | "simplefinService" | "stripeService" | "tellerService">
 ) {
   const registerReviewRoutes = (prefix: "migration" | "sync-review") => {
     app.get(`/api/account-links/:actualAccountId/${prefix}/preview`, async (request, reply) => {
@@ -298,6 +298,49 @@ export async function registerRoutes(
       .parse(request.body);
 
     return await context.plaidService.exchangePublicToken(body.publicToken, body.label);
+  });
+
+  app.post("/api/connections/stripe/session", async (request, reply) => {
+    if (!assertAuthenticated(request, reply)) {
+      return;
+    }
+
+    return context.stripeService!.createConnectSession(request.session.user!.id);
+  });
+
+  app.post("/api/connections/stripe/finalize", async (request, reply) => {
+    if (!assertAuthenticated(request, reply)) {
+      return;
+    }
+
+    const body = z
+      .object({
+        sessionId: z.string().min(1).optional(),
+        label: z.string().min(1).optional(),
+        accountIds: z.array(z.string().min(1)).min(1)
+      })
+      .parse(request.body ?? {});
+
+    return context.stripeService!.finalizeAccounts(body);
+  });
+
+  app.post("/api/connections/:id/stripe/reauth-finalize", async (request, reply) => {
+    if (!assertAuthenticated(request, reply)) {
+      return;
+    }
+
+    const params = connectionIdParamsSchema.parse(request.params);
+    const body = z
+      .object({
+        sessionId: z.string().min(1).optional(),
+        accountIds: z.array(z.string().min(1)).min(1)
+      })
+      .parse(request.body ?? {});
+
+    return context.stripeService!.finalizeReauthSession({
+      connectionId: params.id,
+      ...body
+    });
   });
 
   app.post("/api/connections/simplefin/connect", async (request, reply) => {
@@ -543,7 +586,7 @@ export async function registerRoutes(
       .object({
         actualAccountName: z.string().min(1),
         assetType: z.literal("BANK"),
-        provider: z.enum(["PLAID", "TELLER", "SIMPLEFIN", "SALT_EDGE", "HOME_VALUES"]).nullable().optional(),
+        provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "SALT_EDGE", "HOME_VALUES"]).nullable().optional(),
         connectionId: z.string().nullable().optional(),
         connectionAccountId: z.string().nullable().optional(),
         syncFrequency: z.enum(["MANUAL", "HOURLY", "DAILY", "WEEKLY"]),

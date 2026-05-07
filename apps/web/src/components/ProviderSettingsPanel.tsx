@@ -23,6 +23,19 @@ type PlaidSettingsDraft = {
   automaticSyncConcurrency: string;
 };
 
+type StripeSettingsDraft = {
+  environment: "test" | "live";
+  testPublishableKey: string;
+  testSecretKey: string;
+  livePublishableKey: string;
+  liveSecretKey: string;
+  countryCodes: string;
+  permissions: string;
+  prefetch: string;
+  transactionsInitialDays: string;
+  automaticSyncConcurrency: string;
+};
+
 type TellerSettingsDraft = {
   environment: "sandbox" | "development" | "production";
   sandboxAppId: string;
@@ -69,6 +82,7 @@ type HomeValuesSettingsDraft = {
 
 type ProviderSettingsDraft =
   | PlaidSettingsDraft
+  | StripeSettingsDraft
   | TellerSettingsDraft
   | SimpleFinSettingsDraft
   | SaltEdgeSettingsDraft
@@ -150,6 +164,28 @@ function validateDraft(provider: Provider, draft: ProviderSettingsDraft) {
         requireIntegerInRange("Webhook tolerance", tellerDraft.webhookToleranceSeconds, 1, 900)
       );
     }
+    case "STRIPE": {
+      const stripeDraft = draft as StripeSettingsDraft;
+      const publishableKey =
+        stripeDraft.environment === "test" ? stripeDraft.testPublishableKey : stripeDraft.livePublishableKey;
+      const secretKey = stripeDraft.environment === "test" ? stripeDraft.testSecretKey : stripeDraft.liveSecretKey;
+      if (!publishableKey.trim()) {
+        return "Publishable key is required.";
+      }
+      if (!secretKey.trim()) {
+        return "Secret key is required.";
+      }
+      if (splitCsvField(stripeDraft.countryCodes).length === 0) {
+        return "Country codes must include at least one value.";
+      }
+      if (splitLineOrCsvField(stripeDraft.permissions).length === 0) {
+        return "Permissions must include at least one value.";
+      }
+      return (
+        requireIntegerInRange("Initial transaction window", stripeDraft.transactionsInitialDays, 1, 180) ??
+        requireIntegerInRange("Automatic sync concurrency", stripeDraft.automaticSyncConcurrency, 1, 20)
+      );
+    }
     case "SIMPLEFIN": {
       const simpleFinDraft = draft as SimpleFinSettingsDraft;
       if (simpleFinDraft.mode === "development") {
@@ -206,6 +242,21 @@ function toDraft<T extends Provider>(
         personalFinanceCategoryVersion: plaidSettings.personalFinanceCategoryVersion,
         automaticSyncConcurrency: String(plaidSettings.automaticSyncConcurrency)
       } satisfies PlaidSettingsDraft;
+    }
+    case "STRIPE": {
+      const stripeSettings = settings as ProviderSettingsByProviderDto<"STRIPE">;
+      return {
+        environment: stripeSettings.environment ?? "test",
+        testPublishableKey: stripeSettings.test?.publishableKey ?? "",
+        testSecretKey: stripeSettings.test?.secretKey ?? "",
+        livePublishableKey: stripeSettings.live?.publishableKey ?? "",
+        liveSecretKey: stripeSettings.live?.secretKey ?? "",
+        countryCodes: (stripeSettings.countryCodes ?? []).join(", "),
+        permissions: (stripeSettings.permissions ?? []).join(", "),
+        prefetch: (stripeSettings.prefetch ?? []).join(", "),
+        transactionsInitialDays: String(stripeSettings.transactionsInitialDays),
+        automaticSyncConcurrency: String(stripeSettings.automaticSyncConcurrency)
+      } satisfies StripeSettingsDraft;
     }
     case "TELLER": {
       const tellerSettings = settings as ProviderSettingsByProviderDto<"TELLER">;
@@ -298,6 +349,25 @@ function toPayload<T extends Provider>(
         transactionsDaysRequested: Number(plaidDraft.transactionsDaysRequested),
         personalFinanceCategoryVersion: plaidDraft.personalFinanceCategoryVersion,
         automaticSyncConcurrency: Number(plaidDraft.automaticSyncConcurrency)
+      } as ProviderSettingsByProviderDto<T>;
+    }
+    case "STRIPE": {
+      const stripeDraft = draft as StripeSettingsDraft;
+      return {
+        environment: stripeDraft.environment,
+        test: {
+          publishableKey: stripeDraft.testPublishableKey.trim(),
+          secretKey: stripeDraft.testSecretKey
+        },
+        live: {
+          publishableKey: stripeDraft.livePublishableKey.trim(),
+          secretKey: stripeDraft.liveSecretKey
+        },
+        countryCodes: splitCsvField(stripeDraft.countryCodes).map(code => code.toUpperCase()),
+        permissions: splitLineOrCsvField(stripeDraft.permissions) as ProviderSettingsByProviderDto<"STRIPE">["permissions"],
+        prefetch: splitLineOrCsvField(stripeDraft.prefetch) as ProviderSettingsByProviderDto<"STRIPE">["prefetch"],
+        transactionsInitialDays: Number(stripeDraft.transactionsInitialDays),
+        automaticSyncConcurrency: Number(stripeDraft.automaticSyncConcurrency)
       } as ProviderSettingsByProviderDto<T>;
     }
     case "TELLER": {
@@ -420,6 +490,7 @@ export function ProviderSettingsPanel<T extends Provider>({
   };
 
   const plaidDraft = provider === "PLAID" ? (draft as PlaidSettingsDraft) : null;
+  const stripeDraft = provider === "STRIPE" ? (draft as StripeSettingsDraft) : null;
   const tellerDraft = provider === "TELLER" ? (draft as TellerSettingsDraft) : null;
   const simpleFinDraft = provider === "SIMPLEFIN" ? (draft as SimpleFinSettingsDraft) : null;
   const saltEdgeDraft = provider === "SALT_EDGE" ? (draft as SaltEdgeSettingsDraft) : null;
@@ -561,6 +632,136 @@ export function ProviderSettingsPanel<T extends Provider>({
                   const next = event.target.value;
                   setDraft(current => ({
                     ...(current as PlaidSettingsDraft),
+                    automaticSyncConcurrency: next
+                  }));
+                }}
+              />
+            </label>
+          </>
+        ) : null}
+
+        {stripeDraft ? (
+          <>
+            <label>
+              <span>Environment</span>
+              <select
+                value={stripeDraft.environment}
+                onChange={event => {
+                  const next = event.target.value as StripeSettingsDraft["environment"];
+                  setDraft(current => ({
+                    ...(current as StripeSettingsDraft),
+                    environment: next
+                  }));
+                }}
+              >
+                <option value="test">test</option>
+                <option value="live">live</option>
+              </select>
+            </label>
+            <label>
+              <span>{stripeDraft.environment === "test" ? "Test publishable key" : "Live publishable key"}</span>
+              <input
+                type="text"
+                value={stripeDraft.environment === "test" ? stripeDraft.testPublishableKey : stripeDraft.livePublishableKey}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as StripeSettingsDraft),
+                    ...(stripeDraft.environment === "test"
+                      ? { testPublishableKey: next }
+                      : { livePublishableKey: next })
+                  }));
+                }}
+                placeholder="pk_test_..."
+              />
+            </label>
+            <label>
+              <span>{stripeDraft.environment === "test" ? "Test secret key" : "Live secret key"}</span>
+              <input
+                type="password"
+                value={stripeDraft.environment === "test" ? stripeDraft.testSecretKey : stripeDraft.liveSecretKey}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as StripeSettingsDraft),
+                    ...(stripeDraft.environment === "test" ? { testSecretKey: next } : { liveSecretKey: next })
+                  }));
+                }}
+                placeholder="sk_test_..."
+              />
+            </label>
+            <label>
+              <span>Country codes</span>
+              <input
+                type="text"
+                value={stripeDraft.countryCodes}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as StripeSettingsDraft),
+                    countryCodes: next
+                  }));
+                }}
+                placeholder="US"
+              />
+            </label>
+            <label>
+              <span>Permissions</span>
+              <input
+                type="text"
+                value={stripeDraft.permissions}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as StripeSettingsDraft),
+                    permissions: next
+                  }));
+                }}
+                placeholder="balances, transactions"
+              />
+            </label>
+            <label>
+              <span>Prefetch</span>
+              <input
+                type="text"
+                value={stripeDraft.prefetch}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as StripeSettingsDraft),
+                    prefetch: next
+                  }));
+                }}
+                placeholder="balances, transactions"
+              />
+            </label>
+            <label>
+              <span>Initial transaction window (days)</span>
+              <input
+                type="number"
+                min={1}
+                max={180}
+                value={stripeDraft.transactionsInitialDays}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as StripeSettingsDraft),
+                    transactionsInitialDays: next
+                  }));
+                }}
+              />
+            </label>
+            <label>
+              <span>Automatic sync concurrency</span>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={stripeDraft.automaticSyncConcurrency}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as StripeSettingsDraft),
                     automaticSyncConcurrency: next
                   }));
                 }}

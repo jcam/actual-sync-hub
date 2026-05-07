@@ -45,7 +45,15 @@ export type ConnectionReauthSessionDto =
       connectUrl: string;
     }
   | {
-      provider: "SIMPLEFIN";
+      provider: "STRIPE";
+      connectionId: string;
+      mode: "stripe_relink";
+      sessionId: string;
+      clientSecret: string;
+      publishableKey: string;
+    }
+  | {
+      provider: "SIMPLEFIN" | "STRIPE";
       connectionId: string;
       mode: "manual";
       message: string;

@@ -3,6 +3,7 @@ import type {
   ProviderSettingsByProviderDto,
   ProviderSettingsDto,
   SaltEdgeProviderSettingsDto,
+  StripeProviderSettingsDto,
 } from "@actual-sync/shared";
 import { z } from "zod";
 import { prisma } from "../db.js";
@@ -25,6 +26,22 @@ const plaidSettingsSchema = z.object({
   products: z.array(z.string().min(1)).min(1),
   transactionsDaysRequested: z.coerce.number().int().min(1).max(730),
   personalFinanceCategoryVersion: z.enum(["v1", "v2"]),
+  automaticSyncConcurrency: z.coerce.number().int().min(1).max(20)
+});
+
+const stripeEnvironmentSettingsSchema = z.object({
+  publishableKey: z.string(),
+  secretKey: z.string()
+});
+
+const stripeSettingsSchema = z.object({
+  environment: z.enum(["test", "live"]),
+  test: stripeEnvironmentSettingsSchema,
+  live: stripeEnvironmentSettingsSchema,
+  countryCodes: z.array(z.string().min(2)).min(1),
+  permissions: z.array(z.enum(["balances", "transactions", "ownership", "payment_method"])).min(1),
+  prefetch: z.array(z.enum(["balances", "transactions", "ownership"])),
+  transactionsInitialDays: z.coerce.number().int().min(1).max(180),
   automaticSyncConcurrency: z.coerce.number().int().min(1).max(20)
 });
 
@@ -81,6 +98,7 @@ const homeValuesSettingsSchema = z.object({
 
 export const providerSchemas = {
   PLAID: plaidSettingsSchema,
+  STRIPE: stripeSettingsSchema,
   TELLER: tellerSettingsSchema,
   SIMPLEFIN: simpleFinSettingsSchema,
   SALT_EDGE: saltEdgeSettingsSchema,
@@ -103,6 +121,22 @@ function defaultProviderSettings(): ProviderSettingsDto {
       products: ["transactions"],
       transactionsDaysRequested: 365,
       personalFinanceCategoryVersion: "v2",
+      automaticSyncConcurrency: 2
+    },
+    STRIPE: {
+      environment: "test",
+      test: {
+        publishableKey: "",
+        secretKey: ""
+      },
+      live: {
+        publishableKey: "",
+        secretKey: ""
+      },
+      countryCodes: ["US"],
+      permissions: ["balances", "transactions"],
+      prefetch: ["balances", "transactions"],
+      transactionsInitialDays: 90,
       automaticSyncConcurrency: 2
     },
     TELLER: {
@@ -185,6 +219,20 @@ type SaltEdgeProbeResponse<T> = {
   ok: boolean;
   status: number;
 };
+
+function reconcileStripeEnvironment(settings: StripeProviderSettingsDto) {
+  const hasLiveKeys = Boolean(settings.live.publishableKey.trim() && settings.live.secretKey);
+  const hasTestKeys = Boolean(settings.test.publishableKey.trim() && settings.test.secretKey);
+
+  if (settings.environment === "live" && !hasLiveKeys && hasTestKeys) {
+    return {
+      ...settings,
+      environment: "test" as const
+    };
+  }
+
+  return settings;
+}
 
 export function createProviderSettingsService({
   prisma: database = prisma,
@@ -401,6 +449,7 @@ export function createProviderSettingsService({
 
       return {
         PLAID: parseProviderSettings("PLAID", byProvider.get("PLAID")) ?? defaults.PLAID,
+        STRIPE: reconcileStripeEnvironment(parseProviderSettings("STRIPE", byProvider.get("STRIPE")) ?? defaults.STRIPE),
         TELLER: parseProviderSettings("TELLER", byProvider.get("TELLER")) ?? defaults.TELLER,
         SIMPLEFIN: parseProviderSettings("SIMPLEFIN", byProvider.get("SIMPLEFIN")) ?? defaults.SIMPLEFIN,
         SALT_EDGE: parseProviderSettings("SALT_EDGE", byProvider.get("SALT_EDGE")) ?? defaults.SALT_EDGE,
@@ -415,8 +464,14 @@ export function createProviderSettingsService({
         }
       });
 
-      return (parseProviderSettings(provider, row?.settingsJson) ??
+      const parsed = (parseProviderSettings(provider, row?.settingsJson) ??
         defaults[provider]) as ProviderSettingsByProviderDto<T>;
+
+      return (
+        provider === "STRIPE"
+          ? reconcileStripeEnvironment(parsed as ProviderSettingsByProviderDto<"STRIPE">)
+          : parsed
+      ) as ProviderSettingsByProviderDto<T>;
     },
 
     async update<T extends Provider>(provider: T, settings: ProviderSettingsByProviderDto<T>) {
@@ -424,6 +479,8 @@ export function createProviderSettingsService({
       const effective =
         provider === "SALT_EDGE"
           ? ((await reconcileSaltEdgeEnvironment(parsed as ProviderSettingsByProviderDto<"SALT_EDGE">)) as ProviderSettingsByProviderDto<T>)
+          : provider === "STRIPE"
+            ? (reconcileStripeEnvironment(parsed as ProviderSettingsByProviderDto<"STRIPE">) as ProviderSettingsByProviderDto<T>)
           : parsed;
 
       await database.providerSetting.upsert({

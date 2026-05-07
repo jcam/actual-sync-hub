@@ -9,6 +9,7 @@ datasource db {
 
 enum Provider {
   PLAID
+  STRIPE
   TELLER
   SIMPLEFIN
   SALT_EDGE

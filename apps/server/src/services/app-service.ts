@@ -18,6 +18,7 @@ import type {
 } from "@actual-sync/shared";
 import {
   getActivePlaidEnvironmentSettings,
+  getActiveStripeEnvironmentSettings,
   getSaltEdgeIncludeSandboxes,
   getActiveSimpleFinModeSettings,
   getActiveTellerEnvironmentSettings
@@ -52,6 +53,8 @@ import { simplefinService } from "./simplefin-service.js";
 import type { SimpleFinService } from "./simplefin-service.js";
 import { saltEdgeService } from "./saltedge-service.js";
 import type { SaltEdgeService } from "./saltedge-service.js";
+import { stripeService } from "./stripe-service.js";
+import type { StripeService } from "./stripe-service.js";
 import { createSyncReviewService } from "./sync-review-service.js";
 import { tellerService } from "./teller-service.js";
 import type { TellerService, TellerWebhookEvent } from "./teller-service.js";
@@ -216,6 +219,7 @@ export function createAppService({
   providerSettingsService: settings = createProviderSettingsService({ prisma: database }),
   simplefinService: simplefin = simplefinService,
   saltEdgeService: saltEdge = saltEdgeService,
+  stripeService: stripe = stripeService,
   tellerService: teller = tellerService,
   runtime = {
     instanceLabel: env.APP_INSTANCE_LABEL,
@@ -234,6 +238,7 @@ export function createAppService({
   providerSettingsService?: ProviderSettingsService;
   simplefinService?: SimpleFinService;
   saltEdgeService?: SaltEdgeService;
+  stripeService?: StripeService;
   tellerService?: TellerService;
   runtime?: {
     instanceLabel: string;
@@ -250,6 +255,7 @@ export function createAppService({
     PLAID: plaid,
     SALT_EDGE: saltEdge,
     SIMPLEFIN: simplefin,
+    STRIPE: stripe,
     TELLER: teller
   } satisfies Record<Provider, ProviderAdapter>;
   const providerBackgroundSyncGates = new Map<Provider, ProviderBackgroundSyncGate>();
@@ -309,6 +315,11 @@ export function createAppService({
       return Boolean(getActiveTellerEnvironmentSettings(providerSettings.TELLER).appId);
     }
 
+    if (provider === "STRIPE") {
+      const activeStripeSettings = getActiveStripeEnvironmentSettings(providerSettings.STRIPE);
+      return Boolean(activeStripeSettings.publishableKey.trim() && activeStripeSettings.secretKey);
+    }
+
     if (provider === "SALT_EDGE") {
       return Boolean(providerSettings.SALT_EDGE.appId.trim() && providerSettings.SALT_EDGE.secret);
     }
@@ -322,6 +333,11 @@ export function createAppService({
     const activePlaidSettings = getActivePlaidEnvironmentSettings(providerSettings.PLAID);
     const plaidEnabled = Boolean(activePlaidSettings.clientId && activePlaidSettings.secret);
     const plaidSandboxToolsEnabled = plaidEnvironment === "sandbox";
+    const stripeEnvironment = providerSettings.STRIPE.environment;
+    const activeStripeSettings = getActiveStripeEnvironmentSettings(providerSettings.STRIPE);
+    const stripePublishableKeyConfigured = Boolean(activeStripeSettings.publishableKey.trim());
+    const stripeSecretKeyConfigured = Boolean(activeStripeSettings.secretKey);
+    const stripeEnabled = stripePublishableKeyConfigured && stripeSecretKeyConfigured;
     const activeTellerSettings = getActiveTellerEnvironmentSettings(providerSettings.TELLER);
     const tellerEnabled = Boolean(activeTellerSettings.appId);
     const tellerEnvironment = providerSettings.TELLER.environment;
@@ -360,6 +376,20 @@ export function createAppService({
         notes: plaidSandboxToolsEnabled
           ? ["Sandbox tools are enabled for creating fixture Items and transactions."]
           : []
+      },
+      {
+        provider: "STRIPE",
+        label: "Stripe",
+        enabled: stripeEnabled,
+        ready: stripeEnabled,
+        environment: stripeEnvironment,
+        issues: [
+          ...(stripePublishableKeyConfigured ? [] : ["Enter a Stripe publishable key to launch Financial Connections."]),
+          ...(stripeSecretKeyConfigured ? [] : ["Enter a Stripe secret key to create sessions and sync account data."])
+        ],
+        notes: [
+          "Financial Connections supports US bank accounts, and live transactions access requires Stripe Financial Connections registration."
+        ]
       },
       {
         provider: "TELLER",
@@ -418,6 +448,7 @@ export function createAppService({
       HOME_VALUES: providerSettings.HOME_VALUES?.automaticSyncConcurrency ?? 1,
       PLAID: providerSettings.PLAID.automaticSyncConcurrency,
       SALT_EDGE: providerSettings.SALT_EDGE.automaticSyncConcurrency,
+      STRIPE: providerSettings.STRIPE.automaticSyncConcurrency,
       TELLER: providerSettings.TELLER.automaticSyncConcurrency,
       SIMPLEFIN: providerSettings.SIMPLEFIN.automaticSyncConcurrency
     };
@@ -1484,6 +1515,9 @@ export function createAppService({
       const providers = await getProviderRuntimeInfo();
       const activePlaidSettings = getActivePlaidEnvironmentSettings(effectiveSettings.PLAID);
       const plaidEnabled = Boolean(activePlaidSettings.clientId && activePlaidSettings.secret);
+      const activeStripeSettings = getActiveStripeEnvironmentSettings(effectiveSettings.STRIPE);
+      const stripePublishableKeyConfigured = Boolean(activeStripeSettings.publishableKey.trim());
+      const stripeSecretKeyConfigured = Boolean(activeStripeSettings.secretKey);
       const activeTellerSettings = getActiveTellerEnvironmentSettings(effectiveSettings.TELLER);
       const tellerEnabled = Boolean(activeTellerSettings.appId);
       const tellerMtlsConfigured =
@@ -1502,6 +1536,12 @@ export function createAppService({
           enabled: plaidEnabled,
           environment: effectiveSettings.PLAID.environment,
           sandboxToolsEnabled: plaidSandboxToolsEnabled
+        },
+        stripe: {
+          enabled: stripePublishableKeyConfigured && stripeSecretKeyConfigured,
+          environment: effectiveSettings.STRIPE.environment,
+          publishableKeyConfigured: stripePublishableKeyConfigured,
+          secretKeyConfigured: stripeSecretKeyConfigured
         },
         teller: {
           enabled: tellerEnabled,
@@ -1890,7 +1930,7 @@ export function createAppService({
       const metadata = parseConnectionMetadata(connection.metadataJson);
       const providerKey = connection.provider.toLowerCase();
       const healthAction =
-        connection.provider === "SIMPLEFIN"
+        connection.provider === "SIMPLEFIN" || connection.provider === "STRIPE"
           ? "MANUAL_RECONNECT"
           : "REAUTH_CONNECTION";
       const providerLabel =
@@ -1898,6 +1938,8 @@ export function createAppService({
           ? "Teller"
           : connection.provider === "PLAID"
             ? "Plaid"
+            : connection.provider === "STRIPE"
+              ? "Stripe"
             : connection.provider === "SALT_EDGE"
               ? "Salt Edge"
             : connection.provider === "SIMPLEFIN"

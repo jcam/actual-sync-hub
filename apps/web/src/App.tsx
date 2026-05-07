@@ -11,6 +11,7 @@ import { ReviewPage } from "./routes/ReviewPage";
 import { HomeValuesConnectionsPage } from "./routes/HomeValuesConnectionsPage";
 import { SimpleFinConnectionsPage } from "./routes/SimpleFinConnectionsPage";
 import { SaltEdgeConnectionsPage } from "./routes/SaltEdgeConnectionsPage";
+import { StripeConnectionsPage } from "./routes/StripeConnectionsPage";
 import { TellerConnectionsPage } from "./routes/TellerConnectionsPage";
 
 function Layout({
@@ -36,6 +37,9 @@ function Layout({
           </NavLink>
           <NavLink to="/plaid-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             Plaid Connections
+          </NavLink>
+          <NavLink to="/stripe-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            Stripe Connections
           </NavLink>
           <NavLink to="/teller-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             Teller.io Connections
@@ -67,6 +71,7 @@ function Layout({
           <Route path="/accounts/:actualAccountId/migration" element={<ReviewPage />} />
           <Route path="/accounts/:actualAccountId/sync-review" element={<ReviewPage />} />
           <Route path="/plaid-connections" element={<PlaidConnectionsPage />} />
+          <Route path="/stripe-connections" element={<StripeConnectionsPage />} />
           <Route path="/teller-connections" element={<TellerConnectionsPage />} />
           <Route path="/simplefin-connections" element={<SimpleFinConnectionsPage />} />
           <Route path="/saltedge-connections" element={<SaltEdgeConnectionsPage />} />

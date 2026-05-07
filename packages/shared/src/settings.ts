@@ -19,6 +19,34 @@ export type PlaidProviderSettingsDto = {
   automaticSyncConcurrency: number;
 }
 
+export type StripeFinancialConnectionsPermission =
+  | "balances"
+  | "transactions"
+  | "ownership"
+  | "payment_method";
+
+export type StripeFinancialConnectionsPrefetch =
+  | "balances"
+  | "transactions"
+  | "ownership";
+
+export type StripeProviderSettingsDto = {
+  environment: "test" | "live";
+  test: {
+    publishableKey: string;
+    secretKey: string;
+  };
+  live: {
+    publishableKey: string;
+    secretKey: string;
+  };
+  countryCodes: string[];
+  permissions: StripeFinancialConnectionsPermission[];
+  prefetch: StripeFinancialConnectionsPrefetch[];
+  transactionsInitialDays: number;
+  automaticSyncConcurrency: number;
+};
+
 export type TellerProviderSettingsDto = {
   environment: "sandbox" | "development" | "production";
   sandbox: {
@@ -75,6 +103,7 @@ export type HomeValuesProviderSettingsDto = {
 
 export type ProviderSettingsDto = {
   PLAID: PlaidProviderSettingsDto;
+  STRIPE: StripeProviderSettingsDto;
   TELLER: TellerProviderSettingsDto;
   SIMPLEFIN: SimpleFinProviderSettingsDto;
   SALT_EDGE: SaltEdgeProviderSettingsDto;
@@ -83,6 +112,8 @@ export type ProviderSettingsDto = {
 
 export type ProviderSettingsByProviderDto<T extends Provider = Provider> = T extends "PLAID"
   ? PlaidProviderSettingsDto
+  : T extends "STRIPE"
+    ? StripeProviderSettingsDto
   : T extends "TELLER"
     ? TellerProviderSettingsDto
     : T extends "SIMPLEFIN"
@@ -92,6 +123,10 @@ export type ProviderSettingsByProviderDto<T extends Provider = Provider> = T ext
       : HomeValuesProviderSettingsDto;
 
 export function getActivePlaidEnvironmentSettings(settings: PlaidProviderSettingsDto) {
+  return settings[settings.environment];
+}
+
+export function getActiveStripeEnvironmentSettings(settings: StripeProviderSettingsDto) {
   return settings[settings.environment];
 }
 

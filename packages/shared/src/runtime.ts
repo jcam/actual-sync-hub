@@ -21,6 +21,12 @@ export type RuntimeInfoDto = {
     environment: "sandbox" | "production";
     sandboxToolsEnabled: boolean;
   };
+  stripe: {
+    enabled: boolean;
+    environment: "test" | "live";
+    publishableKeyConfigured: boolean;
+    secretKeyConfigured: boolean;
+  };
   teller: {
     enabled: boolean;
     environment: "sandbox" | "development" | "production";

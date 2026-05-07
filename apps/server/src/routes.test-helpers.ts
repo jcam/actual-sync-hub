@@ -50,6 +50,22 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
             personalFinanceCategoryVersion: "v2",
             automaticSyncConcurrency: 2
           },
+          STRIPE: {
+            environment: "test",
+            test: {
+              publishableKey: "",
+              secretKey: ""
+            },
+            live: {
+              publishableKey: "",
+              secretKey: ""
+            },
+            countryCodes: ["US"],
+            permissions: ["balances", "transactions"],
+            prefetch: ["balances", "transactions"],
+            transactionsInitialDays: 90,
+            automaticSyncConcurrency: 2
+          },
           TELLER: {
             environment: "sandbox",
             sandbox: {
@@ -103,6 +119,12 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           enabled: true,
           environment: "sandbox",
           sandboxToolsEnabled: false
+        },
+        stripe: {
+          enabled: false,
+          environment: "test",
+          publishableKeyConfigured: false,
+          secretKeyConfigured: false
         },
         teller: {
           enabled: false,
@@ -164,6 +186,22 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           products: ["transactions"],
           transactionsDaysRequested: 365,
           personalFinanceCategoryVersion: "v2",
+          automaticSyncConcurrency: 2
+        },
+        STRIPE: {
+          environment: "test",
+          test: {
+            publishableKey: "",
+            secretKey: ""
+          },
+          live: {
+            publishableKey: "",
+            secretKey: ""
+          },
+          countryCodes: ["US"],
+          permissions: ["balances", "transactions"],
+          prefetch: ["balances", "transactions"],
+          transactionsInitialDays: 90,
           automaticSyncConcurrency: 2
         },
         TELLER: {
@@ -231,6 +269,18 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       seedSandboxConnection: vi.fn(),
       seedSandboxTransactions: vi.fn(),
       ...(overrides.plaidService as object | undefined)
+    },
+    stripeService: {
+      provider: "STRIPE" as const,
+      isConfigured: vi.fn().mockReturnValue(false),
+      createConnectSession: vi.fn(),
+      createReauthSession: vi.fn(),
+      finalizeAccounts: vi.fn(),
+      finalizeReauthSession: vi.fn(),
+      disconnectConnection: vi.fn(),
+      refreshConnection: vi.fn(),
+      syncAccountLink: vi.fn(),
+      ...(overrides.stripeService as object | undefined)
     },
     tellerService: {
       provider: "TELLER" as const,

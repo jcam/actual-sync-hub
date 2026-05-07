@@ -3,13 +3,18 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConnectionReauthButton } from "./ConnectionReauthButton";
 
-const { createConnectionReauthSession, refreshConnection } = vi.hoisted(() => ({
+const { createConnectionReauthSession, finalizeStripeReauthSession, refreshConnection } = vi.hoisted(() => ({
   createConnectionReauthSession: vi.fn(),
+  finalizeStripeReauthSession: vi.fn(),
   refreshConnection: vi.fn()
 }));
 
 const { loadTellerConnect } = vi.hoisted(() => ({
   loadTellerConnect: vi.fn()
+}));
+
+const { loadStripeFinancialConnections } = vi.hoisted(() => ({
+  loadStripeFinancialConnections: vi.fn()
 }));
 
 const { usePlaidLink, plaidOpen } = vi.hoisted(() => {
@@ -28,12 +33,17 @@ const { usePlaidLink, plaidOpen } = vi.hoisted(() => {
 vi.mock("../api", () => ({
   api: {
     createConnectionReauthSession,
+    finalizeStripeReauthSession,
     refreshConnection
   }
 }));
 
 vi.mock("../lib/teller-connect", () => ({
   loadTellerConnect
+}));
+
+vi.mock("../lib/stripe-financial-connections", () => ({
+  loadStripeFinancialConnections
 }));
 
 vi.mock("react-plaid-link", () => ({
@@ -143,6 +153,51 @@ describe("ConnectionReauthButton", () => {
       expect(createConnectionReauthSession).toHaveBeenCalledWith("conn-teller-1");
       expect(loadTellerConnect).toHaveBeenCalledOnce();
       expect(refreshConnection).toHaveBeenCalledWith("conn-teller-1");
+      expect(onCompleted).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("launches Stripe relink mode and finalizes the reauthenticated connection", async () => {
+    createConnectionReauthSession.mockResolvedValue({
+      provider: "STRIPE",
+      connectionId: "conn-stripe-1",
+      mode: "stripe_relink",
+      sessionId: "fcsess_relink_123",
+      clientSecret: "fcsess_secret_123",
+      publishableKey: "pk_test_123"
+    });
+    finalizeStripeReauthSession.mockResolvedValue({
+      connectionId: "conn-stripe-1"
+    });
+    loadStripeFinancialConnections.mockResolvedValue({
+      collectFinancialConnectionsAccounts: vi.fn().mockResolvedValue({
+        financialConnectionsSession: {
+          id: "fcsess_relink_123",
+          accounts: [{ id: "fca_123" }]
+        }
+      })
+    });
+
+    const onCompleted = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ConnectionReauthButton
+        connectionId="conn-stripe-1"
+        provider="STRIPE"
+        onCompleted={onCompleted}
+      />
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /reconnect/i }));
+
+    await waitFor(() => {
+      expect(createConnectionReauthSession).toHaveBeenCalledWith("conn-stripe-1");
+      expect(loadStripeFinancialConnections).toHaveBeenCalledWith("pk_test_123");
+      expect(finalizeStripeReauthSession).toHaveBeenCalledWith("conn-stripe-1", {
+        sessionId: "fcsess_relink_123",
+        accountIds: ["fca_123"]
+      });
       expect(onCompleted).toHaveBeenCalledOnce();
     });
   });

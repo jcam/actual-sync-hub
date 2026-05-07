@@ -96,6 +96,138 @@ describe("server auth and connection routes", () => {
     expect(createLinkToken).toHaveBeenCalledWith("user-42");
   });
 
+  it("creates a Stripe Financial Connections session for the authenticated user", async () => {
+    const createConnectSession = vi.fn().mockResolvedValue({
+      sessionId: "fcsess_123",
+      clientSecret: "fcsess_secret_123",
+      publishableKey: "pk_test_123"
+    });
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-84",
+              username: "admin"
+            })
+          },
+          stripeService: {
+            createConnectSession
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/connections/stripe/session",
+      cookies: await loginAsAdmin(app)
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      sessionId: "fcsess_123",
+      clientSecret: "fcsess_secret_123",
+      publishableKey: "pk_test_123"
+    });
+    expect(createConnectSession).toHaveBeenCalledWith("user-84");
+  });
+
+  it("finalizes Stripe-linked accounts for the authenticated user", async () => {
+    const finalizeAccounts = vi.fn().mockResolvedValue({
+      connectionId: "conn-stripe-1"
+    });
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-85",
+              username: "admin"
+            })
+          },
+          stripeService: {
+            finalizeAccounts
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/connections/stripe/finalize",
+      payload: {
+        sessionId: "fcsess_123",
+        label: "Primary Stripe Bank",
+        accountIds: ["fca_1", "fca_2"]
+      },
+      cookies: await loginAsAdmin(app)
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      connectionId: "conn-stripe-1"
+    });
+    expect(finalizeAccounts).toHaveBeenCalledWith({
+      sessionId: "fcsess_123",
+      label: "Primary Stripe Bank",
+      accountIds: ["fca_1", "fca_2"]
+    });
+  });
+
+  it("finalizes Stripe relinked accounts for the authenticated user", async () => {
+    const finalizeReauthSession = vi.fn().mockResolvedValue({
+      connectionId: "conn-stripe-reauth-1"
+    });
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-86",
+              username: "admin"
+            })
+          },
+          stripeService: {
+            finalizeReauthSession
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/connections/conn-stripe-reauth-1/stripe/reauth-finalize",
+      payload: {
+        sessionId: "fcsess_relink_123",
+        accountIds: ["fca_3"]
+      },
+      cookies: await loginAsAdmin(app)
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      connectionId: "conn-stripe-reauth-1"
+    });
+    expect(finalizeReauthSession).toHaveBeenCalledWith({
+      connectionId: "conn-stripe-reauth-1",
+      sessionId: "fcsess_relink_123",
+      accountIds: ["fca_3"]
+    });
+  });
+
   it("creates a connection reauth session for the authenticated user", async () => {
     const createConnectionReauthSession = vi.fn().mockResolvedValue({
       provider: "PLAID",

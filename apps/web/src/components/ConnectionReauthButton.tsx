@@ -3,12 +3,28 @@ import type { ConnectionReauthSessionDto, Provider } from "@actual-sync/shared";
 import { usePlaidLink } from "react-plaid-link";
 import { api } from "../api";
 import { getDisplayErrorMessage } from "../lib/errors";
+import { loadStripeFinancialConnections } from "../lib/stripe-financial-connections";
 import { loadTellerConnect } from "../lib/teller-connect";
 
 function getErrorMessage(error: unknown) {
   return getDisplayErrorMessage(error, "Reauthentication failed", {
     serverUnavailableMessage: "Could not reach the API server to complete reauthentication."
   });
+}
+
+function getStripeRelinkFailureMessage(session: {
+  relink_result?: {
+    failure_reason?: "no_account" | "no_authorization" | "other" | null;
+  };
+}) {
+  switch (session.relink_result?.failure_reason) {
+    case "no_account":
+      return "Stripe reauthentication completed, but the expected bank account was not relinked.";
+    case "no_authorization":
+      return "Stripe reauthentication was not completed.";
+    default:
+      return "Stripe reauthentication failed.";
+  }
 }
 
 export function ConnectionReauthButton({
@@ -183,6 +199,31 @@ export function ConnectionReauthButton({
 
             if (session.mode === "saltedge_connect") {
               setSaltEdgeSession(session);
+              return;
+            }
+
+            if (session.mode === "stripe_relink") {
+              const stripe = await loadStripeFinancialConnections(session.publishableKey);
+              const result = await stripe.collectFinancialConnectionsAccounts({
+                clientSecret: session.clientSecret
+              });
+              const finalSession = result.financialConnectionsSession;
+              const accountIds = (finalSession?.accounts ?? []).map(account => account.id).filter(Boolean);
+
+              if (!finalSession) {
+                throw new Error("Stripe did not return a relink session result.");
+              }
+
+              if (accountIds.length === 0) {
+                throw new Error(getStripeRelinkFailureMessage(finalSession));
+              }
+
+              await api.finalizeStripeReauthSession(connectionId, {
+                sessionId: finalSession.id || session.sessionId,
+                accountIds
+              });
+              await onCompleted?.();
+              setBusy(false);
               return;
             }
 

@@ -95,6 +95,17 @@ export const api = {
       method: "POST"
     });
   },
+  createStripeSession() {
+    return request<{ sessionId: string; clientSecret: string; publishableKey: string }>("/api/connections/stripe/session", {
+      method: "POST"
+    });
+  },
+  finalizeStripeSession(payload: { sessionId?: string; label?: string; accountIds: string[] }) {
+    return request<ProviderConnectResult>("/api/connections/stripe/finalize", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
   exchangePlaidPublicToken(publicToken: string, label?: string) {
     return request<ProviderConnectResult>("/api/connections/plaid/exchange", {
       method: "POST",
@@ -189,6 +200,12 @@ export const api = {
   createConnectionReauthSession(id: string) {
     return request<ConnectionReauthSessionDto>(`/api/connections/${id}/reauth-session`, {
       method: "POST"
+    });
+  },
+  finalizeStripeReauthSession(id: string, payload: { sessionId?: string; accountIds: string[] }) {
+    return request<ProviderConnectResult>(`/api/connections/${id}/stripe/reauth-finalize`, {
+      method: "POST",
+      body: JSON.stringify(payload)
     });
   },
   disconnectConnection(id: string) {
