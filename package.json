@@ -13,6 +13,12 @@
   "scripts": {
     "dev": "concurrently -n server,web -c blue,magenta \"npm run dev -w apps/server\" \"npm run dev -w apps/web\"",
     "dev:live-sandbox": "tsx scripts/dev-live-sandbox.ts",
+    "dev:env:init": "node scripts/init-provider-env.mjs",
+    "dev:env:init:plaid": "node scripts/init-provider-env.mjs --provider PLAID",
+    "dev:env:init:teller": "node scripts/init-provider-env.mjs --provider TELLER",
+    "dev:env:init:simplefin": "node scripts/init-provider-env.mjs --provider SIMPLEFIN",
+    "dev:env:init:saltedge": "node scripts/init-provider-env.mjs --provider SALT_EDGE",
+    "dev:env:init:home-values": "node scripts/init-provider-env.mjs --provider HOME_VALUES",
     "build": "npm run build -w packages/shared && npm run build -w apps/web && npm run build -w apps/server",
     "format:check": "oxfmt --check .",
     "format:fix": "oxfmt .",

@@ -1,12 +1,8 @@
 import type {
-  HomeValuesProviderSettingsDto,
-  PlaidProviderSettingsDto,
   Provider,
   ProviderSettingsByProviderDto,
   ProviderSettingsDto,
   SaltEdgeProviderSettingsDto,
-  SimpleFinProviderSettingsDto,
-  TellerProviderSettingsDto
 } from "@actual-sync/shared";
 import { z } from "zod";
 import { prisma } from "../db.js";

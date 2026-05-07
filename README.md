@@ -1,6 +1,6 @@
 # Actual Sync Hub
 
-`Actual Sync Hub` is a TypeScript service and web app for syncing Actual Budget accounts against external providers. It manages provider connections, account links, review-first imports, scheduled sync, and connection health for Plaid, Teller.io, and SimpleFIN.
+`Actual Sync Hub` is a TypeScript service and web app for running self-hosted bank sync alongside Actual Budget. It manages provider connections, account links, review-first imports, scheduled sync, and connection health for Plaid, Teller.io, SimpleFIN, Salt Edge, and Home Values.
 
 ## Stack
 
@@ -16,7 +16,7 @@
 - `packages/shared`: shared DTOs and enums used by both apps
 - `prisma/schema.prisma`: persistence model for users, provider connections, linked accounts, and sync runs
 
-The scheduler runs inside a single Node process that polls for due links and executes sync jobs. This keeps deployment to one container while still allowing account-level schedules.
+The scheduler runs inside a single Node process that polls for due links and executes sync jobs. This keeps deployment to one container while still allowing account-level schedules, which makes it a practical companion service for a self-hosted Actual setup.
 
 ## Actual integration
 
@@ -28,13 +28,13 @@ The scheduler runs inside a single Node process that polls for due links and exe
 
 ## Live sandbox mode
 
-For interactive exploration against a real Actual server and real Plaid Sandbox Items, run:
+For local development against a real Actual server and provider test data, run:
 
 ```bash
 npm run dev:live-sandbox
 ```
 
-This boots a temporary Dockerized Actual server, seeds an Actual budget with multiple bank accounts, points the app at that budget, and enables sandbox-only Plaid controls in the web UI.
+This boots a temporary Dockerized Actual server, seeds an Actual budget with multiple bank accounts, points the app at that budget, and enables test-mode provider flows in the web UI. It is meant to help you develop and validate the bridge that will sit next to your self-hosted Actual instance.
 
 What you get in this mode:
 
@@ -49,6 +49,8 @@ What you get in this mode:
 - Core runtime wiring stays in `.env`.
 - Provider credentials and sync tuning live in the web UI on each provider page.
 - The optional provider env vars in `.env.example` are only for live-sandbox and live-test injection helpers.
+
+Provider-specific setup docs live in [docs/providers/README.md](./docs/providers/README.md).
 
 ## Plaid
 
@@ -117,13 +119,16 @@ This cache is intended for manual dev/live workflows, not deterministic automate
    npm run db:push
    ```
 
-4. Start development mode:
+4. Start the app in development mode:
 
    ```bash
    npm run dev
    ```
 
 5. Open [http://localhost:5173](http://localhost:5173) for the web UI in development, or [http://localhost:4000](http://localhost:4000) after a production build.
+6. Connect one or more providers and map them to Actual accounts.
+
+For provider-specific setup, real-data guidance, and development/test credential generation, use [docs/providers/README.md](./docs/providers/README.md).
 
 ## Tests
 
@@ -252,5 +257,12 @@ node apps/server/dist/index.js
 ```
 
 For container deployment, mount `./data` or another persistent directory for the SQLite database and Actual cache.
+
+Typical self-hosted shape:
+
+- one Actual Budget server
+- one `actual-sync-hub` server
+- persistent storage for both
+- provider credentials and sync tuning managed through the Sync Hub UI
 
 Note: Prisma resolves SQLite paths relative to `prisma/schema.prisma`, so the default database URL uses `file:../data/sync.db`.
