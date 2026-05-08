@@ -14,6 +14,26 @@ Official docs:
 - [Teller Quickstart](https://teller.io/docs/guides/quickstart)
 - [Teller Authentication](https://teller.io/docs/api/authentication)
 - [Teller Environments](https://teller.io/docs/guides/environments)
+- [Teller pricing](https://teller.io/)
+- [Teller transactions API](https://teller.io/docs/api/account/transactions)
+
+## Cost
+
+As of May 8, 2026:
+
+- `sandbox`: free, unlimited fake data
+- `development`: free, up to **100 live enrollments**
+- `production transactions`: `$0.30` per **enrollment** per month
+
+If you assume one linked bank account is roughly one Teller enrollment:
+
+- `5` linked accounts: about `$1.50/month`
+- `10` linked accounts: about `$3.00/month`
+
+Important caveat:
+
+- Teller bills by **enrollment**, not by individual account.
+- One enrollment can expose multiple accounts at the same institution, so real cost can be lower than the simple 1-account = 1-enrollment estimate.
 
 ## Where to get credentials
 

@@ -15,6 +15,24 @@ Official docs:
 - [SimpleFIN Bridge developer guide](https://beta-bridge.simplefin.org/info/developers)
 - [SimpleFIN protocol quickstart/spec](https://www.simplefin.org/protocol.html)
 
+## Cost
+
+As of May 8, 2026, the hosted SimpleFIN Bridge shows:
+
+- `$1.50/month`, or
+- `$15.00/year`
+
+The hosted Bridge price covers up to **25 institutions** and **25 apps**.
+
+Practical hobbyist reading:
+
+- `5` linked bank accounts / institutions: `$1.50/month`
+- `10` linked bank accounts / institutions: `$1.50/month`
+
+Important caveat:
+
+- SimpleFIN Bridge is effectively a flat consumer subscription, not a per-account metered product.
+
 ## Where to get access
 
 There is no Plaid-style dashboard for a developer app key here.

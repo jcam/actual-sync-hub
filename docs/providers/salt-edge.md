@@ -34,6 +34,26 @@ Official docs:
 - [Salt Edge API reference](https://docs.saltedge.com/v6/api_reference/)
 - [Salt Edge account status / pending mode overview](https://docs.saltedge.com/general/v5/)
 
+## Cost
+
+As of May 8, 2026:
+
+- Salt Edge's public docs do **not** publish a standard paid production price list.
+- Salt Edge's docs say `Pending` clients can use up to **10 fake connections**.
+- Salt Edge's docs say `Test` clients can use live providers with up to **100 connections**.
+- Salt Edge's docs say a `Test Account` is generally available for up to **90 days**.
+
+Practical hobbyist reading:
+
+- `5` linked bank connections in `Test`: `$0/month` during the Test period
+- `10` linked bank connections in `Test`: `$0/month` during the Test period
+- long-term paid production pricing: quote-based, not publicly listed
+
+Important caveat:
+
+- Salt Edge limits and billing are described in terms of **connections**, not individual bank accounts.
+- A single connection may expose more than one account, depending on the institution and consent flow.
+
 ## Where to get credentials
 
 In the Salt Edge dashboard:

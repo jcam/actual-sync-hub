@@ -17,6 +17,36 @@ Official docs:
 - [Plaid Sandbox overview](https://plaid.com/docs/sandbox/)
 - [Plaid Sandbox test credentials](https://plaid.com/docs/sandbox/test-credentials/)
 - [Plaid help: Sandbox vs Production vs Trial/Limited Production](https://support.plaid.com/hc/en-us/articles/16110110883479-How-are-Sandbox-Production-and-Limited-Production-different)
+- [Plaid pricing and billing](https://plaid.com/docs/account/billing/)
+
+## Cost
+
+As of May 8, 2026:
+
+- Plaid's public docs do **not** publish a full production price list.
+- Plaid does publish a free **Trial** plan for new US/Canada teams with up to **10 Production Items**.
+- Plaid bills `Transactions` as a monthly subscription per **Item**, not per individual bank account.
+
+Practical hobbyist reading:
+
+- `5` linked bank logins / Items on Trial: `$0/month`
+- `10` linked bank logins / Items on Trial: `$0/month`
+- beyond that: paid pricing exists, but you have to view it in the Plaid Dashboard during Production access setup
+
+Concrete contracted example:
+
+- for one US Plaid account contract created on **October 29, 2025**, `Transactions` was priced at **`$0.30 per connected account / month`**
+- using that specific contracted rate:
+  - `5` connected accounts: about `$1.50/month`
+  - `10` connected accounts: about `$3.00/month`
+
+Important scope note:
+
+- that `$0.30` figure is a user-observed contracted rate for a **US account** on that contract date, not a general public guarantee for all Plaid accounts or regions
+
+Important caveat:
+
+- Plaid bills by **Item**. One Item is usually one linked institution/login, which may contain more than one bank account.
 
 ## Where to get credentials
 
