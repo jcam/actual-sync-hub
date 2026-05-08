@@ -122,11 +122,15 @@ export function getSyncHealthActionLabel(health: SyncHealthDto) {
 }
 
 export function supportsInlineReauth(health: SyncHealthDto, provider: Provider | null | undefined) {
-  if (!provider || provider === "SIMPLEFIN" || provider === "STRIPE" || provider === "HOME_VALUES") {
+  if (!provider || provider === "SIMPLEFIN" || provider === "HOME_VALUES") {
     return false;
   }
 
-  return health.action === "REAUTH_BANK" || health.action === "REAUTH_CONNECTION";
+  return (
+    health.action === "REAUTH_BANK" ||
+    health.action === "REAUTH_CONNECTION" ||
+    (provider === "STRIPE" && health.action === "MANUAL_RECONNECT")
+  );
 }
 
 export function getSyncHealthBadge(health: SyncHealthDto) {
