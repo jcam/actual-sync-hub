@@ -223,7 +223,12 @@ async function loginToApp(baseUrl: string, username: string, password: string) {
   return sessionCookie.split(";")[0];
 }
 
-async function updateProviderSetting(baseUrl: string, sessionCookie: string, provider: "PLAID" | "TELLER" | "SIMPLEFIN", settings: unknown) {
+async function updateProviderSetting(
+  baseUrl: string,
+  sessionCookie: string,
+  provider: "PLAID" | "STRIPE" | "TELLER" | "SIMPLEFIN",
+  settings: unknown
+) {
   const response = await fetch(`${baseUrl}/api/provider-settings/${provider}`, {
     method: "PUT",
     headers: {
@@ -263,6 +268,31 @@ async function configureLiveSandboxProviderSettings(baseUrl: string) {
     products: ["transactions"],
     transactionsDaysRequested: 365,
     personalFinanceCategoryVersion: "v2",
+    automaticSyncConcurrency: 2
+  });
+
+  await updateProviderSetting(baseUrl, sessionCookie, "STRIPE", {
+    environment: (process.env.STRIPE_TEST_ENV || "test") === "live" ? "live" : "test",
+    test: {
+      publishableKey: (process.env.STRIPE_TEST_ENV || "test") === "test" ? process.env.STRIPE_TEST_PUBLISHABLE_KEY || "" : "",
+      secretKey: (process.env.STRIPE_TEST_ENV || "test") === "test" ? process.env.STRIPE_TEST_SECRET_KEY || "" : "",
+      webhookSigningSecrets:
+        (process.env.STRIPE_TEST_ENV || "test") === "test"
+          ? splitCsv(process.env.STRIPE_TEST_WEBHOOK_SIGNING_SECRETS, "")
+          : []
+    },
+    live: {
+      publishableKey: (process.env.STRIPE_TEST_ENV || "test") === "live" ? process.env.STRIPE_TEST_PUBLISHABLE_KEY || "" : "",
+      secretKey: (process.env.STRIPE_TEST_ENV || "test") === "live" ? process.env.STRIPE_TEST_SECRET_KEY || "" : "",
+      webhookSigningSecrets:
+        (process.env.STRIPE_TEST_ENV || "test") === "live"
+          ? splitCsv(process.env.STRIPE_TEST_WEBHOOK_SIGNING_SECRETS, "")
+          : []
+    },
+    countryCodes: ["US"],
+    permissions: ["balances", "transactions"],
+    prefetch: ["balances", "transactions"],
+    transactionsInitialDays: 90,
     automaticSyncConcurrency: 2
   });
 

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import dotenv from "dotenv";
 
-const providerChoices = ["PLAID", "TELLER", "SIMPLEFIN", "SALT_EDGE", "HOME_VALUES"];
+const providerChoices = ["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "SALT_EDGE", "HOME_VALUES"];
 
 function parseArgs(argv) {
   const args = {};
@@ -176,6 +176,33 @@ async function buildProviderUpdates(provider, rl, args) {
         }
       };
     }
+    case "STRIPE": {
+      const environment = args.env || (await askChoice(rl, "Stripe environment", ["test", "live"], "test"));
+      const publishableKey =
+        args["publishable-key"] || (await ask(rl, "STRIPE_TEST_PUBLISHABLE_KEY", { required: true }));
+      const secretKey = args["secret-key"] || (await ask(rl, "STRIPE_TEST_SECRET_KEY", { required: true }));
+      const webhookSigningSecrets =
+        args["webhook-secrets"] ||
+        (await ask(rl, "STRIPE_TEST_WEBHOOK_SIGNING_SECRETS (comma-separated, optional)", { defaultValue: "" }));
+      const customerId =
+        args["customer-id"] ||
+        (await ask(rl, "STRIPE_TEST_CUSTOMER_ID (optional customer for deeper live tests)", { defaultValue: "" }));
+      const accountId =
+        args["account-id"] ||
+        (await ask(rl, "STRIPE_TEST_ACCOUNT_ID (optional preferred account for sync tests)", { defaultValue: "" }));
+      return {
+        title: "Stripe development / test credentials",
+        updates: {
+          STRIPE_TEST_RUN_LIVE: "1",
+          STRIPE_TEST_ENV: environment,
+          STRIPE_TEST_PUBLISHABLE_KEY: publishableKey,
+          STRIPE_TEST_SECRET_KEY: secretKey,
+          STRIPE_TEST_WEBHOOK_SIGNING_SECRETS: webhookSigningSecrets,
+          STRIPE_TEST_CUSTOMER_ID: customerId,
+          STRIPE_TEST_ACCOUNT_ID: accountId
+        }
+      };
+    }
     case "TELLER": {
       const environment =
         args.env || (await askChoice(rl, "Teller environment", ["sandbox", "development", "production"], "sandbox"));
@@ -314,6 +341,9 @@ async function main() {
     console.log("  3. Open the provider page in the UI and confirm the provider settings loaded.");
     if (provider === "PLAID") {
       console.log("  4. Use Plaid sandbox test credentials like `user_good` / `pass_good` in Link.");
+    }
+    if (provider === "STRIPE") {
+      console.log("  4. `npm run dev:live-sandbox` will seed Provider Settings > Stripe from these STRIPE_TEST_* values.");
     }
     if (provider === "SIMPLEFIN") {
       console.log("  4. Your `.env` now stores the claimed access key, not the one-time setup token.");

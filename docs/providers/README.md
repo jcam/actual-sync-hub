@@ -23,6 +23,7 @@ Provider-specific shortcuts:
 
 ```bash
 npm run dev:env:init:plaid
+npm run dev:env:init:stripe
 npm run dev:env:init:teller
 npm run dev:env:init:simplefin
 npm run dev:env:init:saltedge
@@ -53,6 +54,7 @@ For a real self-hosted deployment, expect this split:
 ## Providers
 
 - [Plaid](./plaid.md)
+- [Stripe](./stripe.md)
 - [Teller](./teller.md)
 - [SimpleFIN](./simplefin.md)
 - [Salt Edge](./salt-edge.md)
