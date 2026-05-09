@@ -270,6 +270,7 @@ describe("server webhook and account-link routes", () => {
 
   it("accepts a Plaid transactions webhook and delegates it to the app service", async () => {
     const handlePlaidWebhook = vi.fn().mockResolvedValue(undefined);
+    const verifyWebhookSignature = vi.fn().mockReturnValue(true);
 
     const app = trackedApps.track(
       await createServer({
@@ -279,6 +280,10 @@ describe("server webhook and account-link routes", () => {
         context: makeContext({
           appService: {
             handlePlaidWebhook
+          },
+          plaidService: {
+            webhooksConfigured: vi.fn().mockReturnValue(true),
+            verifyWebhookSignature
           }
         })
       })
@@ -296,18 +301,57 @@ describe("server webhook and account-link routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/webhooks/plaid",
-      payload
+      headers: {
+        "content-type": "application/json",
+        "plaid-verification": "jwt-value"
+      },
+      payload: JSON.stringify(payload)
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       ok: true
     });
+    expect(verifyWebhookSignature).toHaveBeenCalledWith(JSON.stringify(payload), "jwt-value");
     expect(handlePlaidWebhook).toHaveBeenCalledWith(payload);
   });
 
-  it("rejects malformed Plaid webhook payloads", async () => {
+  it("rejects Plaid webhooks when verification is not configured", async () => {
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          plaidService: {
+            webhooksConfigured: vi.fn().mockReturnValue(false)
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/plaid",
+      headers: {
+        "content-type": "application/json",
+        "plaid-verification": "jwt-value"
+      },
+      payload: JSON.stringify({
+        webhook_type: "TRANSACTIONS",
+        webhook_code: "SYNC_UPDATES_AVAILABLE"
+      })
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({
+      error: "Plaid webhooks are not configured"
+    });
+  });
+
+  it("rejects Plaid webhooks with invalid signatures", async () => {
     const handlePlaidWebhook = vi.fn().mockResolvedValue(undefined);
+    const verifyWebhookSignature = vi.fn().mockReturnValue(false);
 
     const app = trackedApps.track(
       await createServer({
@@ -317,6 +361,54 @@ describe("server webhook and account-link routes", () => {
         context: makeContext({
           appService: {
             handlePlaidWebhook
+          },
+          plaidService: {
+            webhooksConfigured: vi.fn().mockReturnValue(true),
+            verifyWebhookSignature
+          }
+        })
+      })
+    );
+
+    const payload = JSON.stringify({
+      webhook_type: "TRANSACTIONS",
+      webhook_code: "SYNC_UPDATES_AVAILABLE",
+      item_id: "item_123"
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/plaid",
+      headers: {
+        "content-type": "application/json",
+        "plaid-verification": "jwt-value"
+      },
+      payload
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({
+      error: "Invalid Plaid webhook signature"
+    });
+    expect(handlePlaidWebhook).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed Plaid webhook payloads", async () => {
+    const handlePlaidWebhook = vi.fn().mockResolvedValue(undefined);
+    const verifyWebhookSignature = vi.fn().mockReturnValue(true);
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          appService: {
+            handlePlaidWebhook
+          },
+          plaidService: {
+            webhooksConfigured: vi.fn().mockReturnValue(true),
+            verifyWebhookSignature
           }
         })
       })
@@ -325,10 +417,14 @@ describe("server webhook and account-link routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/webhooks/plaid",
-      payload: {
+      headers: {
+        "content-type": "application/json",
+        "plaid-verification": "jwt-value"
+      },
+      payload: JSON.stringify({
         webhook_type: "TRANSACTIONS",
         item_id: "item_123"
-      }
+      })
     });
 
     expect(response.statusCode).toBe(400);
@@ -337,6 +433,7 @@ describe("server webhook and account-link routes", () => {
         error: "Webhook code is required."
       })
     );
+    expect(verifyWebhookSignature).toHaveBeenCalled();
     expect(handlePlaidWebhook).not.toHaveBeenCalled();
   });
 

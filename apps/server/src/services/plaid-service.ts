@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import type { ConnectionReauthSessionDto, ProviderConnectResult } from "@actual-sync/shared";
 import { getActivePlaidEnvironmentSettings } from "@actual-sync/shared";
 import {
@@ -114,12 +115,26 @@ export type PlaidWebhookEvent = {
   new_transactions?: number;
 }
 
+type PlaidWebhookVerificationKey = {
+  alg: string;
+  crv: string;
+  kid: string;
+  kty: string;
+  use: string;
+  x: string;
+  y: string;
+  created_at: number;
+  expired_at: number | null;
+}
+
 export type PlaidService = {
   createLinkToken(userId: string): Promise<string>;
   createUpdateLinkToken(connectionId: string, userId: string): Promise<string>;
   exchangePublicToken(publicToken: string, label?: string): Promise<ProviderConnectResult>;
   seedSandboxConnection(label?: string): Promise<ProviderConnectResult>;
   seedSandboxTransactions(connectionId: string, count?: number): Promise<{ added: number }>;
+  webhooksConfigured(): Promise<boolean>;
+  verifyWebhookSignature(rawBody: string, verificationHeader: string | string[] | undefined): Promise<boolean>;
 } & ProviderAdapter
 
 function assertSandboxToolsEnabled(config: PlaidConfig) {
@@ -174,6 +189,20 @@ function getPlaidTransactionsConfig(config: PlaidConfig) {
   };
 }
 
+function decodeJwtSegment(segment: string) {
+  return JSON.parse(Buffer.from(segment, "base64url").toString("utf8")) as Record<string, unknown>;
+}
+
+function constantTimeStringMatch(left: string, right: string) {
+  const leftBytes = Buffer.from(left, "utf8");
+  const rightBytes = Buffer.from(right, "utf8");
+  if (leftBytes.length !== rightBytes.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(leftBytes, rightBytes);
+}
+
 export function createPlaidService({
   prisma: database = prisma,
   providerSettings = createProviderSettingsService({ prisma: database }),
@@ -191,6 +220,8 @@ export function createPlaidService({
   providerSettings?: ProviderSettingsService;
   config?: PlaidConfig;
 } = {}): PlaidService {
+  const verificationKeyCache = new Map<string, PlaidWebhookVerificationKey>();
+
   const getEffectiveConfig = async (): Promise<PlaidConfig> => {
     const settings = await providerSettings.get("PLAID");
     const activeSettings = getActivePlaidEnvironmentSettings(settings);
@@ -204,6 +235,28 @@ export function createPlaidService({
       transactionsDaysRequested: settings.transactionsDaysRequested,
       personalFinanceCategoryVersion: settings.personalFinanceCategoryVersion
     };
+  };
+
+  const getVerificationKey = async ({
+    keyId,
+    effectiveConfig
+  }: {
+    keyId: string;
+    effectiveConfig: PlaidConfig;
+  }) => {
+    const cached = verificationKeyCache.get(keyId);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (cached && (!cached.expired_at || cached.expired_at > nowSeconds)) {
+      return cached;
+    }
+
+    const client = getPlaidClient(effectiveConfig);
+    const response = await client.webhookVerificationKeyGet({
+      key_id: keyId
+    });
+    const key = response.data.key as PlaidWebhookVerificationKey;
+    verificationKeyCache.set(keyId, key);
+    return key;
   };
 
   const createLinkTokenPayload = ({
@@ -248,6 +301,86 @@ export function createPlaidService({
       });
 
       return response.data.link_token;
+    },
+
+    async webhooksConfigured() {
+      const effectiveConfig = await getEffectiveConfig();
+      return Boolean(effectiveConfig.clientId && effectiveConfig.secret);
+    },
+
+    async verifyWebhookSignature(rawBody: string, verificationHeader: string | string[] | undefined) {
+      const effectiveConfig = await getEffectiveConfig();
+      if (!effectiveConfig.clientId || !effectiveConfig.secret) {
+        return false;
+      }
+
+      const jwt = Array.isArray(verificationHeader) ? verificationHeader[0] : verificationHeader;
+      if (!jwt) {
+        return false;
+      }
+
+      const parts = jwt.split(".");
+      if (parts.length !== 3) {
+        return false;
+      }
+
+      try {
+        const decodedHeader = decodeJwtSegment(parts[0]);
+        if (decodedHeader.alg !== "ES256" || typeof decodedHeader.kid !== "string" || !decodedHeader.kid) {
+          return false;
+        }
+
+        const key = await getVerificationKey({
+          keyId: decodedHeader.kid,
+          effectiveConfig
+        });
+        if (key.alg !== "ES256") {
+          return false;
+        }
+
+        const publicKey = crypto.createPublicKey({
+          key: {
+            kty: key.kty,
+            crv: key.crv,
+            x: key.x,
+            y: key.y
+          },
+          format: "jwk"
+        });
+        const signature = Buffer.from(parts[2], "base64url");
+        const signedContent = Buffer.from(`${parts[0]}.${parts[1]}`, "utf8");
+        const signatureValid = crypto.verify(
+          "sha256",
+          signedContent,
+          {
+            key: publicKey,
+            dsaEncoding: "ieee-p1363"
+          },
+          signature
+        );
+        if (!signatureValid) {
+          return false;
+        }
+
+        const decodedPayload = decodeJwtSegment(parts[1]);
+        if (typeof decodedPayload.iat !== "number" || !Number.isFinite(decodedPayload.iat)) {
+          return false;
+        }
+
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        if (decodedPayload.iat > nowSeconds || nowSeconds - decodedPayload.iat > 5 * 60) {
+          return false;
+        }
+
+        if (typeof decodedPayload.request_body_sha256 !== "string" || !decodedPayload.request_body_sha256) {
+          return false;
+        }
+
+        const rawBodyHash = crypto.createHash("sha256").update(rawBody).digest("hex");
+        return constantTimeStringMatch(rawBodyHash, decodedPayload.request_body_sha256);
+      } catch {
+        return false;
+      }
     },
 
     async createUpdateLinkToken(connectionId: string, userId: string) {

@@ -264,6 +264,8 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
     plaidService: {
       provider: "PLAID" as const,
       isConfigured: vi.fn().mockReturnValue(true),
+      webhooksConfigured: vi.fn().mockReturnValue(true),
+      verifyWebhookSignature: vi.fn().mockReturnValue(true),
       createLinkToken: vi.fn(),
       createUpdateLinkToken: vi.fn(),
       exchangePublicToken: vi.fn(),

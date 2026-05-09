@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { encryptString } from "../lib/crypto.js";
 import { createTestDatabase } from "../test/test-db.js";
@@ -8,7 +9,8 @@ const mockPlaidClient = vi.hoisted(() => ({
   linkTokenCreate: vi.fn(),
   itemRemove: vi.fn(),
   accountsGet: vi.fn(),
-  transactionsSync: vi.fn()
+  transactionsSync: vi.fn(),
+  webhookVerificationKeyGet: vi.fn()
 }));
 
 vi.mock("plaid", () => ({
@@ -62,10 +64,12 @@ describe.sequential("plaid service request options", () => {
   const cleanups: Array<() => Promise<void>> = [];
 
   afterEach(async () => {
+    vi.useRealTimers();
     mockPlaidClient.linkTokenCreate.mockReset();
     mockPlaidClient.itemRemove.mockReset();
     mockPlaidClient.accountsGet.mockReset();
     mockPlaidClient.transactionsSync.mockReset();
+    mockPlaidClient.webhookVerificationKeyGet.mockReset();
     await Promise.all(cleanups.splice(0).map(cleanup => cleanup()));
   });
 
@@ -112,6 +116,76 @@ describe.sequential("plaid service request options", () => {
       user: {
         client_user_id: "user-123"
       }
+    });
+  });
+
+  it("verifies Plaid webhook signatures against the verification key and raw body hash", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-08T12:00:00.000Z"));
+
+    const body = JSON.stringify({
+      webhook_type: "TRANSACTIONS",
+      webhook_code: "SYNC_UPDATES_AVAILABLE",
+      item_id: "item-123"
+    });
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", {
+      namedCurve: "P-256"
+    });
+    const jwk = publicKey.export({
+      format: "jwk"
+    }) as Record<string, string | undefined>;
+
+    mockPlaidClient.webhookVerificationKeyGet.mockResolvedValue({
+      data: {
+        key: {
+          alg: "ES256",
+          crv: jwk.crv || "P-256",
+          kid: "plaid-key-123",
+          kty: jwk.kty || "EC",
+          use: "sig",
+          x: jwk.x || "",
+          y: jwk.y || "",
+          created_at: nowSeconds - 60,
+          expired_at: null
+        }
+      }
+    });
+
+    const header = Buffer.from(
+      JSON.stringify({
+        alg: "ES256",
+        kid: "plaid-key-123",
+        typ: "JWT"
+      }),
+      "utf8"
+    ).toString("base64url");
+    const payload = Buffer.from(
+      JSON.stringify({
+        iat: nowSeconds,
+        request_body_sha256: crypto.createHash("sha256").update(body).digest("hex")
+      }),
+      "utf8"
+    ).toString("base64url");
+    const signedContent = `${header}.${payload}`;
+    const signature = crypto
+      .sign("sha256", Buffer.from(signedContent, "utf8"), {
+        key: privateKey,
+        dsaEncoding: "ieee-p1363"
+      })
+      .toString("base64url");
+    const jwt = `${signedContent}.${signature}`;
+
+    const service = createPlaidService({
+      config: testConfig,
+      providerSettings: createProviderSettingsMock()
+    });
+
+    await expect(service.webhooksConfigured()).resolves.toBe(true);
+    await expect(service.verifyWebhookSignature(body, jwt)).resolves.toBe(true);
+    await expect(service.verifyWebhookSignature(`${body} `, jwt)).resolves.toBe(false);
+    expect(mockPlaidClient.webhookVerificationKeyGet).toHaveBeenCalledWith({
+      key_id: "plaid-key-123"
     });
   });
 

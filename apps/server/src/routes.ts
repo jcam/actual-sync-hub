@@ -207,13 +207,40 @@ export async function registerRoutes(
     };
   });
 
-  app.post("/api/webhooks/plaid", async request => {
-    const body = plaidWebhookBodySchema.parse(request.body ?? {});
+  await app.register(async plaidWebhookApp => {
+    plaidWebhookApp.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => {
+      done(null, body);
+    });
 
-    await context.appService.handlePlaidWebhook(body as PlaidWebhookEvent);
-    return {
-      ok: true
-    };
+    plaidWebhookApp.post("/api/webhooks/plaid", async (request, reply) => {
+      if (!(await context.plaidService.webhooksConfigured())) {
+        return reply.status(503).send({
+          error: "Plaid webhooks are not configured"
+        });
+      }
+
+      const rawBody = typeof request.body === "string" ? request.body : "";
+      if (!(await context.plaidService.verifyWebhookSignature(rawBody, request.headers["plaid-verification"]))) {
+        return reply.status(401).send({
+          error: "Invalid Plaid webhook signature"
+        });
+      }
+
+      let parsedBody: unknown = {};
+      try {
+        parsedBody = rawBody.length > 0 ? JSON.parse(rawBody) : {};
+      } catch {
+        return reply.status(400).send({
+          error: "Invalid JSON body"
+        });
+      }
+
+      const body = plaidWebhookBodySchema.parse(parsedBody);
+      await context.appService.handlePlaidWebhook(body as PlaidWebhookEvent);
+      return {
+        ok: true
+      };
+    });
   });
 
   await app.register(async stripeWebhookApp => {
