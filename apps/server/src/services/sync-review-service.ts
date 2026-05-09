@@ -57,6 +57,9 @@ export function createSyncReviewService<TSiblingLinks>({
   buildSiblingLinks,
   buildReconcileTransactions,
   syncActualExternalWriteback,
+  markActualExternalSyncPending,
+  markActualExternalSyncSuccess,
+  markActualExternalSyncFailure,
   now
 }: {
   database: ReviewDatabase;
@@ -72,6 +75,9 @@ export function createSyncReviewService<TSiblingLinks>({
     transactions: ProviderSyncTransaction[];
   }) => ReconcileTransactionInput[];
   syncActualExternalWriteback?: (args: { actualAccountId: string; lastSync?: string | null }) => Promise<void>;
+  markActualExternalSyncPending?: (actualAccountId: string) => Promise<void>;
+  markActualExternalSyncSuccess?: (actualAccountId: string, lastSync: string) => Promise<void>;
+  markActualExternalSyncFailure?: (actualAccountId: string) => Promise<void>;
   now: () => Date;
 }) {
   function getDateRangeBounds(dates: string[]) {
@@ -253,6 +259,7 @@ export function createSyncReviewService<TSiblingLinks>({
       });
 
       try {
+        await markActualExternalSyncPending?.(actualAccountId);
         const allowedImportedIds = new Set(payload.importedIds);
         const actualCategories = await listActualCategories();
         const linkConfig = parseLinkConfig(link.configJson);
@@ -414,6 +421,7 @@ export function createSyncReviewService<TSiblingLinks>({
             lastSync: actualLastSync
           });
         }
+        await markActualExternalSyncSuccess?.(link.actualAccountId, actualLastSync);
 
         await database.syncRun.update({
           where: {
@@ -429,6 +437,7 @@ export function createSyncReviewService<TSiblingLinks>({
         });
       } catch (error) {
         await persistReviewFailure(link, error, syncRun.id);
+        await markActualExternalSyncFailure?.(link.actualAccountId);
         throw error;
       }
     }

@@ -1,5 +1,6 @@
 import type {
   AccountLinkStatus,
+  ActualBankSyncStatus,
   ActualBankSyncSource,
   AssetType,
   ConnectionStatus,
@@ -95,6 +96,7 @@ export type ActualBankSyncLinkDto = {
   closed?: boolean;
   offbudget?: boolean;
   lastSyncedAt?: string | null;
+  bankSyncStatus?: ActualBankSyncStatus | null;
   currentLinkId?: string | null;
   currentLinkProvider?: Provider | null;
   currentLinkStatus?: AccountLinkStatus | null;

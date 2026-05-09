@@ -1,13 +1,12 @@
 import type {
   ActualAccountDto,
+  ActualBankSyncStatus,
   ActualBankSyncLinkDto,
   ActualCategoryDto,
-  ActualExternalSyncStatusDto,
   CommitMigrationPayload,
   ConnectionReauthSessionDto,
   ConnectionAccountOptionDto,
   ConnectionDto,
-  ExternalSyncBridgeSyncResponseDto,
   MigrationPreviewDto,
   Provider,
   RuntimeInfoDto,
@@ -29,6 +28,7 @@ import { env } from "../env.js";
 import { encryptString } from "../lib/crypto.js";
 import { actualService } from "./actual-service.js";
 import type {
+  ActualExternalSyncAccountRecord,
   ActualExternalSyncMetadataInput,
   ReconcileTransactionInput
 } from "./actual-service.js";
@@ -89,6 +89,28 @@ type AppliedSyncOutcome = {
   summary: string;
   lastSync: string;
 };
+type InternalActualExternalSyncStatus = {
+  configured: boolean;
+  state: "ok" | "syncing" | "error" | "reauth_required" | "not_configured";
+  message?: string | null;
+  lastSync?: string | null;
+  canSync: boolean;
+  needsReauth: boolean;
+};
+type ExistingExternalSyncMetadata = Pick<
+  ActualExternalSyncAccountRecord,
+  | "linked"
+  | "syncSource"
+  | "providerAccountId"
+  | "institutionName"
+  | "institutionExternalId"
+  | "mask"
+  | "officialName"
+  | "balanceCurrent"
+  | "balanceAvailable"
+  | "balanceLimit"
+  | "lastSync"
+>;
 
 const currentLinkOrderBy = [
   {
@@ -202,6 +224,9 @@ export type AppService = {
   refreshConnection(connectionId: string): Promise<void>;
   refreshAllConnections(): Promise<void>;
   upsertAccountLink(actualAccountId: string, payload: UpdateAccountLinkPayload): Promise<unknown>;
+  listRequestedExternalSyncAccountIds(): Promise<string[]>;
+  runRequestedExternalSync(actualAccountId: string): Promise<void>;
+  runRequestedExternalSyncs(): Promise<string[]>;
   runAccountSync(actualAccountId: string): Promise<AppliedSyncOutcome | void>;
   runScheduledLinkSyncs(linkIds: string[]): Promise<void>;
   handlePlaidWebhook(event: PlaidWebhookEvent): Promise<void>;
@@ -210,8 +235,6 @@ export type AppService = {
   previewAccountSyncReview(actualAccountId: string): Promise<MigrationPreviewDto>;
   commitAccountSyncReview(actualAccountId: string, payload: CommitMigrationPayload): Promise<void>;
   listSyncRuns(limit?: number): Promise<SyncRunDto[]>;
-  getExternalSyncBridgeStatus(actualAccountId?: string): Promise<ActualExternalSyncStatusDto>;
-  runExternalSyncBridgeSync(actualAccountId: string): Promise<ExternalSyncBridgeSyncResponseDto>;
 }
 
 export function createAppService({
@@ -265,21 +288,40 @@ export function createAppService({
   const getEffectiveProviderSettings = () => settings.getAll();
   let actualCapabilitiesPromise: Promise<{
     externalSyncWritebackEnabled: boolean;
+    externalSyncMode: "none" | "dedicated-api" | "account-api";
+    externalSyncStatusEnabled: boolean;
   }> | null = null;
+
+  const normalizeActualCapabilities = (
+    capabilities?: Partial<Awaited<NonNullable<typeof actualCapabilitiesPromise>>>
+  ) => {
+    const externalSyncStatusEnabled =
+      capabilities?.externalSyncStatusEnabled ?? typeof actual.updateExternalSyncAccountStatus === "function";
+    const externalSyncWritebackEnabled =
+      capabilities?.externalSyncWritebackEnabled ??
+      (externalSyncStatusEnabled ||
+        (typeof actual.linkExternalSyncAccount === "function" &&
+          typeof actual.getExternalSyncAccount === "function" &&
+          typeof actual.unlinkExternalSyncAccount === "function"));
+    const externalSyncMode =
+      capabilities?.externalSyncMode ??
+      (externalSyncStatusEnabled ? "account-api" : externalSyncWritebackEnabled ? "dedicated-api" : "none");
+
+    return {
+      externalSyncWritebackEnabled,
+      externalSyncMode,
+      externalSyncStatusEnabled
+    } as const;
+  };
 
   const getActualCapabilities = () => {
     if (!actualCapabilitiesPromise) {
       actualCapabilitiesPromise = (async () => {
         if (typeof actual.getCapabilities === "function") {
-          return await actual.getCapabilities();
+          return normalizeActualCapabilities(await actual.getCapabilities());
         }
 
-        return {
-          externalSyncWritebackEnabled:
-            typeof actual.linkExternalSyncAccount === "function" &&
-            typeof actual.getExternalSyncAccount === "function" &&
-            typeof actual.unlinkExternalSyncAccount === "function"
-        };
+        return normalizeActualCapabilities();
       })();
     }
 
@@ -899,6 +941,25 @@ export function createAppService({
     };
   };
 
+  const externalSyncMetadataMatches = (
+    current: ExistingExternalSyncMetadata,
+    next: ActualExternalSyncMetadataInput,
+    options?: {
+      includeLastSync?: boolean;
+    }
+  ) =>
+    current.linked &&
+    current.syncSource === "external" &&
+    current.providerAccountId === next.providerAccountId &&
+    current.institutionName === next.institutionName &&
+    current.institutionExternalId === (next.institutionExternalId ?? null) &&
+    current.mask === (next.mask ?? null) &&
+    current.officialName === (next.officialName ?? null) &&
+    current.balanceCurrent === (typeof next.balanceCurrent === "number" ? next.balanceCurrent : null) &&
+    current.balanceAvailable === (typeof next.balanceAvailable === "number" ? next.balanceAvailable : null) &&
+    current.balanceLimit === (typeof next.balanceLimit === "number" ? next.balanceLimit : null) &&
+    (!options?.includeLastSync || current.lastSync === (next.lastSync ?? null));
+
   const syncActualExternalWriteback = async ({
     actualAccountId,
     lastSync
@@ -906,7 +967,8 @@ export function createAppService({
     actualAccountId: string;
     lastSync?: string | null;
   }): Promise<void> => {
-    if (!(await getActualCapabilities()).externalSyncWritebackEnabled) {
+    const capabilities = await getActualCapabilities();
+    if (!capabilities.externalSyncWritebackEnabled) {
       return;
     }
 
@@ -922,9 +984,40 @@ export function createAppService({
       return;
     }
 
-    await actual.linkExternalSyncAccount(actualAccountId, {
+    const nextMetadata = {
       ...current.metadata,
       lastSync: lastSync ?? current.metadata.lastSync ?? null
+    } satisfies ActualExternalSyncMetadataInput;
+    const existingExternalSync =
+      typeof actual.getExternalSyncAccount === "function"
+        ? await actual.getExternalSyncAccount(actualAccountId)
+        : null;
+    const includeLastSync = capabilities.externalSyncMode !== "account-api";
+
+    if (existingExternalSync && externalSyncMetadataMatches(existingExternalSync, nextMetadata, { includeLastSync })) {
+      const currentConfig = parseLinkConfig(current.link.configJson);
+      if (!currentConfig.actualExternalLinked) {
+        await database.accountLink.update({
+          where: {
+            id: current.link.id
+          },
+          data: {
+            configJson: serializeLinkConfig({
+              ...currentConfig,
+              health: currentConfig.health?.code === "ACTUAL_UNLINKED" ? null : currentConfig.health ?? null,
+              actualExternalLinked: true,
+              categoryMappings: currentConfig.categoryMappings || [],
+              seenCategoryNames: currentConfig.seenCategoryNames || []
+            })
+          }
+        });
+      }
+      return;
+    }
+
+    await actual.linkExternalSyncAccount(actualAccountId, {
+      ...nextMetadata,
+      bankSyncStatus: existingExternalSync?.bankSyncStatus ?? null
     });
 
     const currentConfig = parseLinkConfig(current.link.configJson);
@@ -953,7 +1046,7 @@ export function createAppService({
     summary = "Unknown sync failure",
     automatic = false
   }: {
-    link: Pick<SyncableLink, "id" | "configJson">;
+    link: Pick<SyncableLink, "id" | "configJson" | "actualAccountId">;
     syncRunId: string;
     error: unknown;
     summary?: string;
@@ -1003,6 +1096,7 @@ export function createAppService({
         })
       }
     });
+    await markActualExternalSyncFailure(link.actualAccountId);
   };
 
   const applySyncResultToLink = async ({
@@ -1188,6 +1282,7 @@ export function createAppService({
       actualAccountId: link.actualAccountId,
       lastSync: toActualLastSyncValue(syncCompletedAt)
     });
+    await markActualExternalSyncSuccess(link.actualAccountId, syncCompletedAt);
 
     const summary = migrating
       ? `Migration sync imported ${migrationResult?.added.length ?? 0} transactions, updated ${migrationResult?.updated.length ?? 0}, removed 0.`
@@ -1297,6 +1392,7 @@ export function createAppService({
           }
 
           try {
+            await markActualExternalSyncPending(link.actualAccountId);
             const syncResult = await runWithProviderBackgroundGate(link.provider!, () => adapter.syncAccountLink(link.id));
             await applySyncResultToLink({
               link,
@@ -1317,6 +1413,7 @@ export function createAppService({
 
       let outcomes: Map<string, ProviderSyncOutcome>;
       try {
+        await Promise.all(group.map(link => markActualExternalSyncPending(link.actualAccountId)));
         outcomes = await runWithProviderBackgroundGate(group[0]!.provider!, () =>
           adapter.syncAccountLinks!(group.map(link => link.id))
         );
@@ -1371,7 +1468,7 @@ export function createAppService({
     isEnabled: boolean;
     lastSync?: string | null;
     health?: ReturnType<typeof parseLinkConfig>["health"]   | null;
-  }): ActualExternalSyncStatusDto => {
+  }): InternalActualExternalSyncStatus => {
     if (!health) {
       if (!isEnabled) {
         return {
@@ -1410,7 +1507,7 @@ export function createAppService({
     };
   };
 
-  const getExternalSyncBridgeStatus = async (actualAccountId?: string): Promise<ActualExternalSyncStatusDto> => {
+  const getActualExternalSyncStatus = async (actualAccountId?: string): Promise<InternalActualExternalSyncStatus> => {
     if (!actualAccountId) {
       return {
         configured: true,
@@ -1475,67 +1572,67 @@ export function createAppService({
     });
   };
 
-  const runExternalSyncBridgeSync = async (actualAccountId: string): Promise<ExternalSyncBridgeSyncResponseDto> => {
-    const status = await getExternalSyncBridgeStatus(actualAccountId);
-    if (!status.configured) {
-      return {
-        error_code: "NOT_CONFIGURED",
-        error_type: "EXTERNAL_SYNC",
-        message: status.message ?? "No external sync link is configured for this account.",
-        lastSync: status.lastSync ?? null,
-        newTransactions: [],
-        matchedTransactions: [],
-        updatedAccounts: []
-      };
+  const toActualBankSyncStatus = (status: InternalActualExternalSyncStatus): ActualBankSyncStatus => {
+    if (status.needsReauth || status.state === "reauth_required") {
+      return "reauth-required";
     }
 
-    if (status.needsReauth) {
-      return {
-        error_code: "REAUTH_REQUIRED",
-        error_type: "EXTERNAL_SYNC",
-        message: status.message ?? "Bank credentials need to be refreshed.",
-        lastSync: status.lastSync ?? null,
-        newTransactions: [],
-        matchedTransactions: [],
-        updatedAccounts: []
-      };
+    if (status.state === "ok") {
+      return "ok";
     }
 
-    if (!status.canSync) {
-      return {
-        error_code: "SYNC_FAILED",
-        error_type: "EXTERNAL_SYNC",
-        message: status.message ?? "External sync is not currently available for this account.",
-        lastSync: status.lastSync ?? null,
-        newTransactions: [],
-        matchedTransactions: [],
-        updatedAccounts: []
-      };
+    if (status.state === "syncing") {
+      return "pending";
     }
 
-    try {
-      const outcome = await appService.runAccountSync(actualAccountId);
-      return {
-        message: outcome?.summary ?? "Sync completed.",
-        lastSync: outcome?.lastSync ?? status.lastSync ?? null,
-        newTransactions: outcome?.newTransactions ?? [],
-        matchedTransactions: outcome?.matchedTransactions ?? [],
-        updatedAccounts: outcome?.updatedAccounts ?? []
-      };
-    } catch (error) {
-      const nextStatus = await getExternalSyncBridgeStatus(actualAccountId);
-      return {
-        error_code: nextStatus.needsReauth ? "REAUTH_REQUIRED" : "SYNC_FAILED",
-        error_type: "EXTERNAL_SYNC",
-        message:
-          nextStatus.message ??
-          (error instanceof Error ? error.message : "External sync failed."),
-        lastSync: nextStatus.lastSync ?? null,
-        newTransactions: [],
-        matchedTransactions: [],
-        updatedAccounts: []
-      };
+    return "attention-required";
+  };
+
+  const setActualExternalSyncStatus = async (
+    actualAccountId: string,
+    status: ActualBankSyncStatus,
+    lastSync?: string | null
+  ) => {
+    const capabilities = await getActualCapabilities();
+    if (!capabilities.externalSyncStatusEnabled || typeof actual.updateExternalSyncAccountStatus !== "function") {
+      return;
     }
+
+    if (lastSync === undefined) {
+      await actual.updateExternalSyncAccountStatus(actualAccountId, status);
+      return;
+    }
+
+    await actual.updateExternalSyncAccountStatus(actualAccountId, status, lastSync);
+  };
+
+  const setActualExternalSyncStatusFromInternal = async (
+    actualAccountId: string,
+    status: InternalActualExternalSyncStatus
+  ) => {
+    await setActualExternalSyncStatus(actualAccountId, toActualBankSyncStatus(status));
+  };
+
+  const markActualExternalSyncPending = async (actualAccountId: string) => {
+    await setActualExternalSyncStatus(actualAccountId, "pending");
+  };
+
+  const markActualExternalSyncSuccess = async (actualAccountId: string, lastSync?: Date | string | null) => {
+    await setActualExternalSyncStatus(actualAccountId, "ok", toActualLastSyncValue(lastSync ?? null));
+  };
+
+  const markActualExternalSyncFailure = async (actualAccountId: string) => {
+    await setActualExternalSyncStatusFromInternal(actualAccountId, await getActualExternalSyncStatus(actualAccountId));
+  };
+
+  const runRequestedExternalSync = async (actualAccountId: string) => {
+    const status = await getActualExternalSyncStatus(actualAccountId);
+    if (!status.configured || status.needsReauth || !status.canSync) {
+      await setActualExternalSyncStatusFromInternal(actualAccountId, status);
+      return;
+    }
+
+    await appService.runAccountSync(actualAccountId);
   };
 
   const syncReviewService = createSyncReviewService({
@@ -1546,6 +1643,9 @@ export function createAppService({
     buildSiblingLinks,
     buildReconcileTransactions,
     syncActualExternalWriteback,
+    markActualExternalSyncPending,
+    markActualExternalSyncSuccess,
+    markActualExternalSyncFailure,
     now
   });
 
@@ -2220,6 +2320,45 @@ export function createAppService({
       return replacement;
     },
 
+    async listRequestedExternalSyncAccountIds() {
+      const capabilities = await getActualCapabilities();
+      if (!capabilities.externalSyncStatusEnabled || typeof actual.updateExternalSyncAccountStatus !== "function") {
+        return [];
+      }
+
+      const requestedActualAccountIds = [
+        ...new Set(
+          (await actual.listBankSyncLinks())
+            .filter(
+              link => link.accountSyncSource === "external" && link.bankSyncStatus === "sync-requested"
+            )
+            .map(link => link.actualAccountId)
+        )
+      ];
+
+      if (requestedActualAccountIds.length > 0) {
+        console.info(
+          `[actual-sync] Observed sync-requested for ${requestedActualAccountIds.length} account(s): ${requestedActualAccountIds.join(", ")}`,
+        );
+      }
+
+      return requestedActualAccountIds;
+    },
+
+    async runRequestedExternalSync(actualAccountId: string) {
+      await runRequestedExternalSync(actualAccountId);
+    },
+
+    async runRequestedExternalSyncs() {
+      const requestedActualAccountIds = await appService.listRequestedExternalSyncAccountIds();
+
+      for (const actualAccountId of requestedActualAccountIds) {
+        await runRequestedExternalSync(actualAccountId);
+      }
+
+      return requestedActualAccountIds;
+    },
+
     async runAccountSync(actualAccountId: string) {
       const link = await loadCurrentSyncLink(actualAccountId);
       const syncRun = await createSyncRunForLink(link);
@@ -2239,6 +2378,7 @@ export function createAppService({
       }
 
       try {
+        await markActualExternalSyncPending(link.actualAccountId);
         const syncResult = await adapter.syncAccountLink(link.id);
         return await applySyncResultToLink({
           link,
@@ -2865,10 +3005,6 @@ export function createAppService({
         }
       });
     },
-
-    getExternalSyncBridgeStatus,
-
-    runExternalSyncBridgeSync,
 
     previewAccountSyncReview: syncReviewService.previewAccountSyncReview,
 

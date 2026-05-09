@@ -160,6 +160,9 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       refreshConnection: vi.fn(),
       refreshAllConnections: vi.fn(),
       upsertAccountLink: vi.fn(),
+      listRequestedExternalSyncAccountIds: vi.fn().mockResolvedValue([]),
+      runRequestedExternalSync: vi.fn().mockResolvedValue(undefined),
+      runRequestedExternalSyncs: vi.fn().mockResolvedValue([]),
       runAccountSync: vi.fn(),
       runScheduledLinkSyncs: vi.fn(),
       handlePlaidWebhook: vi.fn(),
@@ -168,8 +171,6 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       previewAccountSyncReview: vi.fn(),
       commitAccountSyncReview: vi.fn(),
       listSyncRuns: vi.fn(),
-      getExternalSyncBridgeStatus: vi.fn(),
-      runExternalSyncBridgeSync: vi.fn(),
       ...(overrides.appService as object | undefined)
     },
     providerSettingsService: {

@@ -21,14 +21,6 @@ const providerParamsSchema = z.object({
   provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "SALT_EDGE", "HOME_VALUES"])
 });
 
-const externalSyncStatusQuerySchema = z.object({
-  accountId: z.string().min(1).optional()
-});
-
-const externalSyncBodySchema = z.object({
-  accountId: z.string().min(1)
-});
-
 const homeValueConnectionBodySchema = z.object({
   label: z.string().min(1).nullable().optional(),
   address: z.string().min(1),
@@ -85,32 +77,6 @@ function assertAuthenticated(request: FastifyRequest, reply: FastifyReply) {
   return true;
 }
 
-async function assertActualBridgeAuthenticated(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  context: Pick<AppContext, "authService">
-) {
-  const header = request.headers["x-actual-token"];
-  const token = Array.isArray(header) ? header[0] : header;
-
-  if (!token || !(await context.authService.validateActualToken(token))) {
-    reply.status(401).send({
-      error: "Unauthorized",
-      reason: "Unauthorized"
-    });
-    return false;
-  }
-
-  return true;
-}
-
-function wrapActualBridgeResponse<T>(data: T) {
-  return {
-    status: "ok" as const,
-    data
-  };
-}
-
 export async function registerRoutes(
   app: FastifyInstance,
   context: Pick<AppContext, "authService" | "appService" | "plaidService" | "providerSettingsService" | "simplefinService" | "stripeService" | "tellerService">
@@ -144,46 +110,6 @@ export async function registerRoutes(
   app.get("/api/health", async () => ({
     ok: true
   }));
-
-  const registerExternalSyncBridgeRoutes = (prefix: "/external-sync" | "/actual/external-sync") => {
-    const handleStatus = async (request: FastifyRequest, reply: FastifyReply) => {
-      if (!(await assertActualBridgeAuthenticated(request, reply, context))) {
-        return;
-      }
-
-      const accountId =
-        typeof request.body === "object" &&
-        request.body &&
-        "accountId" in request.body &&
-        typeof request.body.accountId === "string"
-          ? request.body.accountId
-          : undefined;
-      const query = externalSyncStatusQuerySchema.parse({
-        ...(request.query ?? {}),
-        ...(accountId ? { accountId } : {})
-      });
-      return wrapActualBridgeResponse(
-        await context.appService.getExternalSyncBridgeStatus(query.accountId)
-      );
-    };
-
-    app.get(`${prefix}/status`, handleStatus);
-    app.post(`${prefix}/status`, handleStatus);
-
-    app.post(`${prefix}/sync`, async (request, reply) => {
-      if (!(await assertActualBridgeAuthenticated(request, reply, context))) {
-        return;
-      }
-
-      const body = externalSyncBodySchema.parse(request.body ?? {});
-      return wrapActualBridgeResponse(
-        await context.appService.runExternalSyncBridgeSync(body.accountId)
-      );
-    });
-  };
-
-  registerExternalSyncBridgeRoutes("/external-sync");
-  registerExternalSyncBridgeRoutes("/actual/external-sync");
 
   app.post("/api/webhooks/teller", async (request, reply) => {
     const body = tellerWebhookBodySchema.parse(request.body ?? {});

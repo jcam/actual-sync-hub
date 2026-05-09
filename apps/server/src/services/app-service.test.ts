@@ -800,7 +800,8 @@ describe.sequential("app service", () => {
       balanceCurrent: 150025,
       balanceAvailable: 140000,
       balanceLimit: null,
-      lastSync: null
+      lastSync: null,
+      bankSyncStatus: null
     });
     expect(unlinkExternalSyncAccount).not.toHaveBeenCalled();
   });
@@ -947,7 +948,8 @@ describe.sequential("app service", () => {
       balanceCurrent: 150025,
       balanceAvailable: 140000,
       balanceLimit: null,
-      lastSync: null
+      lastSync: null,
+      bankSyncStatus: null
     });
   });
 
@@ -1653,6 +1655,13 @@ describe.sequential("app service", () => {
     const syncAccountLink = vi.fn().mockRejectedValue(new Error("Plaid webhook sync failed"));
     const service = createAppService({
       prisma,
+      actualService: {
+        getCapabilities: vi.fn().mockResolvedValue({
+          externalSyncWritebackEnabled: false,
+          externalSyncMode: "none",
+          externalSyncStatusEnabled: false
+        })
+      } as never,
       plaidService: {
         provider: "PLAID",
         isConfigured: vi.fn().mockReturnValue(true),
@@ -2356,6 +2365,13 @@ describe.sequential("app service", () => {
     const syncAccountLinkFromWebhook = vi.fn().mockRejectedValue(new Error("Stripe webhook sync failed"));
     const service = createAppService({
       prisma,
+      actualService: {
+        getCapabilities: vi.fn().mockResolvedValue({
+          externalSyncWritebackEnabled: false,
+          externalSyncMode: "none",
+          externalSyncStatusEnabled: false
+        })
+      } as never,
       stripeService: {
         provider: "STRIPE",
         isConfigured: vi.fn().mockReturnValue(true),
@@ -3125,8 +3141,290 @@ describe.sequential("app service", () => {
       balanceCurrent: 50000,
       balanceAvailable: 44200,
       balanceLimit: null,
-      lastSync: String(now.getTime())
+      lastSync: String(now.getTime()),
+      bankSyncStatus: null
     });
+  });
+
+  it("updates pending and ok status for direct account sync when Actual status updates are available", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary",
+        institutionId: "platypus-bank",
+        institutionName: "First Platypus Bank",
+        providerItemId: "item-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "ext-1",
+        name: "Checking",
+        officialName: "Plaid checking",
+        mask: "1234",
+        type: "depository",
+        currentBalance: 500,
+        availableBalance: 442
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    const fixedNow = new Date("2026-05-04T12:00:00.000Z");
+    const updateExternalSyncAccountStatus = vi.fn().mockResolvedValue(undefined);
+    const service = createAppService({
+      prisma,
+      actualService: {
+        getCapabilities: vi.fn().mockResolvedValue({
+          externalSyncWritebackEnabled: true,
+          externalSyncMode: "account-api",
+          externalSyncStatusEnabled: true
+        }),
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        listBankSyncLinks: vi.fn().mockResolvedValue([
+          {
+            actualAccountId: "actual-1",
+            actualAccountName: "Household Checking",
+            actualOfficialName: "Plaid checking",
+            accountSyncSource: "external",
+            externalAccountId: "ext-1",
+            actualBankId: null,
+            actualBankName: "First Platypus Bank",
+            actualBankExternalId: "platypus-bank",
+            mask: "1234",
+            balanceCurrent: 400,
+            balanceAvailable: 300,
+            balanceLimit: null,
+            closed: false,
+            offbudget: false,
+            lastSyncedAt: "1715000000000"
+          }
+        ]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions: vi.fn().mockResolvedValue({
+          added: 0,
+          updated: 0,
+          removed: 0,
+          renamedPayees: 0,
+          addedIds: [],
+          updatedIds: []
+        }),
+        linkExternalSyncAccount: vi.fn().mockResolvedValue(undefined),
+        unlinkExternalSyncAccount: vi.fn().mockResolvedValue(undefined),
+        updateExternalSyncAccountStatus
+      } as never,
+      plaidService: {
+        syncAccountLink: vi.fn().mockResolvedValue({
+          imported: 0,
+          transactions: [],
+          removedImportedIds: [],
+          configPatch: {}
+        })
+      } as never,
+      now: () => fixedNow
+    });
+
+    await service.runAccountSync("actual-1");
+
+    expect(updateExternalSyncAccountStatus).toHaveBeenNthCalledWith(1, "actual-1", "pending");
+    expect(updateExternalSyncAccountStatus).toHaveBeenNthCalledWith(2, "actual-1", "ok", String(fixedNow.getTime()));
+  });
+
+  it("processes Actual sync-requested accounts and writes pending/ok status updates back", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary",
+        institutionId: "platypus-bank",
+        institutionName: "First Platypus Bank",
+        providerItemId: "item-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "ext-1",
+        name: "Checking",
+        officialName: "Plaid checking",
+        mask: "1234",
+        type: "depository",
+        currentBalance: 500,
+        availableBalance: 442
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "MANUAL",
+        isEnabled: true
+      }
+    });
+
+    const fixedNow = new Date("2026-05-09T16:07:20.416Z");
+    const updateExternalSyncAccountStatus = vi.fn().mockResolvedValue(undefined);
+    const linkExternalSyncAccount = vi.fn().mockResolvedValue(undefined);
+    const service = createAppService({
+      prisma,
+      actualService: {
+        getCapabilities: vi.fn().mockResolvedValue({
+          externalSyncWritebackEnabled: true,
+          externalSyncMode: "account-api",
+          externalSyncStatusEnabled: true
+        }),
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        listBankSyncLinks: vi.fn().mockResolvedValue([
+          {
+            actualAccountId: "actual-1",
+            actualAccountName: "Household Checking",
+            actualOfficialName: "Plaid checking",
+            accountSyncSource: "external",
+            externalAccountId: "ext-1",
+            actualBankId: null,
+            actualBankName: "First Platypus Bank",
+            actualBankExternalId: "platypus-bank",
+            mask: "1234",
+            balanceCurrent: 500,
+            balanceAvailable: 442,
+            balanceLimit: null,
+            closed: false,
+            offbudget: false,
+            lastSyncedAt: "1715000000000",
+            bankSyncStatus: "sync-requested"
+          }
+        ]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions: vi.fn().mockResolvedValue({
+          added: 0,
+          updated: 0,
+          removed: 0,
+          renamedPayees: 0,
+          addedIds: [],
+          updatedIds: []
+        }),
+        linkExternalSyncAccount,
+        unlinkExternalSyncAccount: vi.fn().mockResolvedValue(undefined),
+        updateExternalSyncAccountStatus
+      } as never,
+      providerSettingsService: {
+        getAll: vi.fn().mockResolvedValue({
+          PLAID: {
+            environment: "sandbox",
+            sandbox: {
+              clientId: "client-id",
+              secret: "secret"
+            },
+            production: {
+              clientId: "",
+              secret: ""
+            },
+            countryCodes: ["US"],
+            products: ["transactions"],
+            transactionsDaysRequested: 365,
+            personalFinanceCategoryVersion: "v2",
+            automaticSyncConcurrency: 2
+          }
+        })
+      } as never,
+      plaidService: {
+        syncAccountLink: vi.fn().mockResolvedValue({
+          imported: 0,
+          transactions: [],
+          removedImportedIds: [],
+          configPatch: {}
+        })
+      } as never,
+      now: () => fixedNow
+    });
+
+    await expect(service.runRequestedExternalSyncs()).resolves.toEqual(["actual-1"]);
+
+    expect(updateExternalSyncAccountStatus).toHaveBeenNthCalledWith(1, "actual-1", "pending");
+    expect(updateExternalSyncAccountStatus).toHaveBeenNthCalledWith(2, "actual-1", "ok", String(fixedNow.getTime()));
+    expect(linkExternalSyncAccount).toHaveBeenCalledWith(
+      "actual-1",
+      expect.objectContaining({
+        providerAccountId: "ext-1"
+      })
+    );
+  });
+
+  it("marks unsupported Actual sync requests as attention-required without running a provider sync", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const updateExternalSyncAccountStatus = vi.fn().mockResolvedValue(undefined);
+    const syncAccountLink = vi.fn();
+    const service = createAppService({
+      prisma,
+      actualService: {
+        getCapabilities: vi.fn().mockResolvedValue({
+          externalSyncWritebackEnabled: true,
+          externalSyncMode: "account-api",
+          externalSyncStatusEnabled: true
+        }),
+        listBankSyncLinks: vi.fn().mockResolvedValue([
+          {
+            actualAccountId: "actual-missing",
+            actualAccountName: "Missing",
+            actualOfficialName: null,
+            accountSyncSource: "external",
+            externalAccountId: "ext-missing",
+            actualBankId: null,
+            actualBankName: "Unknown",
+            actualBankExternalId: "unknown",
+            mask: null,
+            balanceCurrent: null,
+            balanceAvailable: null,
+            balanceLimit: null,
+            closed: false,
+            offbudget: false,
+            lastSyncedAt: null,
+            bankSyncStatus: "sync-requested"
+          }
+        ]),
+        updateExternalSyncAccountStatus
+      } as never,
+      plaidService: {
+        syncAccountLink
+      } as never
+    });
+
+    await expect(service.runRequestedExternalSyncs()).resolves.toEqual(["actual-missing"]);
+
+    expect(updateExternalSyncAccountStatus).toHaveBeenCalledWith("actual-missing", "attention-required");
+    expect(syncAccountLink).not.toHaveBeenCalled();
   });
 
   it("promotes a migrating link after the first sync using Actual import reconciliation", async () => {
@@ -3736,14 +4034,21 @@ describe.sequential("app service", () => {
       }
     });
 
+    const updateExternalSyncAccountStatus = vi.fn().mockResolvedValue(undefined);
     const service = createAppService({
       prisma,
       actualService: {
+        getCapabilities: vi.fn().mockResolvedValue({
+          externalSyncWritebackEnabled: true,
+          externalSyncMode: "account-api",
+          externalSyncStatusEnabled: true
+        }),
         listAccounts: vi.fn(),
         listCategories: vi.fn().mockResolvedValue([]),
         listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
         importTransactions: vi.fn(),
-        reconcileTransactions: vi.fn().mockRejectedValue(new Error("Actual import failed"))
+        reconcileTransactions: vi.fn().mockRejectedValue(new Error("Actual import failed")),
+        updateExternalSyncAccountStatus
       } as never,
       plaidService: {
         syncAccountLink: vi.fn().mockResolvedValue({
@@ -3786,6 +4091,8 @@ describe.sequential("app service", () => {
       action: "RETRY",
       message: "Actual import failed"
     });
+    expect(updateExternalSyncAccountStatus).toHaveBeenNthCalledWith(1, "actual-1", "pending");
+    expect(updateExternalSyncAccountStatus).toHaveBeenNthCalledWith(2, "actual-1", "attention-required");
     expect(runs[0]).toMatchObject({
       status: "FAILED",
       error: "Actual import failed"

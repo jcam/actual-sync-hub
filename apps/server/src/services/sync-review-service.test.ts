@@ -391,6 +391,8 @@ describe.sequential("sync review service", () => {
     });
 
     const syncActualExternalWriteback = vi.fn().mockResolvedValue(undefined);
+    const markActualExternalSyncPending = vi.fn().mockResolvedValue(undefined);
+    const markActualExternalSyncSuccess = vi.fn().mockResolvedValue(undefined);
     const syncReviewService = createSyncReviewService({
       database: prisma,
       actual: {
@@ -448,6 +450,8 @@ describe.sequential("sync review service", () => {
         }
       ]),
       syncActualExternalWriteback,
+      markActualExternalSyncPending,
+      markActualExternalSyncSuccess,
       now: () => new Date("2026-05-06T12:00:00.000Z")
     });
 
@@ -455,9 +459,11 @@ describe.sequential("sync review service", () => {
       importedIds: ["sf-1"]
     });
 
+    expect(markActualExternalSyncPending).toHaveBeenCalledWith("actual-1");
     expect(syncActualExternalWriteback).toHaveBeenCalledWith({
       actualAccountId: "actual-1",
       lastSync: "1778068800000"
     });
+    expect(markActualExternalSyncSuccess).toHaveBeenCalledWith("actual-1", "1778068800000");
   });
 });

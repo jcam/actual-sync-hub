@@ -4,7 +4,7 @@ import type { ChildProcess } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type * as ActualApi from "@actual-app/api";
-import type { ActualBankSyncSource } from "@actual-sync/shared";
+import type { ActualBankSyncSource, ActualBankSyncStatus } from "@actual-sync/shared";
 import type { APIAccountEntity, APICategoryEntity } from "@actual-app/api/models";
 import { env } from "../env.js";
 
@@ -20,10 +20,13 @@ export type ActualConfig = {
   budgetEncryptionPassword?: string;
   apiLocalEntry?: string;
   apiVersionMatchMode?: "off" | "auto" | "strict";
+  syncEventDebug?: boolean;
 }
 
 export type ActualCapabilities = {
   externalSyncWritebackEnabled: boolean;
+  externalSyncMode: "none" | "dedicated-api" | "account-api";
+  externalSyncStatusEnabled: boolean;
 }
 
 export type ActualExternalSyncPrefs = {
@@ -60,6 +63,7 @@ export type ActualBankSyncLinkRecord = {
   closed?: boolean;
   offbudget?: boolean;
   lastSyncedAt?: string | null;
+  bankSyncStatus?: ActualBankSyncStatus | null;
 }
 
 export type ActualExternalSyncAccountRecord = {
@@ -75,6 +79,7 @@ export type ActualExternalSyncAccountRecord = {
   balanceAvailable: number | null;
   balanceLimit: number | null;
   lastSync: string | null;
+  bankSyncStatus?: ActualBankSyncStatus | null;
   prefs: ActualExternalSyncPrefs;
 }
 
@@ -89,6 +94,7 @@ export type ActualExternalSyncMetadataInput = {
   balanceAvailable?: number | null;
   balanceLimit?: number | null;
   lastSync?: string | null;
+  bankSyncStatus?: ActualBankSyncStatus | null;
 }
 
 export type ActualTransactionRecord = Pick<
@@ -156,6 +162,11 @@ type WorkerReadyMessage = {
   type: "ready";
 };
 
+type WorkerAccountsChangedMessage = {
+  type: "actual-sync-accounts-changed";
+  accountIds?: string[];
+};
+
 type WorkerCommandPayload =
   | {
       operation: "listAccounts";
@@ -178,10 +189,16 @@ type WorkerCommandPayload =
       accountId: string;
       metadata: ActualExternalSyncMetadataInput;
     }
-    | {
-        operation: "unlinkExternalSyncAccount";
-        accountId: string;
-      }
+  | {
+      operation: "unlinkExternalSyncAccount";
+      accountId: string;
+    }
+  | {
+      operation: "updateExternalSyncAccountStatus";
+      accountId: string;
+      status: ActualBankSyncStatus;
+      lastSync?: string | null;
+    }
   | {
       operation: "listTransactionsByDateRange";
       accountId: string;
@@ -228,6 +245,8 @@ type WorkerResponse =
       };
     };
 
+type WorkerPushMessage = WorkerAccountsChangedMessage;
+
 type WorkerHandle = {
   child: ChildProcess;
   call<T>(command: WorkerCommandPayload): Promise<T>;
@@ -261,7 +280,12 @@ function shouldRetryActualError(error: unknown) {
     return false;
   }
 
-  return error.message.includes("Could not get remote files") || error.message.includes("/account/login") || error.message.includes("429");
+  return (
+    error.message.includes("Could not get remote files") ||
+    error.message.includes("/account/login") ||
+    error.message.includes("429") ||
+    error.message.includes("out-of-sync")
+  );
 }
 
 function toError(error: unknown) {
@@ -275,12 +299,14 @@ function toError(error: unknown) {
 export type ActualService = {
   shutdown?(): Promise<void>;
   getCapabilities?(): Promise<ActualCapabilities>;
+  onActualSyncAccountsChanged?(listener: (accountIds: string[]) => void): () => void;
   listAccounts(): Promise<ActualAccountRecord[]>;
   listCategories(): Promise<ActualCategoryRecord[]>;
   listBankSyncLinks(): Promise<ActualBankSyncLinkRecord[]>;
   getExternalSyncAccount?(accountId: string): Promise<ActualExternalSyncAccountRecord>;
   linkExternalSyncAccount(accountId: string, metadata: ActualExternalSyncMetadataInput): Promise<void>;
   unlinkExternalSyncAccount(accountId: string): Promise<void>;
+  updateExternalSyncAccountStatus?(accountId: string, status: ActualBankSyncStatus, lastSync?: string | null): Promise<void>;
   listTransactionsByDateRange(accountId: string, startDate: string, endDate: string): Promise<ActualTransactionRecord[]>;
   importTransactions(accountId: string, transactions: ImportTransactionInput[], options?: ActualImportBehaviorOptions): Promise<{
     added: string[];
@@ -317,7 +343,8 @@ export function createActualService({
     budgetSyncId: env.ACTUAL_BUDGET_SYNC_ID,
     budgetEncryptionPassword: env.ACTUAL_BUDGET_ENCRYPTION_PASSWORD,
     apiLocalEntry: env.ACTUAL_API_LOCAL_ENTRY || undefined,
-    apiVersionMatchMode: env.actualApiVersionMatchMode
+    apiVersionMatchMode: env.actualApiVersionMatchMode,
+    syncEventDebug: env.actualSyncEventDebug
   } satisfies ActualConfig
 }: {
   config?: ActualConfig;
@@ -328,10 +355,19 @@ export function createActualService({
   let accountsCache: { expiresAt: number; value: ActualAccountRecord[] } | null = null;
   let categoriesCache: { expiresAt: number; value: ActualCategoryRecord[] } | null = null;
   let capabilitiesCache: ActualCapabilities | null = null;
+  const actualSyncAccountsChangedListeners = new Set<(accountIds: string[]) => void>();
+  const sessionDir = path.join(config.dataDir, "session");
 
   function clearReadCaches() {
     accountsCache = null;
     categoriesCache = null;
+  }
+
+  async function resetWorkerSession() {
+    await fs.rm(sessionDir, {
+      recursive: true,
+      force: true
+    });
   }
 
   async function resolveWorkerCommand(): Promise<{ command: string; args: string[] }> {
@@ -362,13 +398,19 @@ export function createActualService({
     const { command, args } = await resolveWorkerCommand();
     const child = spawn(command, args, {
       cwd: process.cwd(),
-      stdio: ["ignore", "ignore", "pipe", "ipc"]
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
     });
     workerChild = child;
 
+    child.stdout?.on("data", chunk => {
+      process.stdout.write(chunk);
+    });
+
     let stderrOutput = "";
     child.stderr?.on("data", chunk => {
-      stderrOutput = `${stderrOutput}${chunk.toString()}`.slice(-16_000);
+      const text = chunk.toString();
+      stderrOutput = `${stderrOutput}${text}`.slice(-16_000);
+      process.stderr.write(text);
     });
 
     return await new Promise<WorkerHandle>((resolve, reject) => {
@@ -420,6 +462,17 @@ export function createActualService({
 
       child.on("message", message => {
         if (!message || typeof message !== "object") {
+          return;
+        }
+
+        if ((message as WorkerPushMessage).type === "actual-sync-accounts-changed") {
+          clearReadCaches();
+          const accountIds = Array.isArray((message as WorkerAccountsChangedMessage).accountIds)
+            ? (message as WorkerAccountsChangedMessage).accountIds ?? []
+            : [];
+          for (const listener of actualSyncAccountsChangedListeners) {
+            listener(accountIds);
+          }
           return;
         }
 
@@ -502,6 +555,14 @@ export function createActualService({
             throw toError(error);
           }
 
+          const normalizedError = toError(error);
+          if (normalizedError.message.includes("out-of-sync")) {
+            console.error(
+              `[actual-sync] Recovering Actual worker from out-of-sync during ${payload.operation} (attempt ${attempt}/${MAX_WORKER_ATTEMPTS}).`,
+            );
+            await resetWorkerSession();
+          }
+
           await delay(RETRY_DELAY_MS * attempt);
         }
       }
@@ -526,6 +587,12 @@ export function createActualService({
       });
       capabilitiesCache = result;
       return result;
+    },
+    onActualSyncAccountsChanged(listener: (accountIds: string[]) => void) {
+      actualSyncAccountsChangedListeners.add(listener);
+      return () => {
+        actualSyncAccountsChangedListeners.delete(listener);
+      };
     },
     async listAccounts(): Promise<ActualAccountRecord[]> {
       if (accountsCache && accountsCache.expiresAt > Date.now()) {
@@ -583,6 +650,16 @@ export function createActualService({
       await runWorker<void>({
         operation: "unlinkExternalSyncAccount",
         accountId
+      });
+      clearReadCaches();
+    },
+
+    async updateExternalSyncAccountStatus(accountId: string, status: ActualBankSyncStatus, lastSync?: string | null) {
+      await runWorker<void>({
+        operation: "updateExternalSyncAccountStatus",
+        accountId,
+        status,
+        lastSync
       });
       clearReadCaches();
     },

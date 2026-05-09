@@ -20,8 +20,15 @@ async function main() {
         appService: context.appService
       });
   scheduler?.start();
+  const stopActualSyncEventWakeup =
+    scheduler && typeof context.actualService.onActualSyncAccountsChanged === "function"
+      ? context.actualService.onActualSyncAccountsChanged(accountIds => {
+          scheduler.requestWakeupForAccounts(accountIds);
+        })
+      : null;
 
   const close = async () => {
+    stopActualSyncEventWakeup?.();
     scheduler?.stop();
     await app.close();
     await prisma.$disconnect();
