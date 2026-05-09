@@ -14,8 +14,39 @@ dotenv.config({ path: ".env.example", override: false });
 
 const DEV_APP_IMAGE = "actual-sync-hub-dev";
 const DEV_APP_CONTAINER = "actual-sync-live-sandbox-app";
+const DEV_ACTUAL_CONTAINER = "actual-sync-live-sandbox-actual";
 const DEV_ACTUAL_NETWORK = "actual-sync-live-sandbox";
 const DEV_NODE_MODULES_VOLUME = "actual-sync-live-sandbox-node-modules";
+
+const LIVE_SANDBOX_DATA_DIR = path.join(process.cwd(), "data", "live-sandbox");
+const LIVE_SANDBOX_RUNTIME_DIR = path.join(LIVE_SANDBOX_DATA_DIR, "runtime");
+const LIVE_SANDBOX_ACTUAL_DATA_DIR = path.join(LIVE_SANDBOX_DATA_DIR, "actual-data");
+const LIVE_SANDBOX_LOG_DIR = path.join(LIVE_SANDBOX_DATA_DIR, "logs");
+const LIVE_SANDBOX_STATE_FILE = path.join(LIVE_SANDBOX_DATA_DIR, "state.json");
+const LIVE_SANDBOX_APP_LOG = path.join(LIVE_SANDBOX_LOG_DIR, "app.log");
+const LIVE_SANDBOX_ACTUAL_LOG = path.join(LIVE_SANDBOX_LOG_DIR, "actual.log");
+
+type LiveSandboxState = {
+  actualContainerName: string;
+  actualDataDir: string;
+  actualLogFile: string;
+  actualLogFollowerPid: number | null;
+  actualPort: number;
+  actualServerUrl: string;
+  appContainerName: string;
+  appLogFile: string;
+  appLogFollowerPid: number | null;
+  appPort: number;
+  apiBaseUrl: string;
+  networkName: string;
+  nodeModulesVolumeName: string;
+  runtimeDir: string;
+  startedAt: string;
+  uiBaseUrl: string;
+  webPort: number;
+};
+
+type Command = "start" | "stop" | "remove-node-modules-volume";
 
 function requiredValue(name: string, fallback?: string) {
   const value = process.env[name] || fallback;
@@ -58,6 +89,20 @@ function actualSandboxPort() {
   }
 
   return port;
+}
+
+function appPort() {
+  const raw = process.env.PORT || "4000";
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid app port: ${raw}`);
+  }
+
+  return port;
+}
+
+function webPort() {
+  return 5173;
 }
 
 async function waitForHttp(url: string, timeoutMs = 60_000) {
@@ -105,6 +150,20 @@ async function ensureDockerVolume(name: string) {
   await execFileAsync("docker", ["volume", "create", name]);
 }
 
+async function dockerVolumeExists(name: string) {
+  const inspect = await execFileAsync("docker", ["volume", "inspect", name]).catch(() => null);
+  return Boolean(inspect);
+}
+
+async function removeDockerVolume(name: string) {
+  await execFileAsync("docker", ["volume", "rm", "-f", name]).catch(() => undefined);
+}
+
+async function dockerContainerExists(name: string) {
+  const inspect = await execFileAsync("docker", ["container", "inspect", name]).catch(() => null);
+  return Boolean(inspect);
+}
+
 async function buildDevAppImage() {
   await execFileAsync("docker", [
     "build",
@@ -148,9 +207,9 @@ async function startDevAppContainer({
     "--network",
     DEV_ACTUAL_NETWORK,
     "-p",
-    `${process.env.PORT || "4000"}:4000`,
+    `${appPort()}:${appPort()}`,
     "-p",
-    "5173:5173",
+    `${webPort()}:5173`,
     "-v",
     `${process.cwd()}:/workspace`,
     "-v",
@@ -160,15 +219,15 @@ async function startDevAppContainer({
     "-e",
     "NODE_ENV=development",
     "-e",
-    `PORT=${process.env.PORT || "4000"}`,
+    `PORT=${appPort()}`,
     "-e",
-    `APP_BASE_URL=${process.env.APP_BASE_URL || "http://localhost:4000"}`,
+    `APP_BASE_URL=${process.env.APP_BASE_URL || `http://localhost:${appPort()}`}`,
     "-e",
     "APP_INSTANCE_LABEL=Live Sandbox",
     "-e",
     "LIVE_SANDBOX_MODE=1",
     "-e",
-    "DISABLE_SCHEDULER=1",
+    `ACTUAL_SYNC_EVENT_DEBUG=${process.env.ACTUAL_SYNC_EVENT_DEBUG || "0"}`,
     "-e",
     `DATABASE_URL=${databaseUrl}`,
     "-e",
@@ -337,27 +396,114 @@ async function configureLiveSandboxProviderSettings(baseUrl: string) {
   });
 }
 
-async function main() {
-  const actualPassword = process.env.ACTUAL_TEST_PASSWORD || process.env.ACTUAL_SERVER_PASSWORD || "actual-test-password";
-  const actualPort = actualSandboxPort();
+async function readLiveSandboxState() {
+  try {
+    const raw = await fs.readFile(LIVE_SANDBOX_STATE_FILE, "utf8");
+    return JSON.parse(raw) as LiveSandboxState;
+  } catch {
+    return null;
+  }
+}
 
-  const cleanups: Array<() => Promise<void>> = [async () => removeDockerNetwork(DEV_ACTUAL_NETWORK)];
-  await ensureDockerNetwork(DEV_ACTUAL_NETWORK);
+async function writeLiveSandboxState(state: LiveSandboxState) {
+  await fs.mkdir(LIVE_SANDBOX_DATA_DIR, { recursive: true });
+  await fs.writeFile(LIVE_SANDBOX_STATE_FILE, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
 
-  const container = await startActualTestContainer({
-    image: process.env.ACTUAL_TEST_IMAGE || "ghcr.io/actualbudget/actual:26.5.0-alpine",
-    port: actualPort,
-    network: DEV_ACTUAL_NETWORK
-  });
-  cleanups.unshift(() => container.stop());
+async function removeLiveSandboxState() {
+  await fs.rm(LIVE_SANDBOX_STATE_FILE, { force: true });
+}
+
+async function resetLiveSandboxDirectories() {
+  await fs.mkdir(LIVE_SANDBOX_LOG_DIR, { recursive: true });
+  await fs.rm(LIVE_SANDBOX_RUNTIME_DIR, { recursive: true, force: true });
+  await fs.rm(LIVE_SANDBOX_ACTUAL_DATA_DIR, { recursive: true, force: true });
+  await fs.mkdir(LIVE_SANDBOX_RUNTIME_DIR, { recursive: true });
+  await fs.mkdir(LIVE_SANDBOX_ACTUAL_DATA_DIR, { recursive: true });
+  await fs.writeFile(LIVE_SANDBOX_APP_LOG, "", "utf8");
+  await fs.writeFile(LIVE_SANDBOX_ACTUAL_LOG, "", "utf8");
+}
+
+async function appendLogHeader(logFile: string, containerName: string) {
+  const timestamp = new Date().toISOString();
+  await fs.appendFile(logFile, `\n[${timestamp}] following logs for ${containerName}\n`, "utf8");
+}
+
+async function startDetachedLogFollower(containerName: string, logFile: string) {
+  await appendLogHeader(logFile, containerName);
+  const fileHandle = await fs.open(logFile, "a");
 
   try {
+    const child = spawn("docker", ["logs", "-f", containerName], {
+      detached: true,
+      stdio: ["ignore", fileHandle.fd, fileHandle.fd]
+    });
+
+    child.unref();
+    return child.pid ?? null;
+  } finally {
+    await fileHandle.close();
+  }
+}
+
+function stopPid(pid: number | null | undefined) {
+  if (!pid) {
+    return;
+  }
+
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch {
+    // Ignore stale followers.
+  }
+}
+
+async function stopLiveSandbox() {
+  const state = await readLiveSandboxState();
+
+  stopPid(state?.appLogFollowerPid);
+  stopPid(state?.actualLogFollowerPid);
+
+  await removeContainerIfExists(state?.appContainerName || DEV_APP_CONTAINER);
+  await removeContainerIfExists(state?.actualContainerName || DEV_ACTUAL_CONTAINER);
+  await removeDockerNetwork(state?.networkName || DEV_ACTUAL_NETWORK);
+  await fs.rm(state?.runtimeDir || LIVE_SANDBOX_RUNTIME_DIR, {
+    recursive: true,
+    force: true
+  });
+  await fs.rm(state?.actualDataDir || LIVE_SANDBOX_ACTUAL_DATA_DIR, {
+    recursive: true,
+    force: true
+  });
+  await removeLiveSandboxState();
+}
+
+async function startCommand() {
+  const actualPassword = process.env.ACTUAL_TEST_PASSWORD || process.env.ACTUAL_SERVER_PASSWORD || "actual-test-password";
+  const actualPort = actualSandboxPort();
+  const apiBaseUrl = `http://127.0.0.1:${appPort()}`;
+  const uiBaseUrl = `http://127.0.0.1:${webPort()}`;
+  let actualLogFollowerPid: number | null = null;
+  let appLogFollowerPid: number | null = null;
+
+  await stopLiveSandbox();
+  await resetLiveSandboxDirectories();
+
+  try {
+    await ensureDockerNetwork(DEV_ACTUAL_NETWORK);
+
+    const container = await startActualTestContainer({
+      image: process.env.ACTUAL_TEST_IMAGE || "ghcr.io/actualbudget/actual:26.5.0-alpine",
+      port: actualPort,
+      network: DEV_ACTUAL_NETWORK,
+      containerName: DEV_ACTUAL_CONTAINER,
+      dataDir: LIVE_SANDBOX_ACTUAL_DATA_DIR
+    });
+
     await container.setPassword(actualPassword);
-    const runtimeBaseDir = path.join(process.cwd(), ".tmp");
-    await fs.mkdir(runtimeBaseDir, { recursive: true });
-    const runtimeDir = await fs.mkdtemp(path.join(runtimeBaseDir, "actual-sync-live-sandbox-"));
-    cleanups.unshift(() => fs.rm(runtimeDir, { recursive: true, force: true }));
-    const liveSandboxDbPath = path.join(runtimeDir, "live-sandbox.db");
+    actualLogFollowerPid = await startDetachedLogFollower(DEV_ACTUAL_CONTAINER, LIVE_SANDBOX_ACTUAL_LOG);
+
+    const liveSandboxDbPath = path.join(LIVE_SANDBOX_RUNTIME_DIR, "live-sandbox.db");
     const databaseUrl = `file:${liveSandboxDbPath}`;
     const seededDatabase = await createSqliteDatabase(databaseUrl);
     await seededDatabase.$disconnect();
@@ -365,77 +511,129 @@ async function main() {
     const seed = await seedActualSandboxBudget({
       serverURL: container.serverURL,
       password: actualPassword,
-      dataDir: path.join(runtimeDir, "seed")
+      dataDir: path.join(LIVE_SANDBOX_RUNTIME_DIR, "seed")
     });
     const containerDatabaseUrl = `file:${toContainerPath(liveSandboxDbPath)}`;
-    const containerActualDataDir = toContainerPath(path.join(runtimeDir, "actual-cache"));
+    const containerActualDataDir = toContainerPath(path.join(LIVE_SANDBOX_RUNTIME_DIR, "actual-cache"));
 
     await startDevAppContainer({
-      actualServerUrl: `http://${container.containerName}:5006`,
+      actualServerUrl: `http://${DEV_ACTUAL_CONTAINER}:5006`,
       actualPassword,
       budgetSyncId: seed.syncId,
       databaseUrl: containerDatabaseUrl,
       actualDataDir: containerActualDataDir
     });
-    cleanups.unshift(async () => {
-      await removeContainerIfExists(DEV_APP_CONTAINER);
-    });
+    appLogFollowerPid = await startDetachedLogFollower(DEV_APP_CONTAINER, LIVE_SANDBOX_APP_LOG);
 
-    const apiBaseUrl = `http://127.0.0.1:${process.env.PORT || "4000"}`;
     await waitForHttp(`${apiBaseUrl}/api/auth/session`);
-    await waitForHttp("http://127.0.0.1:5173");
+    await waitForHttp(uiBaseUrl);
     await configureLiveSandboxProviderSettings(apiBaseUrl);
 
+    await writeLiveSandboxState({
+      actualContainerName: DEV_ACTUAL_CONTAINER,
+      actualDataDir: LIVE_SANDBOX_ACTUAL_DATA_DIR,
+      actualLogFile: LIVE_SANDBOX_ACTUAL_LOG,
+      actualLogFollowerPid,
+      actualPort,
+      actualServerUrl: container.serverURL,
+      appContainerName: DEV_APP_CONTAINER,
+      appLogFile: LIVE_SANDBOX_APP_LOG,
+      appLogFollowerPid,
+      appPort: appPort(),
+      apiBaseUrl,
+      networkName: DEV_ACTUAL_NETWORK,
+      nodeModulesVolumeName: DEV_NODE_MODULES_VOLUME,
+      runtimeDir: LIVE_SANDBOX_RUNTIME_DIR,
+      startedAt: new Date().toISOString(),
+      uiBaseUrl,
+      webPort: webPort()
+    });
+
     console.log("");
-    console.log("Live sandbox ready:");
-    console.log(`- Actual Sync Hub UI: http://localhost:5173`);
-    console.log(`- API server: http://localhost:${process.env.PORT || "4000"}`);
+    console.log("Live sandbox started in detached mode:");
+    console.log(`- Actual Sync Hub UI: ${uiBaseUrl}`);
+    console.log(`- API server: ${apiBaseUrl}`);
     console.log(`- Actual docker server: ${container.serverURL}`);
     console.log(`- Seeded Actual accounts: ${seed.accounts.map(account => account.name).join(", ")}`);
     console.log(`- Login: ${process.env.ADMIN_USERNAME || "admin"}`);
+    console.log(`- App log: ${LIVE_SANDBOX_APP_LOG}`);
+    console.log(`- Actual log: ${LIVE_SANDBOX_ACTUAL_LOG}`);
     console.log("");
-
-    let stopping = false;
-    const logFollower = spawn("docker", ["logs", "-f", DEV_APP_CONTAINER], {
-      stdio: "inherit"
-    });
-    const stop = async () => {
-      stopping = true;
-      logFollower.kill("SIGTERM");
-      await Promise.all(cleanups.splice(0).map(cleanup => cleanup().catch(() => undefined)));
-    };
-
-    process.on("SIGINT", () => {
-      void stop().then(() => process.exit(0));
-    });
-
-    process.on("SIGTERM", () => {
-      void stop().then(() => process.exit(0));
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      logFollower.on("exit", code => {
-        void (async () => {
-          await Promise.all(cleanups.splice(0).map(cleanup => cleanup().catch(() => undefined)));
-          if (stopping) {
-            resolve();
-            return;
-          }
-
-          if (code && code !== 0) {
-            reject(new Error(`dev container log stream exited with code ${code}`));
-            return;
-          }
-
-          resolve();
-        })();
-      });
-      logFollower.on("error", reject);
-    });
   } catch (error) {
-    await Promise.all(cleanups.splice(0).map(cleanup => cleanup().catch(() => undefined)));
+    stopPid(appLogFollowerPid);
+    stopPid(actualLogFollowerPid);
+    await stopLiveSandbox();
     throw error;
   }
+}
+
+async function stopCommand() {
+  const state = await readLiveSandboxState();
+  await stopLiveSandbox();
+
+  console.log("");
+  console.log("Live sandbox stopped.");
+  console.log(`- App container: ${(state?.appContainerName || DEV_APP_CONTAINER)}`);
+  console.log(`- Actual container: ${(state?.actualContainerName || DEV_ACTUAL_CONTAINER)}`);
+  console.log(`- Network: ${(state?.networkName || DEV_ACTUAL_NETWORK)}`);
+  console.log("");
+}
+
+async function removeNodeModulesVolumeCommand() {
+  const state = await readLiveSandboxState();
+  const appContainerRunning = await dockerContainerExists(DEV_APP_CONTAINER);
+  const actualContainerRunning = await dockerContainerExists(DEV_ACTUAL_CONTAINER);
+
+  if (state || appContainerRunning || actualContainerRunning) {
+    throw new Error(
+      `Live sandbox appears to be running. Run "npm run dev:live-sandbox:stop" before removing ${DEV_NODE_MODULES_VOLUME}.`
+    );
+  }
+
+  const volumeExists = await dockerVolumeExists(DEV_NODE_MODULES_VOLUME);
+  if (!volumeExists) {
+    console.log("");
+    console.log(`Docker volume already absent: ${DEV_NODE_MODULES_VOLUME}`);
+    console.log("");
+    return;
+  }
+
+  await removeDockerVolume(DEV_NODE_MODULES_VOLUME);
+
+  console.log("");
+  console.log(`Removed docker volume: ${DEV_NODE_MODULES_VOLUME}`);
+  console.log("");
+}
+
+function parseCommand() {
+  const raw = process.argv[2] || "start";
+  if (
+    raw === "start" ||
+    raw === "stop" ||
+    raw === "remove-node-modules-volume"
+  ) {
+    return raw;
+  }
+
+  throw new Error(
+    `Unknown command: ${raw}. Expected one of: start, stop, remove-node-modules-volume.`
+  );
+}
+
+async function main() {
+  const command = parseCommand();
+
+  if (command === "start") {
+    await startCommand();
+    return;
+  }
+
+  if (command === "stop") {
+    await stopCommand();
+    return;
+  }
+
+  await removeNodeModulesVolumeCommand();
 }
 
 void main();

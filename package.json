@@ -12,7 +12,9 @@
   },
   "scripts": {
     "dev": "concurrently -n server,web -c blue,magenta \"npm run dev -w apps/server\" \"npm run dev -w apps/web\"",
-    "dev:live-sandbox": "tsx scripts/dev-live-sandbox.ts",
+    "dev:live-sandbox": "tsx scripts/dev-live-sandbox.ts start",
+    "dev:live-sandbox:stop": "tsx scripts/dev-live-sandbox.ts stop",
+    "dev:live-sandbox:remove-node-modules-volume": "tsx scripts/dev-live-sandbox.ts remove-node-modules-volume",
     "dev:env:init": "node scripts/init-provider-env.mjs",
     "dev:env:init:plaid": "node scripts/init-provider-env.mjs --provider PLAID",
     "dev:env:init:stripe": "node scripts/init-provider-env.mjs --provider STRIPE",
@@ -39,9 +41,9 @@
     "test:saltedge-full-live": "ACTUAL_TEST_RUN_LIVE=1 SALT_EDGE_TEST_RUN_LIVE=1 vitest run apps/server/src/integration/saltedge-full.live.test.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push && prisma generate",
-    "postinstall": "prisma generate && npm run build -w packages/shared"
+    "db:generate": "XDG_CACHE_HOME=.cache prisma generate",
+    "db:push": "XDG_CACHE_HOME=.cache prisma db push && XDG_CACHE_HOME=.cache prisma generate",
+    "postinstall": "XDG_CACHE_HOME=.cache prisma generate && npm run build -w packages/shared"
   },
   "devDependencies": {
     "@oxlint/plugins": "^1.60.0",

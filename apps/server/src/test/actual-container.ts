@@ -72,15 +72,25 @@ async function bootstrapActualPassword(serverURL: string, password: string) {
 export async function startActualTestContainer({
   image = process.env.ACTUAL_TEST_IMAGE || "ghcr.io/actualbudget/actual:26.5.0-alpine",
   port: requestedPort,
-  network
+  network,
+  containerName: requestedContainerName,
+  dataDir: requestedDataDir
 }: {
   image?: string;
   port?: number;
   network?: string;
+  containerName?: string;
+  dataDir?: string;
 } = {}) {
   const port = requestedPort ?? (await getFreePort());
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "actual-live-data-"));
-  const containerName = `actual-sync-test-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const dataDir = requestedDataDir ?? (await fs.mkdtemp(path.join(os.tmpdir(), "actual-live-data-")));
+  const containerName =
+    requestedContainerName ??
+    `actual-sync-test-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+
+  if (requestedDataDir) {
+    await fs.mkdir(requestedDataDir, { recursive: true });
+  }
 
   const runArgs = [
     "run",

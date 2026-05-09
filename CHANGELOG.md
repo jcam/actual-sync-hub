@@ -9,10 +9,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 - Plaid webhook signature verification using Plaid's verification-key flow, with raw-body hashing and route-level rejection of unverified webhook requests.
+- Support for Actual's alternate public account-API external-sync surface, including status-aware external account reads and writeback without relying on Actual internals.
+- Detached live-sandbox lifecycle scripts with log capture, explicit stop/remove helpers, and repo-local npm/Prisma cache defaults for more reliable local installs and test runs.
 
 ### Changed
 - Switched Salt Edge connect and reconnect flows from embedded iframes to popup/new-window handling so redirect-auth and OAuth providers follow Salt Edge's recommended launch model.
 - Cleaned up provider-page copy to remove stale iframe wording from Teller sandbox guidance and keep hosted-provider instructions specific to each provider.
+- Reworked Actual external-sync orchestration so requested sync polling, manual syncs, scheduled syncs, and review-commit syncs all drive the same `pending` / success / failure lifecycle and update `last_sync` consistently.
+- Removed the unused published `/status` and `/sync` bridge endpoints now that neither supported Actual external-sync surface depends on them.
 
 ## [0.21.0] - 2026-05-07
 

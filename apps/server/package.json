@@ -10,7 +10,7 @@
     "test": "vitest run src"
   },
   "dependencies": {
-    "@actual-app/api": "^26.5.0",
+    "@actual-app/api": "file:../../vendor/actual-app-api.tgz",
     "@actual-sync/shared": "*",
     "@fastify/cookie": "^11.0.2",
     "@fastify/session": "^11.1.0",
