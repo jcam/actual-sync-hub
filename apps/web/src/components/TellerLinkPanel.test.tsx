@@ -87,7 +87,7 @@ describe("TellerLinkPanel", () => {
     });
   });
 
-  it("seeds a Teller sandbox connection without opening the iframe", async () => {
+  it("seeds a Teller sandbox connection without opening Teller Connect", async () => {
     getTellerConnectConfig.mockResolvedValue({
       applicationId: "app_test_123",
       environment: "sandbox",

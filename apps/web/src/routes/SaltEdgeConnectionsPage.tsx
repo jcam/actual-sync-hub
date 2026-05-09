@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionDto, RuntimeInfoDto, SaltEdgeConnectSessionDto } from "@actual-sync/shared";
 import { api } from "../api";
 import { ProviderReadinessPanel } from "../components/ProviderReadinessPanel";
 import { ProviderSettingsPanel } from "../components/ProviderSettingsPanel";
 import { SaltEdgeConnectionCard } from "../components/SaltEdgeConnectionCard";
 import { getDisplayErrorMessage } from "../lib/errors";
+import { closeSaltEdgeWindow, navigateSaltEdgeWindow, openSaltEdgeWindow } from "../lib/saltedge-window";
 
 type SaltEdgeMessagePayload = {
   data?: {
@@ -24,6 +25,7 @@ function formatSaltEdgeError(error: unknown, fallback: string) {
 }
 
 export function SaltEdgeConnectionsPage() {
+  const connectWindowRef = useRef<Window | null>(null);
   const [connections, setConnections] = useState<ConnectionDto[]>([]);
   const [runtime, setRuntime] = useState<RuntimeInfoDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -89,6 +91,8 @@ export function SaltEdgeConnectionsPage() {
       }
 
       if (stage === "error") {
+        closeSaltEdgeWindow(connectWindowRef.current);
+        connectWindowRef.current = null;
         setActiveSession(null);
         setStatusMessage(null);
         setError(payload.data?.error_message || payload.data?.error_class || "Salt Edge connect failed.");
@@ -115,6 +119,8 @@ export function SaltEdgeConnectionsPage() {
           setMessage("Salt Edge connection saved.");
           setWarning(result.warning || null);
           setLabel("");
+          closeSaltEdgeWindow(connectWindowRef.current);
+          connectWindowRef.current = null;
           setActiveSession(null);
           setStatusMessage(null);
           await load();
@@ -129,6 +135,35 @@ export function SaltEdgeConnectionsPage() {
     window.addEventListener("message", listener);
     return () => window.removeEventListener("message", listener);
   }, [activeSession, label]);
+
+  useEffect(() => {
+    if (!activeSession) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      if (!connectWindowRef.current) {
+        return;
+      }
+
+      if (!connectWindowRef.current.closed) {
+        return;
+      }
+
+      connectWindowRef.current = null;
+      setActiveSession(null);
+      setStatusMessage(null);
+    }, 500);
+
+    return () => window.clearInterval(interval);
+  }, [activeSession]);
+
+  useEffect(() => {
+    return () => {
+      closeSaltEdgeWindow(connectWindowRef.current);
+      connectWindowRef.current = null;
+    };
+  }, []);
 
   const saltEdgeConnections = useMemo(
     () => connections.filter(connection => connection.provider === "SALT_EDGE"),
@@ -152,8 +187,8 @@ export function SaltEdgeConnectionsPage() {
         <p className="eyebrow">Connect Salt Edge</p>
         <div className="status-copy">
           <p className="muted">
-            Create a Salt Edge Connect session, complete the provider flow in the embedded frame, and the connection
-            will be imported into the sync hub automatically when Salt Edge posts back the success payload.
+            Create a Salt Edge Connect session, complete the provider flow in a separate Salt Edge window, and the
+            connection will be imported into the sync hub automatically when Salt Edge posts back the success payload.
           </p>
         </div>
         <div className="grid account-settings-grid">
@@ -170,8 +205,15 @@ export function SaltEdgeConnectionsPage() {
         <div className="button-row">
           <button
             className="primary-button"
-            disabled={creatingSession || finishing}
+            disabled={creatingSession || finishing || Boolean(activeSession)}
             onClick={async () => {
+              const popup = openSaltEdgeWindow();
+              if (!popup) {
+                setError("Salt Edge connect needs a popup or new tab. Allow popups and try again.");
+                return;
+              }
+
+              connectWindowRef.current = popup;
               setCreatingSession(true);
               setMessage(null);
               setWarning(null);
@@ -180,7 +222,11 @@ export function SaltEdgeConnectionsPage() {
               try {
                 const session = await api.createSaltEdgeConnectSession(label.trim() || undefined);
                 setActiveSession(session);
+                navigateSaltEdgeWindow(popup, session.connectUrl);
+                setStatusMessage("Salt Edge connect opened in a separate window. Finish the provider flow there.");
               } catch (sessionError) {
+                closeSaltEdgeWindow(popup);
+                connectWindowRef.current = null;
                 setActiveSession(null);
                 setError(formatSaltEdgeError(sessionError, "Failed to create a Salt Edge connect session."));
               } finally {
@@ -195,28 +241,17 @@ export function SaltEdgeConnectionsPage() {
               className="ghost-button"
               disabled={finishing}
               onClick={() => {
+                closeSaltEdgeWindow(connectWindowRef.current);
+                connectWindowRef.current = null;
                 setActiveSession(null);
                 setStatusMessage(null);
               }}
             >
-              Close connect frame
+              Close Salt Edge window
             </button>
           ) : null}
         </div>
         {statusMessage ? <p className="muted">{statusMessage}</p> : null}
-        {activeSession ? (
-          <iframe
-            title="Salt Edge Connect"
-            src={activeSession.connectUrl}
-            style={{
-              width: "100%",
-              minHeight: 720,
-              border: 0,
-              borderRadius: 18,
-              marginTop: 16
-            }}
-          />
-        ) : null}
         {message ? <p className="success-text">{message}</p> : null}
         {warning ? <p className="muted">{warning}</p> : null}
         {error ? <p className="error-text">{error}</p> : null}

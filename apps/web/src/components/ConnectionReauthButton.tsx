@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ConnectionReauthSessionDto, Provider } from "@actual-sync/shared";
 import { usePlaidLink } from "react-plaid-link";
 import { api } from "../api";
 import { getDisplayErrorMessage } from "../lib/errors";
+import { closeSaltEdgeWindow, navigateSaltEdgeWindow, openSaltEdgeWindow } from "../lib/saltedge-window";
 import { loadStripeFinancialConnections } from "../lib/stripe-financial-connections";
 import { loadTellerConnect } from "../lib/teller-connect";
 
@@ -38,6 +39,7 @@ export function ConnectionReauthButton({
   onCompleted?: () => Promise<void>;
   label?: string;
 }) {
+  const saltEdgeWindowRef = useRef<Window | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plaidSession, setPlaidSession] = useState<Extract<
@@ -122,6 +124,8 @@ export function ConnectionReauthButton({
       }
 
       if (stage === "error") {
+        closeSaltEdgeWindow(saltEdgeWindowRef.current);
+        saltEdgeWindowRef.current = null;
         setError(payload.data?.error_message || payload.data?.error_class || "Salt Edge reauthentication failed.");
         setSaltEdgeSession(null);
         setBusy(false);
@@ -144,6 +148,8 @@ export function ConnectionReauthButton({
         } catch (refreshError) {
           setError(getErrorMessage(refreshError));
         } finally {
+          closeSaltEdgeWindow(saltEdgeWindowRef.current);
+          saltEdgeWindowRef.current = null;
           setSaltEdgeSession(null);
           setBusy(false);
         }
@@ -153,6 +159,35 @@ export function ConnectionReauthButton({
     window.addEventListener("message", listener);
     return () => window.removeEventListener("message", listener);
   }, [onCompleted, saltEdgeSession]);
+
+  useEffect(() => {
+    if (!saltEdgeSession) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      if (!saltEdgeWindowRef.current) {
+        return;
+      }
+
+      if (!saltEdgeWindowRef.current.closed) {
+        return;
+      }
+
+      saltEdgeWindowRef.current = null;
+      setSaltEdgeSession(null);
+      setBusy(false);
+    }, 500);
+
+    return () => window.clearInterval(interval);
+  }, [saltEdgeSession]);
+
+  useEffect(() => {
+    return () => {
+      closeSaltEdgeWindow(saltEdgeWindowRef.current);
+      saltEdgeWindowRef.current = null;
+    };
+  }, []);
 
   if (provider === "SIMPLEFIN" || provider === "HOME_VALUES") {
     return null;
@@ -198,7 +233,14 @@ export function ConnectionReauthButton({
             }
 
             if (session.mode === "saltedge_connect") {
+              const popup = openSaltEdgeWindow();
+              if (!popup) {
+                throw new Error("Salt Edge reconnect needs a popup or new tab. Allow popups and try again.");
+              }
+
+              saltEdgeWindowRef.current = popup;
               setSaltEdgeSession(session);
+              navigateSaltEdgeWindow(popup, session.connectUrl);
               return;
             }
 
@@ -239,26 +281,18 @@ export function ConnectionReauthButton({
       </button>
       {saltEdgeSession ? (
         <>
-          <iframe
-            title="Salt Edge Reconnect"
-            src={saltEdgeSession.connectUrl}
-            style={{
-              width: "100%",
-              minHeight: 720,
-              border: 0,
-              borderRadius: 18,
-              marginTop: 12
-            }}
-          />
+          <p className="muted">Salt Edge reauthentication is open in a separate window. Finish the provider flow there.</p>
           <div className="button-row">
             <button
               className="ghost-button"
               onClick={() => {
+                closeSaltEdgeWindow(saltEdgeWindowRef.current);
+                saltEdgeWindowRef.current = null;
                 setSaltEdgeSession(null);
                 setBusy(false);
               }}
             >
-              Close Salt Edge frame
+              Close Salt Edge window
             </button>
           </div>
         </>

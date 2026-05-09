@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+- Switched Salt Edge connect and reconnect flows from embedded iframes to popup/new-window handling so redirect-auth and OAuth providers follow Salt Edge's recommended launch model.
+- Cleaned up provider-page copy to remove stale iframe wording from Teller sandbox guidance and keep hosted-provider instructions specific to each provider.
+
 ## [0.21.0] - 2026-05-07
 
 ### Added

@@ -172,7 +172,7 @@ export function TellerLinkPanel({
         <p className="muted">Development and production Teller API calls require client certificate and key PEM values in settings.</p>
       ) : null}
       {config?.environment === "sandbox" ? (
-        <p className="muted">Sandbox tools can seed a Teller test enrollment directly without opening the Connect iframe.</p>
+        <p className="muted">Sandbox tools can seed a Teller test enrollment directly without opening Teller Connect.</p>
       ) : null}
       <p className="muted">When provider fixture caching is enabled, you can reuse the most recent Teller enrollment without opening Connect again.</p>
       {error ? <p className="error-text">{error}</p> : null}
