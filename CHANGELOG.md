@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-05-11
+
 ### Changed
 - Tightened static quality gates by adding a `knip`-backed unused-code check to `npm run lint`, reporting unused `oxlint` disable directives, removing dead server dependencies and exports, and documenting the intentional dynamic-loading exceptions for the Actual worker and Prisma client.
 - Enabled `noUncheckedIndexedAccess` across the repo and fixed the resulting unchecked array/env lookups in the imported-transaction ledger, Plaid runtime/live-test setup, and AccountCard UI tests.
@@ -19,6 +21,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Fixed `createAppContext(...)` so an explicitly provided scheduler override is preserved in the returned context instead of being dropped during service composition.
 - Expanded Plaid, Stripe, and Teller adapter branch coverage across reauth, disconnect, sandbox, cache, and provider-error fallback paths, and raised the Vitest per-file coverage gates to enforce those stronger adapter and boundary baselines going forward.
 - Expanded web-side provider coverage for reconnect flows, provider-settings validation/saves, and the Stripe/Teller browser loaders, so the remaining low-coverage provider UI paths are exercised before tightening the next round of server-side thresholds.
+- Expanded server-side route, review-service, and adapter coverage across session/logout state, static serving, reviewed-sync failure/removal paths, and additional Stripe/Teller guard branches, then raised the matching per-file Vitest thresholds so those new baselines are enforced going forward.
+- Fixed reviewed sync commits to treat deselected preview items as removals, so reconcile/delete cleanup and imported-transaction ledger pruning stay aligned with the user’s final review selection.
 
 ## [0.26.0] - 2026-05-11
 

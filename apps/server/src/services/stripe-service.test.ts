@@ -773,6 +773,94 @@ describe.sequential("stripeService", () => {
     });
   });
 
+  it("rejects refreshConnection for non-Stripe connections", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Plaid Connection",
+        accessTokenCiphertext: ""
+      }
+    });
+
+    const service = createStripeService({
+      prisma,
+      providerSettings: createProviderSettingsMock()
+    });
+
+    await expect(service.refreshConnection!(connection.id)).rejects.toThrow(
+      "Connection is not a Stripe Financial Connections account"
+    );
+  });
+
+  it("marks Stripe connections unhealthy when refreshConnection fails", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "STRIPE",
+        label: "Stripe Connection",
+        accessTokenCiphertext: "",
+        providerItemId: "auth_old",
+        metadataJson: JSON.stringify({
+          stripe: {
+            permissions: ["balances"],
+            authorizationId: "auth_old"
+          }
+        })
+      }
+    });
+
+    await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "acct_1",
+        name: "Checking",
+        type: "cash"
+      }
+    });
+
+    stripeMocks.accountsRetrieve.mockRejectedValueOnce(new Stripe.errors.StripeAuthenticationError({
+      message: "stripe auth failed",
+      statusCode: 401,
+      code: "auth_failed"
+    }));
+
+    const service = createStripeService({
+      prisma,
+      providerSettings: createProviderSettingsMock()
+    });
+
+    await expect(service.refreshConnection!(connection.id)).rejects.toMatchObject({
+      name: "ProviderOperationError",
+      healthScope: "CONNECTION_AUTH",
+      healthAction: "RETRY",
+      message: "stripe auth failed"
+    });
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+
+    expect(JSON.parse(updatedConnection.metadataJson || "{}")).toMatchObject({
+      stripe: {
+        permissions: ["balances"],
+        authorizationId: "auth_old"
+      },
+      health: {
+        scope: "CONNECTION_AUTH",
+        action: "RETRY",
+        message: "stripe auth failed"
+      }
+    });
+    expect(updatedConnection.status).toBe("ERROR");
+  });
+
   it("rejects finalizeReauthSession when Stripe relink returns an authorization already linked elsewhere", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
@@ -862,5 +950,68 @@ describe.sequential("stripeService", () => {
 
     await expect(service.disconnectConnection!(connection.id)).resolves.toBeUndefined();
     expect(stripeMocks.accountsDisconnect).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects disconnectConnection for non-Stripe connections", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Plaid Connection",
+        accessTokenCiphertext: ""
+      }
+    });
+
+    const service = createStripeService({
+      prisma,
+      providerSettings: createProviderSettingsMock()
+    });
+
+    await expect(service.disconnectConnection!(connection.id)).rejects.toThrow(
+      "Connection is not a Stripe Financial Connections account"
+    );
+  });
+
+  it("rethrows unexpected Stripe disconnect failures as retryable provider errors", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "STRIPE",
+        label: "Stripe Connection",
+        accessTokenCiphertext: "",
+        providerItemId: "auth_123"
+      }
+    });
+
+    await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "acct_1",
+        name: "Checking",
+        type: "cash"
+      }
+    });
+
+    stripeMocks.accountsDisconnect.mockRejectedValueOnce(new Stripe.errors.StripeError({
+      message: "permission denied",
+      statusCode: 403,
+      code: "permission_denied"
+    }));
+
+    const service = createStripeService({
+      prisma,
+      providerSettings: createProviderSettingsMock()
+    });
+
+    await expect(service.disconnectConnection!(connection.id)).rejects.toMatchObject({
+      name: "ProviderOperationError",
+      healthScope: "CONNECTION_AUTH",
+      healthAction: "RETRY",
+      message: "permission denied"
+    });
   });
 });

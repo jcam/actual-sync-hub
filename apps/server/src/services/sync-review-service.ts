@@ -435,9 +435,11 @@ export function createSyncReviewService<TSiblingLinks>({
         const reconcileTransactions = snapshot.reconcileTransactions.filter(transaction =>
           allowedImportedIds.has(transaction.imported_id)
         );
+        const removedImportedIds = snapshot.reconcileTransactions
+          .map(transaction => transaction.imported_id)
+          .filter(importedId => !allowedImportedIds.has(importedId));
 
         const migrating = link.status === "MIGRATING";
-        const removedImportedIds: string[] = [];
         const migrationResult = migrating
           ? await actual.importTransactions(actualAccountId, reconcileTransactions.map(toImportTransactionInput), {
               reimportDeleted: actualExternalSyncPrefs.reimportDeleted,

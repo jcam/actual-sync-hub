@@ -249,6 +249,43 @@ describe.sequential("teller service", () => {
     })).rejects.toThrow("Teller enrollment payload is incomplete");
   });
 
+  it("rejects Teller enrollment when the provider is not configured", async () => {
+    const service = createTellerService({
+      providerSettings: {
+        get: vi.fn().mockResolvedValue({
+          environment: "sandbox",
+          sandbox: {
+            appId: "",
+            sandboxAccessToken: "",
+            webhookSigningSecrets: []
+          },
+          development: {
+            appId: "",
+            certificatePem: "",
+            keyPem: "",
+            webhookSigningSecrets: []
+          },
+          production: {
+            appId: "",
+            certificatePem: "",
+            keyPem: "",
+            webhookSigningSecrets: []
+          },
+          transactionsInitialDays: 90,
+          transactionsOverlapDays: 10,
+          automaticSyncConcurrency: 1,
+          webhookToleranceSeconds: 180
+        })
+      } as never,
+      request: vi.fn()
+    });
+
+    await expect(service.enrollConnection({
+      accessToken: "teller-token",
+      enrollmentId: "enr_123"
+    })).rejects.toThrow("Teller is not configured");
+  });
+
   it("syncs Teller transactions with an overlapping date window", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-04T12:00:00.000Z"));
@@ -505,6 +542,60 @@ describe.sequential("teller service", () => {
     });
 
     await expect(service.verifyWebhookSignature(rawBody, `t=${signedTimestamp},v1=${signature}`)).resolves.toBe(false);
+  });
+
+  it("rejects missing and malformed Teller webhook signatures before HMAC verification", async () => {
+    const rawBody = JSON.stringify({
+      id: "wh-1",
+      type: "webhook.test",
+      timestamp: "2026-05-05T00:00:00Z",
+      payload: {}
+    });
+
+    const service = createTellerService({
+      providerSettings: {
+        get: vi.fn().mockResolvedValue({
+          environment: "sandbox",
+          sandbox: {
+            appId: "teller-app-id",
+            sandboxAccessToken: "",
+            webhookSigningSecrets: ["secret-1"]
+          },
+          development: {
+            appId: "",
+            certificatePem: "",
+            keyPem: "",
+            webhookSigningSecrets: []
+          },
+          production: {
+            appId: "",
+            certificatePem: "",
+            keyPem: "",
+            webhookSigningSecrets: []
+          },
+          transactionsInitialDays: 90,
+          transactionsOverlapDays: 10,
+          automaticSyncConcurrency: 1,
+          webhookToleranceSeconds: 180
+        })
+      } as never,
+      config: {
+        appId: "teller-app-id",
+        environment: "sandbox",
+        certificateFile: "",
+        keyFile: "",
+        sandboxAccessToken: "",
+        transactionsInitialDays: 90,
+        transactionsOverlapDays: 10,
+        webhookSigningSecrets: ["secret-1"],
+        webhookToleranceSeconds: 180
+      } satisfies TellerConfig,
+      request: vi.fn()
+    });
+
+    await expect(service.verifyWebhookSignature(rawBody, undefined)).resolves.toBe(false);
+    await expect(service.verifyWebhookSignature(rawBody, "v1=deadbeef")).resolves.toBe(false);
+    await expect(service.verifyWebhookSignature(rawBody, "t=not-a-number,v1=deadbeef")).resolves.toBe(false);
   });
 
   it("classifies Teller token failures as provider connection reauth failures", async () => {

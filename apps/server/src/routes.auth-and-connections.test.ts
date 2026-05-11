@@ -61,6 +61,99 @@ describe("server auth and connection routes", () => {
     expect(listConnections).toHaveBeenCalledOnce();
   });
 
+  it("rejects invalid login credentials", async () => {
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue(null)
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: {
+        username: "admin",
+        password: "wrong-password"
+      }
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({
+      error: "Invalid credentials"
+    });
+  });
+
+  it("reports session auth state before login and after logout", async () => {
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-2",
+              username: "admin"
+            })
+          }
+        })
+      })
+    );
+
+    const beforeLogin = await app.inject({
+      method: "GET",
+      url: "/api/auth/session"
+    });
+
+    expect(beforeLogin.statusCode).toBe(200);
+    expect(beforeLogin.json()).toEqual({
+      authenticated: false
+    });
+
+    const cookies = await loginAsAdmin(app);
+
+    const afterLogin = await app.inject({
+      method: "GET",
+      url: "/api/auth/session",
+      cookies
+    });
+
+    expect(afterLogin.statusCode).toBe(200);
+    expect(afterLogin.json()).toEqual({
+      authenticated: true,
+      username: "admin"
+    });
+
+    const logout = await app.inject({
+      method: "POST",
+      url: "/api/auth/logout",
+      cookies
+    });
+
+    expect(logout.statusCode).toBe(200);
+    expect(logout.json()).toEqual({
+      authenticated: false
+    });
+
+    const afterLogout = await app.inject({
+      method: "GET",
+      url: "/api/auth/session",
+      cookies
+    });
+
+    expect(afterLogout.statusCode).toBe(200);
+    expect(afterLogout.json()).toEqual({
+      authenticated: false
+    });
+  });
+
   it("returns shared account options and categories once for the accounts route", async () => {
     const payload = {
       accounts: [
@@ -1285,5 +1378,125 @@ describe("server auth and connection routes", () => {
       webhookSyncDebounceSeconds: 45,
       webhookToleranceSeconds: 180
     });
+  });
+
+  it("returns sync runs for authenticated users", async () => {
+    const listSyncRuns = vi.fn().mockResolvedValue([
+      {
+        id: "run-1",
+        status: "SUCCEEDED",
+        startedAt: "2026-05-10T12:00:00.000Z"
+      }
+    ]);
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-sync-runs",
+              username: "admin"
+            })
+          },
+          appService: {
+            listSyncRuns
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/sync-runs",
+      cookies: await loginAsAdmin(app)
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([
+      {
+        id: "run-1",
+        status: "SUCCEEDED",
+        startedAt: "2026-05-10T12:00:00.000Z"
+      }
+    ]);
+    expect(listSyncRuns).toHaveBeenCalledOnce();
+  });
+
+  it("returns a 400 for an invalid provider settings route parameter", async () => {
+    const get = vi.fn();
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-settings",
+              username: "admin"
+            })
+          },
+          providerSettingsService: {
+            get
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/provider-settings/UNKNOWN_PROVIDER",
+      cookies: await loginAsAdmin(app)
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Provider must be one of PLAID, STRIPE, TELLER, SIMPLEFIN, HOME_VALUES."
+    });
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("returns a 400 for an invalid home-values source enum", async () => {
+    const createHomeValueConnection = vi.fn();
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-home-values",
+              username: "admin"
+            })
+          },
+          appService: {
+            createHomeValueConnection
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/connections/home-values",
+      cookies: await loginAsAdmin(app),
+      payload: {
+        label: "Home",
+        address: "123 Main St",
+        source: "ZILLOW"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Source must be one of REDFIN, MOVOTO, HOMES_COM, TRULIA, AVERAGE."
+    });
+    expect(createHomeValueConnection).not.toHaveBeenCalled();
   });
 });

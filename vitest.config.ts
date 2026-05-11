@@ -18,7 +18,7 @@ export default defineConfig({
         perFile: true,
         "apps/server/src/services/{actual-service.ts,app-service.ts,home-values-service.ts,sync-review-service.ts}": {
           statements: 79,
-          branches: 57,
+          branches: 61,
           functions: 81,
           lines: 79
         },
@@ -29,22 +29,22 @@ export default defineConfig({
           lines: 77
         },
         "apps/server/src/services/{plaid-service.ts,simplefin-service.ts,teller-service.ts}": {
-          statements: 69,
-          branches: 59,
+          statements: 70,
+          branches: 60,
           functions: 66,
-          lines: 69
+          lines: 70
         },
         "apps/server/src/services/stripe-service.ts": {
-          statements: 78,
-          branches: 56,
+          statements: 81,
+          branches: 61,
           functions: 86,
-          lines: 78
+          lines: 81
         },
         "apps/server/src/{routes.ts,server.ts}": {
-          statements: 60,
-          branches: 47,
+          statements: 85,
+          branches: 61,
           functions: 85,
-          lines: 60
+          lines: 85
         },
         "apps/server/src/lib/request-parsing.ts": {
           statements: 95,

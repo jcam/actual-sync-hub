@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDatabase } from "../test/test-db.js";
 import { createSyncReviewService } from "./sync-review-service.js";
-import { serializeLinkConfig } from "./link-config.js";
+import { parseLinkConfig, serializeLinkConfig } from "./link-config.js";
 
 describe.sequential("sync review service", () => {
   const cleanups: Array<() => Promise<void>> = [];
@@ -820,5 +820,425 @@ describe.sequential("sync review service", () => {
       lastSync: "1778068800000"
     });
     expect(markActualExternalSyncSuccess).toHaveBeenCalledWith("actual-1", "1778068800000");
+  });
+
+  it("removes deselected reviewed transactions from the imported-transaction ledger", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    await prisma.accountLink.create({
+      data: {
+        id: "link-1",
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "SIMPLEFIN",
+        syncFrequency: "MANUAL",
+        isEnabled: true,
+        configJson: serializeLinkConfig({
+          health: null,
+          categoryMappings: [],
+          seenCategoryNames: []
+        })
+      }
+    });
+
+    await prisma.importedTransaction.create({
+      data: {
+        accountLinkId: "link-1",
+        importedId: "sf-remove",
+        transactionDate: "2026-05-04",
+        actualTransactionId: "tx-remove-old",
+        lastSeenAt: new Date("2026-05-04T00:00:00.000Z")
+      }
+    });
+
+    const reconcileTransactions = vi.fn().mockReturnValue([
+      {
+        date: "2026-05-05",
+        amount: -12.34,
+        payee_name: "Merchant",
+        imported_payee: "MERCHANT",
+        imported_id: "sf-keep",
+        cleared: true,
+        category_names: [],
+        resolved_category_id: undefined,
+        transfer_actual_account_id: undefined
+      },
+      {
+        date: "2026-05-04",
+        amount: -8.76,
+        payee_name: "Skipped Merchant",
+        imported_payee: "SKIPPED MERCHANT",
+        imported_id: "sf-remove",
+        cleared: true,
+        category_names: [],
+        resolved_category_id: undefined,
+        transfer_actual_account_id: undefined
+      }
+    ]);
+    const actualReconcileTransactions = vi.fn().mockResolvedValue({
+      added: 0,
+      updated: 1,
+      removed: 1,
+      addedIds: [],
+      updatedIds: ["tx-keep"]
+    });
+
+    const syncReviewService = createSyncReviewService({
+      database: prisma,
+      actual: {
+        listCategories: vi.fn().mockResolvedValue([]),
+        previewImportTransactions: vi.fn().mockResolvedValue({
+          errors: [],
+          updatedPreview: [
+            {
+              transaction: {
+                imported_id: "sf-keep"
+              },
+              existing: false,
+              ignored: false
+            },
+            {
+              transaction: {
+                imported_id: "sf-remove"
+              },
+              existing: false,
+              ignored: false
+            }
+          ]
+        }),
+        importTransactions: vi.fn(),
+        reconcileTransactions: actualReconcileTransactions,
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([
+          {
+            id: "tx-keep",
+            imported_id: "sf-keep"
+          }
+        ])
+      },
+      currentLinkStatuses: ["ACTIVE", "MIGRATING"],
+      getProviderAdapter: () =>
+        ({
+          provider: "SIMPLEFIN",
+          syncAccountLink: vi.fn().mockResolvedValue({
+            imported: 2,
+            transactions: [
+              {
+                importedId: "sf-keep",
+                date: "2026-05-05",
+                amount: -12.34,
+                payeeName: "Merchant",
+                importedPayee: "MERCHANT",
+                cleared: true,
+                categoryNames: [],
+                searchText: ["Merchant"]
+              },
+              {
+                importedId: "sf-remove",
+                date: "2026-05-04",
+                amount: -8.76,
+                payeeName: "Skipped Merchant",
+                importedPayee: "SKIPPED MERCHANT",
+                cleared: true,
+                categoryNames: [],
+                searchText: ["Skipped Merchant"]
+              }
+            ],
+            removedImportedIds: [],
+            configPatch: {}
+          })
+        }) as never,
+      buildSiblingLinks: vi.fn().mockResolvedValue([]),
+      buildReconcileTransactions: reconcileTransactions,
+      now: () => new Date("2026-05-06T12:00:00.000Z")
+    });
+
+    const preview = await syncReviewService.previewAccountSyncReview("actual-1");
+    await syncReviewService.commitAccountSyncReview("actual-1", {
+      snapshotId: preview.snapshotId,
+      importedIds: ["sf-keep"]
+    });
+
+    expect(actualReconcileTransactions).toHaveBeenCalledWith(
+      "actual-1",
+      [
+        expect.objectContaining({
+          imported_id: "sf-keep"
+        })
+      ],
+      ["sf-remove"],
+      ["tx-remove-old"],
+      {
+        reimportDeleted: true,
+        updateDates: false
+      }
+    );
+
+    const ledgerRows = await prisma.importedTransaction.findMany({
+      where: {
+        accountLinkId: "link-1"
+      },
+      orderBy: {
+        importedId: "asc"
+      }
+    });
+
+    expect(ledgerRows).toHaveLength(1);
+    expect(ledgerRows[0]).toMatchObject({
+      importedId: "sf-keep",
+      actualTransactionId: "tx-keep"
+    });
+  });
+
+  it("completes migrating commits through Actual importTransactions and marks the link active", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    await prisma.accountLink.create({
+      data: {
+        id: "link-1",
+        status: "MIGRATING",
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "SIMPLEFIN",
+        syncFrequency: "MANUAL",
+        isEnabled: true,
+        configJson: serializeLinkConfig({
+          health: null,
+          categoryMappings: [],
+          seenCategoryNames: []
+        })
+      }
+    });
+
+    const importTransactions = vi.fn().mockResolvedValue({
+      added: ["tx-1"],
+      updated: [],
+      errors: []
+    });
+    const reconcileTransactions = vi.fn();
+
+    const syncReviewService = createSyncReviewService({
+      database: prisma,
+      actual: {
+        listCategories: vi.fn().mockResolvedValue([]),
+        previewImportTransactions: vi.fn().mockResolvedValue({
+          errors: [],
+          updatedPreview: [
+            {
+              transaction: {
+                imported_id: "sf-1"
+              },
+              existing: false,
+              ignored: false
+            }
+          ]
+        }),
+        importTransactions,
+        reconcileTransactions,
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([
+          {
+            id: "tx-1",
+            imported_id: "sf-1"
+          }
+        ])
+      },
+      currentLinkStatuses: ["ACTIVE", "MIGRATING"],
+      getProviderAdapter: () =>
+        ({
+          provider: "SIMPLEFIN",
+          syncAccountLink: vi.fn().mockResolvedValue({
+            imported: 1,
+            transactions: [
+              {
+                importedId: "sf-1",
+                date: "2026-05-05",
+                amount: -12.34,
+                payeeName: "Merchant",
+                importedPayee: "MERCHANT",
+                cleared: true,
+                categoryNames: [],
+                searchText: ["Merchant"]
+              }
+            ],
+            removedImportedIds: [],
+            configPatch: {}
+          })
+        }) as never,
+      buildSiblingLinks: vi.fn().mockResolvedValue([]),
+      buildReconcileTransactions: vi.fn().mockReturnValue([
+        {
+          date: "2026-05-05",
+          amount: -12.34,
+          payee_name: "Merchant",
+          imported_payee: "MERCHANT",
+          imported_id: "sf-1",
+          cleared: true,
+          category_names: [],
+          resolved_category_id: undefined,
+          transfer_actual_account_id: undefined
+        }
+      ]),
+      markActualExternalSyncSuccess: vi.fn().mockResolvedValue(undefined),
+      now: () => new Date("2026-05-06T12:00:00.000Z")
+    });
+
+    const preview = await syncReviewService.previewAccountSyncReview("actual-1");
+    await syncReviewService.commitAccountSyncReview("actual-1", {
+      snapshotId: preview.snapshotId,
+      importedIds: ["sf-1"]
+    });
+
+    expect(importTransactions).toHaveBeenCalledWith(
+      "actual-1",
+      [
+        expect.objectContaining({
+          imported_id: "sf-1",
+          amount: -12.34
+        })
+      ],
+      {
+        reimportDeleted: true,
+        updateDates: false
+      }
+    );
+    expect(reconcileTransactions).not.toHaveBeenCalled();
+
+    const updatedLink = await prisma.accountLink.findUniqueOrThrow({
+      where: {
+        id: "link-1"
+      }
+    });
+    const syncRuns = await prisma.syncRun.findMany({
+      where: {
+        accountLinkId: "link-1"
+      }
+    });
+
+    expect(updatedLink.status).toBe("ACTIVE");
+    expect(updatedLink.migrationCompletedAt?.toISOString()).toBe("2026-05-06T12:00:00.000Z");
+    expect(syncRuns[0]).toMatchObject({
+      status: "SUCCESS",
+      summary: "Migration sync imported 1 transactions, updated 0, removed 0."
+    });
+  });
+
+  it("marks sync failures on the link and sync run when commit reconciliation throws", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    await prisma.accountLink.create({
+      data: {
+        id: "link-1",
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "SIMPLEFIN",
+        syncFrequency: "MANUAL",
+        isEnabled: true,
+        configJson: serializeLinkConfig({
+          health: null,
+          categoryMappings: [],
+          seenCategoryNames: []
+        })
+      }
+    });
+
+    const markActualExternalSyncFailure = vi.fn().mockResolvedValue(undefined);
+
+    const syncReviewService = createSyncReviewService({
+      database: prisma,
+      actual: {
+        listCategories: vi.fn().mockResolvedValue([]),
+        previewImportTransactions: vi.fn().mockResolvedValue({
+          errors: [],
+          updatedPreview: [
+            {
+              transaction: {
+                imported_id: "sf-1"
+              },
+              existing: false,
+              ignored: false
+            }
+          ]
+        }),
+        importTransactions: vi.fn(),
+        reconcileTransactions: vi.fn().mockRejectedValue(new Error("reconcile failed")),
+        listTransactionsByDateRange: vi.fn()
+      },
+      currentLinkStatuses: ["ACTIVE", "MIGRATING"],
+      getProviderAdapter: () =>
+        ({
+          provider: "SIMPLEFIN",
+          syncAccountLink: vi.fn().mockResolvedValue({
+            imported: 1,
+            transactions: [
+              {
+                importedId: "sf-1",
+                date: "2026-05-05",
+                amount: -12.34,
+                payeeName: "Merchant",
+                importedPayee: "MERCHANT",
+                cleared: true,
+                categoryNames: [],
+                searchText: ["Merchant"]
+              }
+            ],
+            removedImportedIds: [],
+            configPatch: {}
+          })
+        }) as never,
+      buildSiblingLinks: vi.fn().mockResolvedValue([]),
+      buildReconcileTransactions: vi.fn().mockReturnValue([
+        {
+          date: "2026-05-05",
+          amount: -12.34,
+          payee_name: "Merchant",
+          imported_payee: "MERCHANT",
+          imported_id: "sf-1",
+          cleared: true,
+          category_names: [],
+          resolved_category_id: undefined,
+          transfer_actual_account_id: undefined
+        }
+      ]),
+      markActualExternalSyncFailure,
+      now: () => new Date("2026-05-06T12:00:00.000Z")
+    });
+
+    const preview = await syncReviewService.previewAccountSyncReview("actual-1");
+
+    await expect(
+      syncReviewService.commitAccountSyncReview("actual-1", {
+        snapshotId: preview.snapshotId,
+        importedIds: ["sf-1"]
+      })
+    ).rejects.toThrow("reconcile failed");
+
+    expect(markActualExternalSyncFailure).toHaveBeenCalledWith("actual-1");
+
+    const updatedLink = await prisma.accountLink.findUniqueOrThrow({
+      where: {
+        id: "link-1"
+      }
+    });
+    const syncRuns = await prisma.syncRun.findMany({
+      where: {
+        accountLinkId: "link-1"
+      }
+    });
+    const updatedConfig = parseLinkConfig(updatedLink.configJson);
+
+    expect(updatedConfig.health).toMatchObject({
+      scope: "ACTUAL_BACKEND",
+      action: "RETRY",
+      message: "reconcile failed"
+    });
+    expect(syncRuns[0]).toMatchObject({
+      status: "FAILED",
+      error: "reconcile failed"
+    });
   });
 });

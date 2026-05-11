@@ -464,6 +464,59 @@ describe("server webhook and account-link routes", () => {
     expect(requestWakeup).toHaveBeenCalledOnce();
   });
 
+  it("rejects account-link writes and manual sync without a session", async () => {
+    const upsertAccountLink = vi.fn();
+    const runAccountSync = vi.fn();
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          appService: {
+            upsertAccountLink,
+            runAccountSync
+          }
+        })
+      })
+    );
+
+    const saveResponse = await app.inject({
+      method: "PUT",
+      url: "/api/account-links/actual-1",
+      payload: {
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "SIMPLEFIN",
+        connectionId: "conn-1",
+        connectionAccountId: "conn-account-1",
+        syncFrequency: "DAILY",
+        syncHour: 6,
+        syncDayOfWeek: null,
+        isEnabled: true,
+        categoryMappings: []
+      }
+    });
+
+    expect(saveResponse.statusCode).toBe(401);
+    expect(saveResponse.json()).toEqual({
+      error: "Unauthorized"
+    });
+    expect(upsertAccountLink).not.toHaveBeenCalled();
+
+    const syncResponse = await app.inject({
+      method: "POST",
+      url: "/api/account-links/actual-1/sync"
+    });
+
+    expect(syncResponse.statusCode).toBe(401);
+    expect(syncResponse.json()).toEqual({
+      error: "Unauthorized"
+    });
+    expect(runAccountSync).not.toHaveBeenCalled();
+  });
+
   it("runs a manual sync through the route layer", async () => {
     const runAccountSync = vi.fn().mockResolvedValue(undefined);
 

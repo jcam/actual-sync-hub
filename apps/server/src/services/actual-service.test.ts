@@ -345,7 +345,9 @@ describe.sequential("actual service", () => {
   const cleanups: Array<() => Promise<void>> = [];
 
   afterEach(async () => {
-    await Promise.all(cleanups.splice(0).map(cleanup => cleanup()));
+    for (const cleanup of cleanups.splice(0).reverse()) {
+      await cleanup();
+    }
   });
 
   it("falls back to getAccounts for external sync reads when getExternalSyncAccount is unavailable", async () => {
