@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDatabase } from "../test/test-db.js";
-import { isAccountLinkDue, SyncScheduler } from "./scheduler.js";
+import { getNextAccountLinkDueAt, isAccountLinkDue, SyncScheduler } from "./scheduler.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -46,6 +46,19 @@ describe("isAccountLinkDue", () => {
     ).toBe(true);
   });
 
+  it("computes the next due time for an hourly link", () => {
+    expect(
+      getNextAccountLinkDueAt(new Date("2026-05-04T12:00:00.000Z"), {
+        syncFrequency: "HOURLY",
+        syncHour: null,
+        syncDayOfWeek: null,
+        isEnabled: true,
+        id: "link-1",
+        lastSyncedAt: new Date("2026-05-04T11:30:00.000Z")
+      })?.toISOString()
+    ).toBe("2026-05-04T12:30:00.000Z");
+  });
+
   it("passes due links to the batched scheduled sync entrypoint", async () => {
     const { prisma, cleanup } = await createTestDatabase();
 
@@ -61,6 +74,7 @@ describe("isAccountLinkDue", () => {
             syncFrequency: "HOURLY",
             isEnabled: true,
             lastSyncedAt: new Date("2026-05-04T10:00:00.000Z"),
+            nextSyncAt: new Date("2026-05-04T11:00:00.000Z"),
             updatedAt: new Date("2026-05-04T10:00:00.000Z")
           },
           {
@@ -113,6 +127,7 @@ describe("isAccountLinkDue", () => {
           syncFrequency: "HOURLY",
           isEnabled: true,
           lastSyncedAt: new Date("2026-05-04T10:00:00.000Z"),
+          nextSyncAt: new Date("2026-05-04T11:00:00.000Z"),
           updatedAt: new Date("2026-05-04T10:00:00.000Z")
         }
       });
@@ -150,7 +165,8 @@ describe("isAccountLinkDue", () => {
     const scheduler = new SyncScheduler({
       prisma: {
         accountLink: {
-          findMany: vi.fn().mockResolvedValue([])
+          findMany: vi.fn().mockResolvedValue([]),
+          findFirst: vi.fn().mockResolvedValue(null)
         }
       } as never,
       appService: {
@@ -182,7 +198,8 @@ describe("isAccountLinkDue", () => {
     const scheduler = new SyncScheduler({
       prisma: {
         accountLink: {
-          findMany: vi.fn().mockResolvedValue([])
+          findMany: vi.fn().mockResolvedValue([]),
+          findFirst: vi.fn().mockResolvedValue(null)
         }
       } as never,
       appService: {
@@ -211,6 +228,54 @@ describe("isAccountLinkDue", () => {
     scheduler.stop();
   });
 
+  it("arms a one-shot scheduled tick for the next due link", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-04T12:00:00.000Z"));
+
+    const { prisma, cleanup } = await createTestDatabase();
+    const listRequestedExternalSyncAccountIds = vi.fn().mockResolvedValue([]);
+    const runRequestedExternalSync = vi.fn().mockResolvedValue(undefined);
+    const runScheduledLinkSyncs = vi.fn().mockResolvedValue(undefined);
+    await prisma.accountLink.create({
+      data: {
+        id: "link-1",
+        actualAccountId: "actual-1",
+        actualAccountName: "Checking",
+        assetType: "BANK",
+        provider: "SIMPLEFIN",
+        syncFrequency: "HOURLY",
+        isEnabled: true,
+        lastSyncedAt: new Date("2026-05-04T11:30:00.000Z"),
+        nextSyncAt: new Date("2026-05-04T12:30:00.000Z")
+      }
+    });
+    const scheduler = new SyncScheduler({
+      prisma,
+      appService: {
+        listRequestedExternalSyncAccountIds,
+        runRequestedExternalSync,
+        runScheduledLinkSyncs
+      } as never,
+      intervalMs: 60_000,
+      requestedSyncPollIntervalMs: 10_000
+    });
+
+    scheduler.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    runScheduledLinkSyncs.mockClear();
+
+    await vi.advanceTimersByTimeAsync(29 * 60_000);
+    expect(runScheduledLinkSyncs).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.runOnlyPendingTimersAsync();
+    expect(runScheduledLinkSyncs).toHaveBeenCalledWith(["link-1"]);
+
+    scheduler.stop();
+    await cleanup();
+  });
+
   it("reuses the in-flight requested external sync poll between the fast poll and the main tick", async () => {
     vi.useFakeTimers();
 
@@ -226,7 +291,8 @@ describe("isAccountLinkDue", () => {
     const scheduler = new SyncScheduler({
       prisma: {
         accountLink: {
-          findMany: vi.fn().mockResolvedValue([])
+          findMany: vi.fn().mockResolvedValue([]),
+          findFirst: vi.fn().mockResolvedValue(null)
         }
       } as never,
       appService: {
@@ -263,7 +329,8 @@ describe("isAccountLinkDue", () => {
     const scheduler = new SyncScheduler({
       prisma: {
         accountLink: {
-          findMany: vi.fn().mockResolvedValue([])
+          findMany: vi.fn().mockResolvedValue([]),
+          findFirst: vi.fn().mockResolvedValue(null)
         }
       } as never,
       appService: {

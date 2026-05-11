@@ -317,6 +317,20 @@ function parseTimestamp(value: string | null | undefined) {
   return Number.isFinite(ms) ? ms : null;
 }
 
+function toFetchedAtDate(value: string | null | undefined) {
+  const parsed = parseTimestamp(value);
+  return parsed == null ? null : new Date(parsed);
+}
+
+function buildFetchedAtColumns(details: HomeValueConnectionDetailsDto) {
+  return {
+    homeValuesRedfinLastFetchedAt: toFetchedAtDate(details.sources?.redfin?.lastFetchedAt ?? null),
+    homeValuesMovotoLastFetchedAt: toFetchedAtDate(details.sources?.movoto?.lastFetchedAt ?? null),
+    homeValuesHomesLastFetchedAt: toFetchedAtDate(details.sources?.homes?.lastFetchedAt ?? null),
+    homeValuesTruliaLastFetchedAt: toFetchedAtDate(details.sources?.trulia?.lastFetchedAt ?? null)
+  };
+}
+
 function isOlderThan(value: string | null | undefined, nowMs: number, thresholdMs: number) {
   const parsed = parseTimestamp(value);
   return parsed == null || nowMs - parsed >= thresholdMs;
@@ -789,7 +803,7 @@ export function createHomeValuesService({
   };
 
   const getLatestFetchAt = async (sourceKey: SourceKey, currentConnectionId?: string) => {
-    const connections = await database.connection.findMany({
+    const aggregate = await database.connection.aggregate({
       where: {
         provider: "HOME_VALUES",
         ...(currentConnectionId
@@ -800,29 +814,22 @@ export function createHomeValuesService({
             }
           : {})
       },
-      select: {
-        metadataJson: true
+      _max: {
+        homeValuesRedfinLastFetchedAt: true,
+        homeValuesMovotoLastFetchedAt: true,
+        homeValuesHomesLastFetchedAt: true,
+        homeValuesTruliaLastFetchedAt: true
       }
     });
-
-    let latest: number | null = null;
-    for (const connection of connections) {
-      const metadata = parseConnectionMetadata(connection.metadataJson) as HomeValuesMetadata;
-      const details = metadata.homeValues;
-      const timestamp =
-        sourceKey === "redfin"
-          ? details?.sources?.redfin?.lastFetchedAt
-          : sourceKey === "movoto"
-            ? details?.sources?.movoto?.lastFetchedAt
-            : sourceKey === "homes"
-              ? details?.sources?.homes?.lastFetchedAt
-              : details?.sources?.trulia?.lastFetchedAt;
-      const parsed = parseTimestamp(timestamp);
-      if (parsed != null && (latest == null || parsed > latest)) {
-        latest = parsed;
-      }
-    }
-    return latest;
+    return parseTimestamp(
+      sourceKey === "redfin"
+        ? aggregate._max.homeValuesRedfinLastFetchedAt?.toISOString() ?? null
+        : sourceKey === "movoto"
+          ? aggregate._max.homeValuesMovotoLastFetchedAt?.toISOString() ?? null
+          : sourceKey === "homes"
+            ? aggregate._max.homeValuesHomesLastFetchedAt?.toISOString() ?? null
+            : aggregate._max.homeValuesTruliaLastFetchedAt?.toISOString() ?? null
+    );
   };
 
   const persistConnectionDetails = async ({
@@ -842,6 +849,7 @@ export function createHomeValuesService({
         institutionName: "Home Values",
         institutionId: "home-values",
         lastRefreshedAt: now(),
+        ...buildFetchedAtColumns(details),
         metadataJson: JSON.stringify({
           homeValues: details,
           health: clearSyncHealth()
@@ -950,6 +958,7 @@ export function createHomeValuesService({
           accessTokenCiphertext: encryptString("manual-home-values"),
           providerItemId: randomUUID(),
           lastRefreshedAt: now(),
+          ...buildFetchedAtColumns(details),
           metadataJson: JSON.stringify({
             homeValues: details,
             health: clearSyncHealth()

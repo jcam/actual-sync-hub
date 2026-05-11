@@ -2670,6 +2670,7 @@ describe.sequential("app service", () => {
       updateDates: false
     });
     expect(link.lastSyncedAt?.toISOString()).toBe(now.toISOString());
+    expect(link.nextSyncAt?.toISOString()).toBe("2026-05-05T04:00:00.000Z");
     expect(link.configJson).toContain("\"cursor\":\"cursor-2\"");
     expect(runs).toHaveLength(1);
     expect(runs[0]?.status).toBe("SUCCESS");

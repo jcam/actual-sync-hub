@@ -26,6 +26,7 @@ describe("ReviewPage", () => {
   });
 
   const previewPayload = {
+    snapshotId: "snapshot-1",
     actualAccountId: "actual-1",
     actualAccountName: "Checking",
     linkId: "link-1",
@@ -96,6 +97,7 @@ describe("ReviewPage", () => {
 
     await waitFor(() => {
       expect(commitSyncReview).toHaveBeenCalledWith("actual-1", {
+        snapshotId: "snapshot-1",
         importedIds: ["plaid-1"]
       });
     });
@@ -125,6 +127,7 @@ describe("ReviewPage", () => {
     await waitFor(() => {
       expect(previewMigration).toHaveBeenCalledWith("actual-1");
       expect(commitMigration).toHaveBeenCalledWith("actual-1", {
+        snapshotId: "snapshot-1",
         importedIds: ["plaid-1"]
       });
     });

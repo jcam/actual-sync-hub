@@ -374,6 +374,44 @@ function collectDateUpdates({
   });
 }
 
+function buildTransferPayeeByAccountId(
+  payees: APIPayeeEntity[]
+): Map<string, { id: string; name?: string | null }> {
+  return new Map(
+    payees
+      .filter((payee: APIPayeeEntity) => Boolean(payee.transfer_acct))
+      .map(payee => [
+        payee.transfer_acct as string,
+        {
+          id: payee.id,
+          name: payee.name
+        }
+      ])
+  );
+}
+
+function toActualImportTransaction(
+  accountId: string,
+  transaction: ImportTransactionInput
+): ActualImportTransaction {
+  return {
+    account: accountId,
+    date: transaction.date,
+    amount: amountToInteger(transaction.amount),
+    payee: transaction.payee,
+    payee_name: transaction.payee_name,
+    imported_payee: transaction.imported_payee,
+    notes: transaction.notes,
+    imported_id: transaction.imported_id,
+    cleared: transaction.cleared ?? true,
+    category: transaction.category
+  };
+}
+
+function buildActualImportPayload(accountId: string, transactions: ImportTransactionInput[]) {
+  return transactions.map(transaction => toActualImportTransaction(accountId, transaction));
+}
+
 function getActualCapabilities(actual: ActualModule): ActualCapabilities {
   const api = actual as ActualModuleWithExternalSync;
   const accountApi = actual as ActualModuleWithAccountApi;
@@ -921,32 +959,17 @@ async function main() {
         }
 
         case "importTransactions": {
-          const payees = await actual.getPayees();
-          const transferPayeeByAccountId = new Map(
-            payees
-              .filter((payee: APIPayeeEntity) => Boolean(payee.transfer_acct))
-              .map(payee => [
-                payee.transfer_acct as string,
-                {
-                  id: payee.id
-                }
-              ])
+          const transferPayeeByAccountId = buildTransferPayeeByAccountId(await actual.getPayees());
+          const payload = buildActualImportPayload(
+            command.accountId,
+            command.transactions.map(transaction => ({
+              ...transaction,
+              payee:
+                transaction.transfer_actual_account_id
+                  ? transferPayeeByAccountId.get(transaction.transfer_actual_account_id)?.id
+                  : transaction.payee
+            }))
           );
-          const payload: ActualImportTransaction[] = command.transactions.map(transaction => ({
-            account: command.accountId,
-            date: transaction.date,
-            amount: amountToInteger(transaction.amount),
-            payee:
-              transaction.transfer_actual_account_id
-                ? transferPayeeByAccountId.get(transaction.transfer_actual_account_id)?.id
-                : transaction.payee,
-            payee_name: transaction.payee_name,
-            imported_payee: transaction.imported_payee,
-            notes: transaction.notes,
-            imported_id: transaction.imported_id,
-            cleared: transaction.cleared ?? true,
-            category: transaction.category
-          }));
 
           const result = await actual.importTransactions(command.accountId, payload, {
             defaultCleared: true,
@@ -981,32 +1004,17 @@ async function main() {
 
         case "previewImportTransactions": {
           await syncIfNeeded();
-          const payees = await actual.getPayees();
-          const transferPayeeByAccountId = new Map(
-            payees
-              .filter((payee: APIPayeeEntity) => Boolean(payee.transfer_acct))
-              .map(payee => [
-                payee.transfer_acct as string,
-                {
-                  id: payee.id
-                }
-              ])
+          const transferPayeeByAccountId = buildTransferPayeeByAccountId(await actual.getPayees());
+          const payload = buildActualImportPayload(
+            command.accountId,
+            command.transactions.map(transaction => ({
+              ...transaction,
+              payee:
+                transaction.transfer_actual_account_id
+                  ? transferPayeeByAccountId.get(transaction.transfer_actual_account_id)?.id
+                  : transaction.payee
+            }))
           );
-          const payload: ActualImportTransaction[] = command.transactions.map(transaction => ({
-            account: command.accountId,
-            date: transaction.date,
-            amount: amountToInteger(transaction.amount),
-            payee:
-              transaction.transfer_actual_account_id
-                ? transferPayeeByAccountId.get(transaction.transfer_actual_account_id)?.id
-                : transaction.payee,
-            payee_name: transaction.payee_name,
-            imported_payee: transaction.imported_payee,
-            notes: transaction.notes,
-            imported_id: transaction.imported_id,
-            cleared: transaction.cleared ?? true,
-            category: transaction.category
-          }));
 
           const result = await actual.importTransactions(command.accountId, payload, {
             defaultCleared: true,
@@ -1025,27 +1033,17 @@ async function main() {
           await syncIfNeeded();
 
           const categories = (await actual.getCategories()).filter(isActualCategory);
-          const payees = await actual.getPayees();
-          const transferPayeeByAccountId = new Map(
-            payees
-              .filter((payee: APIPayeeEntity) => Boolean(payee.transfer_acct))
-              .map(payee => [
-                payee.transfer_acct as string,
-                {
-                  id: payee.id,
-                  name: payee.name
-                }
-              ])
-          );
+          const actualCategories = categories.map(category => ({
+            id: category.id,
+            name: category.name
+          }));
+          const transferPayeeByAccountId = buildTransferPayeeByAccountId(await actual.getPayees());
           let removed = 0;
           let renamedPayees = 0;
           const resolvedTransactions = command.transactions.map(transaction => {
             const resolvedCategoryId = transaction.resolved_category_id || resolveActualCategoryId({
               categoryNames: transaction.category_names,
-              actualCategories: categories.map(category => ({
-                id: category.id,
-                name: category.name
-              }))
+              actualCategories
             });
             const resolvedTransferPayee = transaction.transfer_actual_account_id
               ? transferPayeeByAccountId.get(transaction.transfer_actual_account_id)
@@ -1063,6 +1061,7 @@ async function main() {
               category: resolvedCategoryId
             } satisfies ImportTransactionInput;
           });
+          const importPayload = buildActualImportPayload(command.accountId, resolvedTransactions);
 
           for (const existingId of command.removedActualTransactionIds) {
             if (!existingId) {
@@ -1080,18 +1079,7 @@ async function main() {
             updatedPreview: []
           };
           if (resolvedTransactions.length > 0) {
-            previewResult = (await actual.importTransactions(command.accountId, resolvedTransactions.map(transaction => ({
-              account: command.accountId,
-              date: transaction.date,
-              amount: amountToInteger(transaction.amount),
-              payee: transaction.payee,
-              payee_name: transaction.payee_name,
-              imported_payee: transaction.imported_payee,
-              notes: transaction.notes,
-              imported_id: transaction.imported_id,
-              cleared: transaction.cleared ?? true,
-              category: transaction.category
-            })), {
+            previewResult = (await actual.importTransactions(command.accountId, importPayload, {
               defaultCleared: true,
               dryRun: true,
               reimportDeleted: command.options?.reimportDeleted
@@ -1101,18 +1089,7 @@ async function main() {
               throw new Error(previewResult.errors[0]?.message || "Actual reconcile preview failed");
             }
 
-            const importResult = await actual.importTransactions(command.accountId, resolvedTransactions.map(transaction => ({
-              account: command.accountId,
-              date: transaction.date,
-              amount: amountToInteger(transaction.amount),
-              payee: transaction.payee,
-              payee_name: transaction.payee_name,
-              imported_payee: transaction.imported_payee,
-              notes: transaction.notes,
-              imported_id: transaction.imported_id,
-              cleared: transaction.cleared ?? true,
-              category: transaction.category
-            })), {
+            const importResult = await actual.importTransactions(command.accountId, importPayload, {
               defaultCleared: true,
               reimportDeleted: command.options?.reimportDeleted
             });
@@ -1121,7 +1098,7 @@ async function main() {
               throw new Error(importResult.errors[0]?.message || "Actual reconcile import failed");
             }
 
-            const renamedPayeeIds = new Set<string>();
+            const renamedPayeeUpdates = new Map<string, string>();
             previewResult.updatedPreview.forEach((preview, index) => {
               const existing = preview.existing || null;
               const transaction = command.transactions[index];
@@ -1136,26 +1113,15 @@ async function main() {
                 transaction.imported_payee &&
                 existing.imported_payee === existing.payee_name &&
                 transaction.payee_name !== transaction.imported_payee &&
-                !renamedPayeeIds.has(existing.payee)
+                !renamedPayeeUpdates.has(existing.payee)
               ) {
-                renamedPayeeIds.add(existing.payee);
+                renamedPayeeUpdates.set(existing.payee, transaction.payee_name);
               }
             });
 
-            for (const payeeId of renamedPayeeIds) {
-              const matchingPreview = previewResult.updatedPreview.find(preview => {
-                const existing = preview.existing || null;
-                return existing?.payee === payeeId;
-              });
-              const transaction = matchingPreview
-                ? command.transactions[previewResult.updatedPreview.indexOf(matchingPreview)]
-                : null;
-              if (!transaction?.payee_name) {
-                continue;
-              }
-
+            for (const [payeeId, payeeName] of renamedPayeeUpdates) {
               await actual.updatePayee(payeeId, {
-                name: transaction.payee_name
+                name: payeeName
               });
               renamedPayees += 1;
             }

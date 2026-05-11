@@ -7,6 +7,21 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-05-11
+
+### Added
+- A configurable `HTTP_REQUEST_LOG_ENABLED` server flag so low-power deployments can disable Fastify request logging without code changes.
+- Snapshot-backed sync review commits that apply exactly the previewed provider data, reject stale previews, and surface recoverable refresh errors in the review UI.
+- Persisted `nextSyncAt` scheduling state for account links and persisted per-source Home Values fetch timestamps, so the scheduler and Home Values pacing logic can rely on indexed database fields instead of recomputing from full record scans.
+
+### Changed
+- Reduced account-management overhead by returning shared Actual account options/categories once per response and replacing full Actual account scans with targeted single-account external-link reconciliation.
+- Removed repeated provider settings reads, repeated connection-metadata parsing, repeated Stripe metadata parsing, and repeated SimpleFIN link lookups across common server paths.
+- Reworked the Actual worker import/reconcile flow to reuse transfer payee maps and import payload construction instead of rebuilding the same structures multiple times per command.
+- Lowered peak sync-path pressure by bounding imported-transaction ledger write concurrency and removing avoidable quadratic lookups from sync application paths.
+- Moved scheduled automatic syncs from a fixed one-minute global scan to one-shot next-due scheduling with a four-hour sanity fallback and explicit wakeups only where schedule state can actually change.
+- Tightened the greenfield optimization paths to assume current persisted schema state rather than carrying forward compatibility workarounds for legacy `nextSyncAt` or Home Values fetch-timestamp backfills.
+
 ## [0.23.0] - 2026-05-11
 
 ### Added

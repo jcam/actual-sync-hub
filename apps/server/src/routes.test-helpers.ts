@@ -23,6 +23,11 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       reconcileTransactions: vi.fn(),
       ...(overrides.actualService as object | undefined)
     },
+    scheduler: {
+      requestWakeup: vi.fn(),
+      requestWakeupForAccounts: vi.fn(),
+      ...(overrides.scheduler as object | undefined)
+    },
     authService: {
       authenticateUser: vi.fn(),
       validateActualToken: vi.fn().mockResolvedValue(true),

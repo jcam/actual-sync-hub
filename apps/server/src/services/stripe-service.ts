@@ -1015,13 +1015,15 @@ export function createStripeService({
         throw new Error("Connection is not a Stripe Financial Connections account");
       }
 
+      const metadata = parseConnectionMetadata(connection.metadataJson);
+      const connectionCanRefreshBalances = metadata.stripe?.permissions?.includes("balances");
+
       try {
         const refreshedAccounts = await Promise.all(
           connection.accounts.map(async linkedAccount => {
             const account = await retrieveStripeAccount(stripe, linkedAccount.externalAccountId);
             const canRefreshBalance =
-              account.permissions?.includes("balances") ||
-              parseConnectionMetadata(connection.metadataJson).stripe?.permissions?.includes("balances");
+              account.permissions?.includes("balances") || connectionCanRefreshBalances;
             return refreshStripeAccountData({
               stripe,
               account,
@@ -1037,7 +1039,6 @@ export function createStripeService({
           accounts: refreshedAccounts
         });
 
-        const metadata = parseConnectionMetadata(connection.metadataJson);
         await database.connection.update({
           where: {
             id: connection.id
@@ -1060,7 +1061,6 @@ export function createStripeService({
           }
         });
       } catch (error) {
-        const metadata = parseConnectionMetadata(connection.metadataJson);
         const health = toSyncHealth(classifyStripeError(error));
         await database.connection.update({
           where: {

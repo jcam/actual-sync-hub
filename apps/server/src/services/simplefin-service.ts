@@ -635,9 +635,10 @@ export function createSimpleFinService({
       const outcomes = new Map<string, ProviderSyncOutcome>();
       const today = toIsoDate(now());
       const linksByConnection = new Map<string, SimpleFinLink[]>();
+      const linkById = new Map(links.map(link => [link.id, link] as const));
 
       for (const linkId of linkIds) {
-        const link = links.find(candidate => candidate.id === linkId);
+        const link = linkById.get(linkId);
         if (!link) {
           outcomes.set(linkId, {
             error: new Error(`SimpleFIN link ${linkId} was not found`)

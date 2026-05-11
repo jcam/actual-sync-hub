@@ -73,6 +73,10 @@ model Connection {
   providerItemId        String?
   metadataJson          String?
   lastRefreshedAt       DateTime?
+  homeValuesRedfinLastFetchedAt DateTime?
+  homeValuesMovotoLastFetchedAt DateTime?
+  homeValuesHomesLastFetchedAt  DateTime?
+  homeValuesTruliaLastFetchedAt DateTime?
   createdAt             DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
   accounts              ConnectionAccount[]
@@ -120,6 +124,7 @@ model AccountLink {
   syncDayOfWeek     Int?
   isEnabled         Boolean           @default(false)
   lastSyncedAt      DateTime?
+  nextSyncAt        DateTime?
   migrationStartedAt DateTime?
   migrationCompletedAt DateTime?
   supersededAt      DateTime?
@@ -133,6 +138,7 @@ model AccountLink {
   importedTransactions ImportedTransaction[]
 
   @@index([actualAccountId, status])
+  @@index([isEnabled, status, nextSyncAt])
   @@index([replacedByLinkId])
 }
 

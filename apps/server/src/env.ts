@@ -21,6 +21,7 @@ const envSchema = z.object({
   ACTUAL_API_LOCAL_ENTRY: z.string().optional().default(""),
   ACTUAL_API_VERSION_MATCH_MODE: z.enum(["off", "auto", "strict"]).optional(),
   ACTUAL_SYNC_EVENT_DEBUG: z.enum(["0", "1"]).default("0"),
+  HTTP_REQUEST_LOG_ENABLED: z.enum(["0", "1"]).optional(),
   AUTOMATIC_SYNC_BACKOFF_BASE_MINUTES: z.coerce.number().int().min(1).max(120).default(5),
   AUTOMATIC_SYNC_BACKOFF_MAX_MINUTES: z.coerce.number().int().min(1).max(1440).default(60),
   PROVIDER_FIXTURE_CACHE_ENABLED: z.enum(["0", "1"]).default("0"),
@@ -39,6 +40,9 @@ export const env = {
     parsed.ACTUAL_API_VERSION_MATCH_MODE ??
     (parsed.NODE_ENV === "production" && parsed.LIVE_SANDBOX_MODE !== "1" ? "off" : "auto"),
   actualSyncEventDebug: parsed.ACTUAL_SYNC_EVENT_DEBUG === "1",
+  httpRequestLogEnabled: parsed.HTTP_REQUEST_LOG_ENABLED
+    ? parsed.HTTP_REQUEST_LOG_ENABLED === "1"
+    : parsed.NODE_ENV === "development",
   providerFixtureCacheEnabled: parsed.PROVIDER_FIXTURE_CACHE_ENABLED === "1",
   providerFixtureCacheFile: path.resolve(process.cwd(), parsed.PROVIDER_FIXTURE_CACHE_FILE),
   liveSandboxMode: parsed.LIVE_SANDBOX_MODE === "1",

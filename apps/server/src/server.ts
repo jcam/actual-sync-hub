@@ -14,15 +14,17 @@ export async function createServer({
   sessionSecret,
   nodeEnv = "development",
   enableStatic = true,
+  requestLoggingEnabled = nodeEnv === "development",
   context = createAppContext()
 }: {
   sessionSecret: string;
   nodeEnv?: "development" | "test" | "production";
   enableStatic?: boolean;
+  requestLoggingEnabled?: boolean;
   context?: AppContext;
 }) {
   const app = Fastify({
-    logger: true
+    logger: requestLoggingEnabled
   });
 
   const formatValidationIssue = (issue: ZodIssue) => {

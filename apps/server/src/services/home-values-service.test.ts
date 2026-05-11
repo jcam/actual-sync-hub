@@ -86,6 +86,8 @@ describe.sequential("home values service", () => {
 
     expect(connection.provider).toBe("HOME_VALUES");
     expect(connection.accounts[0]?.currentBalance).toBe(640000);
+    expect(connection.homeValuesRedfinLastFetchedAt).toBeTruthy();
+    expect(connection.homeValuesMovotoLastFetchedAt).toBeTruthy();
     expect(fetchImpl).toHaveBeenCalledTimes(2);
 
     const link = await prisma.accountLink.create({
@@ -655,4 +657,5 @@ describe.sequential("home values service", () => {
     expect(secondResult.transactions[0]?.amount).toBe(820000);
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
+
 });

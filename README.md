@@ -49,6 +49,7 @@ What you get in this mode:
 - Core runtime wiring stays in `.env`.
 - Provider credentials and sync tuning live in the web UI on each provider page.
 - The optional provider env vars in `.env.example` are only for live-sandbox and live-test injection helpers.
+- `HTTP_REQUEST_LOG_ENABLED=1` enables Fastify request logging. It defaults to on in development and off in test/production.
 
 Provider-specific setup docs live in [docs/providers/README.md](./docs/providers/README.md).
 

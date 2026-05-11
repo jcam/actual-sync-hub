@@ -21,6 +21,11 @@ import type { StripeService } from './services/stripe-service.js';
 import { tellerService } from './services/teller-service.js';
 import type { TellerService } from './services/teller-service.js';
 
+export type SchedulerSignal = {
+  requestWakeup(delayMs?: number): void;
+  requestWakeupForAccounts(accountIds: Iterable<string>, delayMs?: number): void;
+};
+
 export type AppContext = {
   prisma: PrismaClient;
   authService: AuthService;
@@ -33,6 +38,7 @@ export type AppContext = {
   stripeService?: StripeService;
   tellerService: TellerService;
   actualService: ActualService;
+  scheduler?: SchedulerSignal;
 }
 
 export function createAppContext(overrides: Partial<AppContext> = {}): AppContext {

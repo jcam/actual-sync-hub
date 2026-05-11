@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   AccountLinkStatus,
   ActualCategoryDto,
@@ -7,6 +8,7 @@ import type {
 } from "@actual-sync/shared";
 import type { prisma } from "../db.js";
 import type { ActualService, ReconcileTransactionInput } from "./actual-service.js";
+import { getNextAccountLinkDueAt } from "./account-link-schedule.js";
 import { pruneImportedTransactionLedger } from "./imported-transaction-ledger.js";
 import type { LinkConfigData } from "./link-config.js";
 import { parseLinkConfig, serializeLinkConfig } from "./link-config.js";
@@ -18,10 +20,11 @@ import {
   normalizeActualExternalSyncPrefs,
   toImportTransactionInput
 } from "./provider-sync-helpers.js";
-import type { ProviderAdapter, ProviderSyncTransaction } from "./provider-adapter.js";
+import type { ProviderAdapter, ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
 import { clearSyncHealth, toSyncHealth } from "./sync-health.js";
 
 type DatabaseClient = typeof prisma;
+const REVIEW_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
 type ReviewDatabase = Pick<DatabaseClient, "accountLink" | "syncRun" | "importedTransaction">;
 type ReviewActualService = Pick<
   ActualService,
@@ -41,8 +44,27 @@ type ReviewableLink = {
   actualAccountName: string;
   provider: Provider | null;
   connectionId: string | null;
+  syncFrequency: "MANUAL" | "HOURLY" | "DAILY" | "WEEKLY";
+  syncHour: number | null;
+  syncDayOfWeek: number | null;
+  isEnabled: boolean;
+  lastSyncedAt: Date | null;
   configJson?: string | null;
   migrationCompletedAt: Date | null;
+  updatedAt: Date;
+};
+
+type ReviewSnapshot = {
+  id: string;
+  actualAccountId: string;
+  createdAt: Date;
+  expiresAt: number;
+  link: ReviewableLink;
+  linkConfig: LinkConfigData;
+  actualExternalSyncPrefs: ReturnType<typeof normalizeActualExternalSyncPrefs>;
+  syncResultConfigPatch: ProviderSyncResult["configPatch"];
+  transactions: ProviderSyncTransaction[];
+  reconcileTransactions: ReconcileTransactionInput[];
 };
 
 function toActualLastSyncValue(timestamp: Date): string {
@@ -80,6 +102,8 @@ export function createSyncReviewService<TSiblingLinks>({
   markActualExternalSyncFailure?: (actualAccountId: string) => Promise<void>;
   now: () => Date;
 }) {
+  const reviewSnapshots = new Map<string, ReviewSnapshot>();
+
   function getDateRangeBounds(dates: string[]) {
     if (dates.length === 0) {
       return null;
@@ -163,6 +187,38 @@ export function createSyncReviewService<TSiblingLinks>({
     return (await actual.getExternalSyncAccount(actualAccountId)).prefs;
   }
 
+  function pruneExpiredReviewSnapshots() {
+    const currentTime = Date.now();
+    for (const [snapshotId, snapshot] of reviewSnapshots) {
+      if (snapshot.expiresAt <= currentTime) {
+        reviewSnapshots.delete(snapshotId);
+      }
+    }
+  }
+
+  function storeReviewSnapshot(snapshot: Omit<ReviewSnapshot, "id" | "createdAt" | "expiresAt">) {
+    pruneExpiredReviewSnapshots();
+    const snapshotId = randomUUID();
+    reviewSnapshots.set(snapshotId, {
+      ...snapshot,
+      id: snapshotId,
+      createdAt: now(),
+      expiresAt: Date.now() + REVIEW_SNAPSHOT_TTL_MS
+    });
+    return snapshotId;
+  }
+
+  function takeReviewSnapshot(actualAccountId: string, snapshotId: string) {
+    pruneExpiredReviewSnapshots();
+    const snapshot = reviewSnapshots.get(snapshotId);
+    if (!snapshot || snapshot.actualAccountId !== actualAccountId) {
+      throw new Error("Review preview expired. Refresh preview and try again.");
+    }
+
+    reviewSnapshots.delete(snapshotId);
+    return snapshot;
+  }
+
   return {
     previewAccountSyncReview: async (actualAccountId: string): Promise<MigrationPreviewDto> => {
       const link = await loadCurrentReviewableLink(actualAccountId);
@@ -189,6 +245,15 @@ export function createSyncReviewService<TSiblingLinks>({
           siblingLinks,
           transactions: syncResult.transactions
         });
+        const snapshotId = storeReviewSnapshot({
+          actualAccountId,
+          link,
+          linkConfig,
+          actualExternalSyncPrefs,
+          syncResultConfigPatch: syncResult.configPatch,
+          transactions: syncResult.transactions,
+          reconcileTransactions
+        });
 
         const previewResult = await actual.previewImportTransactions(
           actualAccountId,
@@ -205,6 +270,7 @@ export function createSyncReviewService<TSiblingLinks>({
         const previewByImportedId = mapPreviewItemByImportedId(previewResult.updatedPreview);
 
         return {
+          snapshotId,
           actualAccountId,
           actualAccountName: link.actualAccountName,
           linkId: link.id,
@@ -245,9 +311,16 @@ export function createSyncReviewService<TSiblingLinks>({
 
     commitAccountSyncReview: async (actualAccountId: string, payload: CommitMigrationPayload) => {
       const link = await loadCurrentReviewableLink(actualAccountId);
-      const adapter = getProviderAdapter(link.provider);
-      if (!adapter) {
-        throw new Error("Sync review commit is not supported for this link");
+      const snapshot = takeReviewSnapshot(actualAccountId, payload.snapshotId);
+      if (
+        link.id !== snapshot.link.id ||
+        link.status !== snapshot.link.status ||
+        link.provider !== snapshot.link.provider ||
+        link.connectionId !== snapshot.link.connectionId ||
+        link.configJson !== snapshot.link.configJson ||
+        link.updatedAt.getTime() !== snapshot.link.updatedAt.getTime()
+      ) {
+        throw new Error("Review preview is stale. Refresh preview and try again.");
       }
 
       const syncRun = await database.syncRun.create({
@@ -261,31 +334,17 @@ export function createSyncReviewService<TSiblingLinks>({
       try {
         await markActualExternalSyncPending?.(actualAccountId);
         const allowedImportedIds = new Set(payload.importedIds);
-        const actualCategories = await listActualCategories();
-        const linkConfig = parseLinkConfig(link.configJson);
-        const actualExternalSyncPrefs = normalizeActualExternalSyncPrefs(
-          await getActualExternalSyncPrefs(actualAccountId)
-        );
-        const syncResult = applyActualExternalSyncPrefsToProviderSyncResult(
-          await adapter.syncAccountLink(link.id),
-          actualExternalSyncPrefs
-        );
-        const siblingLinks = await buildSiblingLinks(link);
-        const selectedTransactions = syncResult.transactions.filter(transaction =>
+        const actualExternalSyncPrefs = snapshot.actualExternalSyncPrefs;
+        const linkConfig = snapshot.linkConfig;
+        const selectedTransactions = snapshot.transactions.filter(transaction =>
           allowedImportedIds.has(transaction.importedId)
         );
-        const reconcileTransactions = buildReconcileTransactions({
-          actualAccountId,
-          actualCategories,
-          linkConfig,
-          siblingLinks,
-          transactions: selectedTransactions
-        });
+        const reconcileTransactions = snapshot.reconcileTransactions.filter(transaction =>
+          allowedImportedIds.has(transaction.imported_id)
+        );
 
         const migrating = link.status === "MIGRATING";
-        const removedImportedIds = syncResult.removedImportedIds.filter(
-          importedId => !reconcileTransactions.some(transaction => transaction.imported_id === importedId)
-        );
+        const removedImportedIds: string[] = [];
         const migrationResult = migrating
           ? await actual.importTransactions(actualAccountId, reconcileTransactions.map(toImportTransactionInput), {
               reimportDeleted: actualExternalSyncPrefs.reimportDeleted,
@@ -400,10 +459,17 @@ export function createSyncReviewService<TSiblingLinks>({
           data: {
             status: migrating ? "ACTIVE" : link.status,
             lastSyncedAt: syncCompletedAt,
+            nextSyncAt: getNextAccountLinkDueAt(syncCompletedAt, {
+              syncFrequency: link.syncFrequency,
+              syncHour: link.syncHour,
+              syncDayOfWeek: link.syncDayOfWeek,
+              isEnabled: link.isEnabled,
+              lastSyncedAt: syncCompletedAt
+            }),
             migrationCompletedAt: migrating ? syncCompletedAt : link.migrationCompletedAt,
             configJson: serializeLinkConfig({
               ...linkConfig,
-              ...syncResult.configPatch,
+              ...snapshot.syncResultConfigPatch,
               health: clearSyncHealth(),
               categoryMappings: linkConfig.categoryMappings || [],
               seenCategoryNames: [

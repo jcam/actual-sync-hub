@@ -20,6 +20,7 @@ export function ReviewPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const reviewMode = location.pathname.endsWith("/migration") ? "migration" : "sync-review";
   const pageLabel = reviewMode === "migration" ? "Migration review" : "Sync review";
 
@@ -31,6 +32,7 @@ export function ReviewPage() {
     }
 
     setError(null);
+    setSaveError(null);
     try {
       const nextPreview =
         reviewMode === "migration"
@@ -128,6 +130,7 @@ export function ReviewPage() {
           Deselected rows will be skipped when this review is committed, and the provider sync state will advance past
           them.
         </p>
+        {saveError ? <p className="error-text">{saveError}</p> : null}
         <div className="button-row">
           <button className="ghost-button" onClick={() => void load()}>
             Refresh preview
@@ -143,6 +146,7 @@ export function ReviewPage() {
               setSaving(true);
               try {
                 const payload = {
+                  snapshotId: preview.snapshotId,
                   importedIds: [...selectedIds]
                 };
                 if (reviewMode === "migration") {
@@ -151,6 +155,12 @@ export function ReviewPage() {
                   await api.commitSyncReview(actualAccountId, payload);
                 }
                 void navigate("/accounts");
+              } catch (commitError) {
+                setSaveError(
+                  getDisplayErrorMessage(commitError, `Failed to commit ${pageLabel.toLowerCase()}.`, {
+                    serverUnavailableMessage: `Could not reach the API server to commit ${pageLabel.toLowerCase()}.`
+                  })
+                );
               } finally {
                 setSaving(false);
               }

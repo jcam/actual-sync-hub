@@ -10,6 +10,7 @@ const actualAccountIdParamsSchema = z.object({
 });
 
 const reviewCommitBodySchema = z.object({
+  snapshotId: z.string().min(1),
   importedIds: z.array(z.string().min(1)).default([])
 });
 
@@ -79,7 +80,7 @@ function assertAuthenticated(request: FastifyRequest, reply: FastifyReply) {
 
 export async function registerRoutes(
   app: FastifyInstance,
-  context: Pick<AppContext, "authService" | "appService" | "plaidService" | "providerSettingsService" | "simplefinService" | "stripeService" | "tellerService">
+  context: Pick<AppContext, "authService" | "appService" | "plaidService" | "providerSettingsService" | "simplefinService" | "stripeService" | "tellerService" | "scheduler">
 ) {
   const registerReviewRoutes = (prefix: "migration" | "sync-review") => {
     app.get(`/api/account-links/:actualAccountId/${prefix}/preview`, async (request, reply) => {
@@ -127,10 +128,10 @@ export async function registerRoutes(
       });
     }
 
-    await context.appService.handleTellerWebhook(body as TellerWebhookEvent);
-    return {
-      ok: true
-    };
+      await context.appService.handleTellerWebhook(body as TellerWebhookEvent);
+      return {
+        ok: true
+      };
   });
 
   await app.register(async plaidWebhookApp => {
@@ -608,6 +609,7 @@ export async function registerRoutes(
       .parse(request.body);
 
     await context.appService.upsertAccountLink(params.actualAccountId, body);
+    context.scheduler?.requestWakeup();
     return {
       ok: true
     };

@@ -11,6 +11,7 @@ async function main() {
   const app = await createServer({
     sessionSecret: env.SESSION_SECRET,
     nodeEnv: env.NODE_ENV,
+    requestLoggingEnabled: env.httpRequestLogEnabled,
     context
   });
   const scheduler = env.disableScheduler
@@ -19,6 +20,9 @@ async function main() {
         prisma: context.prisma,
         appService: context.appService
       });
+  if (scheduler) {
+    context.scheduler = scheduler;
+  }
   scheduler?.start();
   const stopActualSyncEventWakeup =
     scheduler && typeof context.actualService.onActualSyncAccountsChanged === "function"

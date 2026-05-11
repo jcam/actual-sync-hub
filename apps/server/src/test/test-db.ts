@@ -32,6 +32,10 @@ async function initializeSchema(prisma: PrismaClient) {
       "providerItemId" TEXT,
       "metadataJson" TEXT,
       "lastRefreshedAt" DATETIME,
+      "homeValuesRedfinLastFetchedAt" DATETIME,
+      "homeValuesMovotoLastFetchedAt" DATETIME,
+      "homeValuesHomesLastFetchedAt" DATETIME,
+      "homeValuesTruliaLastFetchedAt" DATETIME,
       "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" DATETIME NOT NULL
     );`,
@@ -71,6 +75,7 @@ async function initializeSchema(prisma: PrismaClient) {
       "syncDayOfWeek" INTEGER,
       "isEnabled" BOOLEAN NOT NULL DEFAULT false,
       "lastSyncedAt" DATETIME,
+      "nextSyncAt" DATETIME,
       "migrationStartedAt" DATETIME,
       "migrationCompletedAt" DATETIME,
       "supersededAt" DATETIME,
@@ -82,6 +87,7 @@ async function initializeSchema(prisma: PrismaClient) {
       CONSTRAINT "AccountLink_connectionAccountId_fkey" FOREIGN KEY ("connectionAccountId") REFERENCES "ConnectionAccount" ("id") ON DELETE SET NULL ON UPDATE CASCADE
     );`,
     `CREATE INDEX "AccountLink_actualAccountId_status_idx" ON "AccountLink"("actualAccountId", "status");`,
+    `CREATE INDEX "AccountLink_isEnabled_status_nextSyncAt_idx" ON "AccountLink"("isEnabled", "status", "nextSyncAt");`,
     `CREATE INDEX "AccountLink_replacedByLinkId_idx" ON "AccountLink"("replacedByLinkId");`,
     `CREATE TABLE "SyncRun" (
       "id" TEXT NOT NULL PRIMARY KEY,

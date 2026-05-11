@@ -35,6 +35,7 @@ import type {
 } from "./actual-service.js";
 import { getStripeMetadata, getTellerMetadata, parseConnectionMetadata } from "./connection-metadata.js";
 import { learnCategoryMappingsFromHistory, pruneImportedTransactionLedger } from "./imported-transaction-ledger.js";
+import { getNextAccountLinkDueAt } from "./account-link-schedule.js";
 import { CURRENT_LINK_STATUSES, linkIdentityChanged, parseLinkConfig, selectCurrentLink, serializeLinkConfig, toLinkDto } from "./link-config.js";
 import type { LinkConfigData } from "./link-config.js";
 import { plaidService } from "./plaid-service.js";
@@ -129,6 +130,7 @@ const currentLinkInclude = {
   connection: true,
   connectionAccount: true
 } satisfies Prisma.AccountLinkInclude;
+const IMPORTED_TRANSACTION_LEDGER_WRITE_CONCURRENCY = 25;
 
 function createConcurrencyGate(limit: number) {
   let active = 0;
@@ -286,6 +288,7 @@ export function createAppService({
     TELLER: teller
   } satisfies Record<Provider, ProviderAdapter>;
   const providerBackgroundSyncGates = new Map<Provider, ProviderBackgroundSyncGate>();
+  const runImportedTransactionLedgerWrite = createConcurrencyGate(IMPORTED_TRANSACTION_LEDGER_WRITE_CONCURRENCY);
   const getEffectiveProviderSettings = () => settings.getAll();
   let actualCapabilitiesPromise: Promise<{
     externalSyncWritebackEnabled: boolean;
@@ -345,6 +348,29 @@ export function createAppService({
     return (await actual.getExternalSyncAccount(actualAccountId)).prefs;
   };
 
+  const listTrackedCurrentActualExternalLinks = async (actualAccountIds?: string[]) => {
+    const links = await database.accountLink.findMany({
+      where: {
+        status: {
+          in: [...CURRENT_LINK_STATUSES]
+        },
+        ...(actualAccountIds
+          ? {
+              actualAccountId: {
+                in: actualAccountIds
+              }
+            }
+          : {})
+      },
+      orderBy: currentLinkOrderBy
+    });
+
+    return [...groupLinksByActualAccountId(links).values()]
+      .map(group => selectCurrentLink(group))
+      .filter((link): link is NonNullable<typeof link> => Boolean(link))
+      .filter(link => parseLinkConfig(link.configJson).actualExternalLinked === true);
+  };
+
   const isProviderConfigured = async (provider: Provider) => {
     const providerSettings = await getEffectiveProviderSettings();
 
@@ -373,31 +399,34 @@ export function createAppService({
     return true;
   };
 
-  const getProviderRuntimeInfo = async (): Promise<RuntimeInfoDto["providers"]> => {
-    const providerSettings = await getEffectiveProviderSettings();
-    const plaidEnvironment = providerSettings.PLAID.environment;
-    const activePlaidSettings = getActivePlaidEnvironmentSettings(providerSettings.PLAID);
+  const getProviderRuntimeInfo = async (
+    providerSettings?: Awaited<ReturnType<typeof getEffectiveProviderSettings>>
+  ): Promise<RuntimeInfoDto["providers"]> => {
+    const effectiveProviderSettings = providerSettings ?? (await getEffectiveProviderSettings());
+    const plaidEnvironment = effectiveProviderSettings.PLAID.environment;
+    const activePlaidSettings = getActivePlaidEnvironmentSettings(effectiveProviderSettings.PLAID);
     const plaidEnabled = Boolean(activePlaidSettings.clientId && activePlaidSettings.secret);
     const plaidSandboxToolsEnabled = plaidEnvironment === "sandbox";
-    const stripeEnvironment = providerSettings.STRIPE.environment;
-    const activeStripeSettings = getActiveStripeEnvironmentSettings(providerSettings.STRIPE);
+    const stripeEnvironment = effectiveProviderSettings.STRIPE.environment;
+    const activeStripeSettings = getActiveStripeEnvironmentSettings(effectiveProviderSettings.STRIPE);
     const stripePublishableKeyConfigured = Boolean(activeStripeSettings.publishableKey.trim());
     const stripeSecretKeyConfigured = Boolean(activeStripeSettings.secretKey);
     const stripeEnabled = stripePublishableKeyConfigured && stripeSecretKeyConfigured;
-    const activeTellerSettings = getActiveTellerEnvironmentSettings(providerSettings.TELLER);
+    const activeTellerSettings = getActiveTellerEnvironmentSettings(effectiveProviderSettings.TELLER);
     const tellerEnabled = Boolean(activeTellerSettings.appId);
-    const tellerEnvironment = providerSettings.TELLER.environment;
+    const tellerEnvironment = effectiveProviderSettings.TELLER.environment;
     const tellerMtlsConfigured =
       tellerEnvironment === "sandbox" ||
       Boolean(
         ("certificatePem" in activeTellerSettings ? activeTellerSettings.certificatePem : "") &&
           ("keyPem" in activeTellerSettings ? activeTellerSettings.keyPem : "")
       );
-    const simpleFinMode = providerSettings.SIMPLEFIN.mode;
+    const simpleFinMode = effectiveProviderSettings.SIMPLEFIN.mode;
     const simpleFinDevelopmentConfigured =
-      simpleFinMode !== "development" || Boolean(getActiveSimpleFinModeSettings(providerSettings.SIMPLEFIN)?.serverUrl);
+      simpleFinMode !== "development" ||
+      Boolean(getActiveSimpleFinModeSettings(effectiveProviderSettings.SIMPLEFIN)?.serverUrl);
     const saltEdgeEnabled = Boolean(
-      providerSettings.SALT_EDGE.appId.trim() && providerSettings.SALT_EDGE.secret
+      effectiveProviderSettings.SALT_EDGE.appId.trim() && effectiveProviderSettings.SALT_EDGE.secret
     );
 
     return [
@@ -477,10 +506,10 @@ export function createAppService({
         label: "Salt Edge",
         enabled: saltEdgeEnabled,
         ready: saltEdgeEnabled,
-        environment: providerSettings.SALT_EDGE.environment,
+        environment: effectiveProviderSettings.SALT_EDGE.environment,
         issues: saltEdgeEnabled ? [] : ["Enter a Salt Edge App ID and Secret to enable Salt Edge connections."],
         notes: [
-          getSaltEdgeIncludeSandboxes(providerSettings.SALT_EDGE)
+          getSaltEdgeIncludeSandboxes(effectiveProviderSettings.SALT_EDGE)
             ? "Salt Edge sandboxes and fake providers are enabled for Connect flows."
             : "Salt Edge sandboxes and fake providers are disabled for Connect flows."
         ]
@@ -673,6 +702,27 @@ export function createAppService({
     };
   };
 
+  const getPersistedNextSyncAt = ({
+    syncFrequency,
+    syncHour,
+    syncDayOfWeek,
+    isEnabled,
+    lastSyncedAt
+  }: {
+    syncFrequency: "MANUAL" | "HOURLY" | "DAILY" | "WEEKLY";
+    syncHour: number | null;
+    syncDayOfWeek: number | null;
+    isEnabled: boolean;
+    lastSyncedAt: Date | null;
+  }) =>
+    getNextAccountLinkDueAt(now(), {
+      syncFrequency,
+      syncHour,
+      syncDayOfWeek,
+      isEnabled,
+      lastSyncedAt
+    });
+
   const listCurrentSyncLinks = (where: Prisma.AccountLinkWhereInput = {}) =>
     database.accountLink.findMany({
       where: {
@@ -804,29 +854,7 @@ export function createAppService({
       return;
     }
 
-    const links = await database.accountLink.findMany({
-      where: {
-        status: {
-          in: [...CURRENT_LINK_STATUSES]
-        },
-        ...(actualAccountIds
-          ? {
-              actualAccountId: {
-                in: actualAccountIds
-              }
-            }
-          : {})
-      },
-      orderBy: currentLinkOrderBy
-    });
-
-    const linksByActualId = groupLinksByActualAccountId(links);
-
-    const trackedCurrentLinks = [...linksByActualId.values()]
-      .map(group => selectCurrentLink(group))
-      .filter((link): link is NonNullable<typeof link> => Boolean(link))
-      .filter(link => parseLinkConfig(link.configJson).actualExternalLinked === true);
-
+    const trackedCurrentLinks = await listTrackedCurrentActualExternalLinks(actualAccountIds);
     if (trackedCurrentLinks.length === 0) {
       return;
     }
@@ -861,6 +889,7 @@ export function createAppService({
             },
             data: {
               isEnabled: false,
+              nextSyncAt: null,
               configJson: serializeLinkConfig({
                 ...linkConfig,
                 actualExternalLinked: false,
@@ -1151,8 +1180,9 @@ export function createAppService({
       siblingLinks,
       transactions: syncResult.transactions
     });
+    const reconcileImportedIds = new Set(reconcileTransactions.map(transaction => transaction.imported_id));
     const removedImportedIds = syncResult.removedImportedIds.filter(
-      importedId => !reconcileTransactions.some(transaction => transaction.imported_id === importedId)
+      importedId => !reconcileImportedIds.has(importedId)
     );
     const migrating = link.status === "MIGRATING";
     const migrationImportPayload = reconcileTransactions.map(transaction => ({
@@ -1220,32 +1250,38 @@ export function createAppService({
       : new Map<string, Awaited<ReturnType<typeof actual.listTransactionsByDateRange>>[number]>();
 
     if (reconcileTransactions.length > 0) {
+      const ledgerSeenAt = now();
       await Promise.all(
         reconcileTransactions.map((transaction, index) =>
-          database.importedTransaction.upsert({
-            where: {
-              accountLinkId_importedId: {
+          runImportedTransactionLedgerWrite(() => {
+            const actualTransactionId = importedTransactionByImportedId.get(transaction.imported_id)?.id ?? null;
+            const primarySourceCategory = getPrimarySourceCategory(syncResult.transactions[index]!);
+
+            return database.importedTransaction.upsert({
+              where: {
+                accountLinkId_importedId: {
+                  accountLinkId: link.id,
+                  importedId: transaction.imported_id
+                }
+              },
+              update: {
+                transactionDate: transaction.date,
+                actualTransactionId,
+                primarySourceCategory,
+                appliedCategoryId: transaction.resolved_category_id ?? null,
+                lastSeenAt: ledgerSeenAt
+              },
+              create: {
                 accountLinkId: link.id,
-                importedId: transaction.imported_id
+                importedId: transaction.imported_id,
+                transactionDate: transaction.date,
+                actualTransactionId,
+                primarySourceCategory,
+                appliedCategoryId: transaction.resolved_category_id ?? null,
+                observedCategoryId: transaction.resolved_category_id ?? null,
+                lastSeenAt: ledgerSeenAt
               }
-            },
-            update: {
-              transactionDate: transaction.date,
-              actualTransactionId: importedTransactionByImportedId.get(transaction.imported_id)?.id ?? null,
-              primarySourceCategory: getPrimarySourceCategory(syncResult.transactions[index]!),
-              appliedCategoryId: transaction.resolved_category_id ?? null,
-              lastSeenAt: now()
-            },
-            create: {
-              accountLinkId: link.id,
-              importedId: transaction.imported_id,
-              transactionDate: transaction.date,
-              actualTransactionId: importedTransactionByImportedId.get(transaction.imported_id)?.id ?? null,
-              primarySourceCategory: getPrimarySourceCategory(syncResult.transactions[index]!),
-              appliedCategoryId: transaction.resolved_category_id ?? null,
-              observedCategoryId: transaction.resolved_category_id ?? null,
-              lastSeenAt: now()
-            }
+            });
           })
         )
       );
@@ -1276,6 +1312,13 @@ export function createAppService({
       data: {
         status: migrating ? "ACTIVE" : link.status,
         lastSyncedAt: syncCompletedAt,
+        nextSyncAt: getPersistedNextSyncAt({
+          syncFrequency: link.syncFrequency,
+          syncHour: link.syncHour,
+          syncDayOfWeek: link.syncDayOfWeek,
+          isEnabled: link.isEnabled,
+          lastSyncedAt: syncCompletedAt
+        }),
         migrationCompletedAt: migrating ? syncCompletedAt : link.migrationCompletedAt,
         configJson: serializeLinkConfig({
           ...linkConfig,
@@ -1667,7 +1710,7 @@ export function createAppService({
     async getRuntimeInfo(): Promise<RuntimeInfoDto> {
       const effectiveSettings = await getEffectiveProviderSettings();
       const actualCapabilities = await getActualCapabilities();
-      const providers = await getProviderRuntimeInfo();
+      const providers = await getProviderRuntimeInfo(effectiveSettings);
       const activePlaidSettings = getActivePlaidEnvironmentSettings(effectiveSettings.PLAID);
       const plaidEnabled = Boolean(activePlaidSettings.clientId && activePlaidSettings.secret);
       const activeStripeSettings = getActiveStripeEnvironmentSettings(effectiveSettings.STRIPE);
@@ -1733,6 +1776,25 @@ export function createAppService({
 
       return connections.map(connection => {
         const metadata = parseConnectionMetadata(connection.metadataJson);
+        const simplefinBaseUrl =
+          connection.provider === "SIMPLEFIN" &&
+          typeof metadata.simplefin === "object" &&
+          metadata.simplefin &&
+          "baseUrl" in metadata.simplefin &&
+          typeof metadata.simplefin.baseUrl === "string"
+            ? metadata.simplefin.baseUrl
+            : null;
+        const providerAccountsUrl =
+          simplefinBaseUrl != null
+            ? (() => {
+                try {
+                  const url = new URL(simplefinBaseUrl);
+                  return `${url.origin}/my-account`;
+                } catch {
+                  return null;
+                }
+              })()
+            : null;
 
         return {
           id: connection.id,
@@ -1755,21 +1817,7 @@ export function createAppService({
                   typeof metadata.teller.userId === "string"
                 ? metadata.teller.userId
                 : null,
-          providerAccountsUrl:
-            connection.provider === "SIMPLEFIN" &&
-            typeof metadata.simplefin === "object" &&
-            metadata.simplefin &&
-            "baseUrl" in metadata.simplefin &&
-            typeof metadata.simplefin.baseUrl === "string"
-              ? (() => {
-                  try {
-                    const url = new URL(metadata.simplefin.baseUrl);
-                    return `${url.origin}/my-account`;
-                  } catch {
-                    return null;
-                  }
-                })()
-              : null,
+          providerAccountsUrl,
           lastRefreshedAt: connection.lastRefreshedAt?.toISOString() ?? null,
           health: metadata.health ?? null,
           homeValues:
@@ -1780,7 +1828,7 @@ export function createAppService({
               : null,
           accounts: connection.accounts.map(account => {
             const simplefinRaw =
-              connection.provider === "SIMPLEFIN" ? parseSimpleFinAccountRawJson(account.rawJson) : {};
+              connection.provider === "SIMPLEFIN" ? parseSimpleFinAccountRawJson(account.rawJson) : null;
             return {
               id: account.id,
               externalAccountId: account.externalAccountId,
@@ -1791,11 +1839,11 @@ export function createAppService({
               subtype: account.subtype,
               currentBalance: account.currentBalance,
               availableBalance: account.availableBalance,
-              providerConnectionId: account.providerConnectionId ?? simplefinRaw.connId ?? null,
-              providerConnectionName: account.providerConnectionName ?? simplefinRaw.connName ?? null,
+              providerConnectionId: account.providerConnectionId ?? simplefinRaw?.connId ?? null,
+              providerConnectionName: account.providerConnectionName ?? simplefinRaw?.connName ?? null,
               providerInstitutionName:
-                simplefinRaw.institution ??
-                simplefinRaw.connOrgName ??
+                simplefinRaw?.institution ??
+                simplefinRaw?.connOrgName ??
                 account.providerConnectionName ??
                 connection.institutionName ??
                 null
@@ -1979,6 +2027,7 @@ export function createAppService({
               connectionAccountId: connectionAccount.id,
               syncFrequency: "MANUAL",
               isEnabled: false,
+              nextSyncAt: null,
               configJson: serializeLinkConfig({})
             }
           });
@@ -2144,7 +2193,8 @@ export function createAppService({
             }
           },
           data: {
-            isEnabled: false
+            isEnabled: false,
+            nextSyncAt: null
           }
         });
       });
@@ -2269,6 +2319,13 @@ export function createAppService({
             syncHour: normalizedSchedulePayload.syncHour ?? null,
             syncDayOfWeek: normalizedSchedulePayload.syncDayOfWeek ?? null,
             isEnabled: normalizedSchedulePayload.isEnabled,
+            nextSyncAt: getPersistedNextSyncAt({
+              syncFrequency: normalizedSchedulePayload.syncFrequency,
+              syncHour: normalizedSchedulePayload.syncHour ?? null,
+              syncDayOfWeek: normalizedSchedulePayload.syncDayOfWeek ?? null,
+              isEnabled: normalizedSchedulePayload.isEnabled,
+              lastSyncedAt: null
+            }),
             configJson: serializeLinkConfig(nextConfig)
           }
         });
@@ -2291,6 +2348,13 @@ export function createAppService({
             syncHour: normalizedSchedulePayload.syncHour ?? null,
             syncDayOfWeek: normalizedSchedulePayload.syncDayOfWeek ?? null,
             isEnabled: normalizedSchedulePayload.isEnabled,
+            nextSyncAt: getPersistedNextSyncAt({
+              syncFrequency: normalizedSchedulePayload.syncFrequency,
+              syncHour: normalizedSchedulePayload.syncHour ?? null,
+              syncDayOfWeek: normalizedSchedulePayload.syncDayOfWeek ?? null,
+              isEnabled: normalizedSchedulePayload.isEnabled,
+              lastSyncedAt: currentLink.lastSyncedAt
+            }),
             configJson: serializeLinkConfig(nextConfig)
           }
         });
@@ -2313,6 +2377,13 @@ export function createAppService({
             syncHour: normalizedSchedulePayload.syncHour ?? null,
             syncDayOfWeek: normalizedSchedulePayload.syncDayOfWeek ?? null,
             isEnabled: normalizedSchedulePayload.isEnabled,
+            nextSyncAt: getPersistedNextSyncAt({
+              syncFrequency: normalizedSchedulePayload.syncFrequency,
+              syncHour: normalizedSchedulePayload.syncHour ?? null,
+              syncDayOfWeek: normalizedSchedulePayload.syncDayOfWeek ?? null,
+              isEnabled: normalizedSchedulePayload.isEnabled,
+              lastSyncedAt: null
+            }),
             migrationStartedAt: timestamp,
             configJson: serializeLinkConfig(nextConfig)
           }
@@ -2325,6 +2396,7 @@ export function createAppService({
           data: {
             status: "INACTIVE",
             isEnabled: false,
+            nextSyncAt: null,
             supersededAt: timestamp,
             replacedByLinkId: replacement.id
           }
@@ -2649,7 +2721,8 @@ export function createAppService({
             }
           },
           data: {
-            isEnabled: false
+            isEnabled: false,
+            nextSyncAt: null
           }
         });
         return;
@@ -2847,7 +2920,8 @@ export function createAppService({
             }
           },
           data: {
-            isEnabled: false
+            isEnabled: false,
+            nextSyncAt: null
           }
         });
         return;

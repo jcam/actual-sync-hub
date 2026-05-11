@@ -412,6 +412,7 @@ describe("server webhook and account-link routes", () => {
 
   it("saves an account link through the route layer", async () => {
     const upsertAccountLink = vi.fn().mockResolvedValue(undefined);
+    const requestWakeup = vi.fn();
 
     const app = trackedApps.track(
       await createServer({
@@ -427,6 +428,9 @@ describe("server webhook and account-link routes", () => {
           },
           appService: {
             upsertAccountLink
+          },
+          scheduler: {
+            requestWakeup
           }
         })
       })
@@ -457,6 +461,7 @@ describe("server webhook and account-link routes", () => {
       ok: true
     });
     expect(upsertAccountLink).toHaveBeenCalledWith("actual-1", payload);
+    expect(requestWakeup).toHaveBeenCalledOnce();
   });
 
   it("runs a manual sync through the route layer", async () => {
@@ -496,6 +501,7 @@ describe("server webhook and account-link routes", () => {
 
   it("returns a migration preview and commits the selected imported ids", async () => {
     const previewAccountSyncReview = vi.fn().mockResolvedValue({
+      snapshotId: "snapshot-1",
       actualAccountId: "actual-1",
       actualAccountName: "Checking",
       linkId: "link-1",
@@ -545,12 +551,14 @@ describe("server webhook and account-link routes", () => {
       method: "POST",
       url: "/api/account-links/actual-1/migration/commit",
       payload: {
+        snapshotId: "snapshot-1",
         importedIds: ["plaid-1", "plaid-2"]
       },
       cookies
     });
     expect(commit.statusCode).toBe(200);
     expect(commitAccountSyncReview).toHaveBeenCalledWith("actual-1", {
+      snapshotId: "snapshot-1",
       importedIds: ["plaid-1", "plaid-2"]
     });
 
@@ -558,6 +566,7 @@ describe("server webhook and account-link routes", () => {
       method: "POST",
       url: "/api/account-links/actual-1/sync-review/commit",
       payload: {
+        snapshotId: "snapshot-9",
         importedIds: ["plaid-9"]
       },
       cookies

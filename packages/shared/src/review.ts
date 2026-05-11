@@ -25,6 +25,7 @@ export type MigrationPreviewItemDto = {
 }
 
 export type MigrationPreviewDto = {
+  snapshotId: string;
   actualAccountId: string;
   actualAccountName: string;
   linkId: string;
@@ -33,5 +34,6 @@ export type MigrationPreviewDto = {
 }
 
 export type CommitMigrationPayload = {
+  snapshotId: string;
   importedIds: string[];
 }

@@ -393,11 +393,39 @@ describe.sequential("sync review service", () => {
     const syncActualExternalWriteback = vi.fn().mockResolvedValue(undefined);
     const markActualExternalSyncPending = vi.fn().mockResolvedValue(undefined);
     const markActualExternalSyncSuccess = vi.fn().mockResolvedValue(undefined);
+    const syncAccountLink = vi.fn().mockResolvedValue({
+      imported: 1,
+      transactions: [
+        {
+          importedId: "sf-1",
+          date: "2026-05-05",
+          amount: -12.34,
+          payeeName: "Merchant",
+          importedPayee: "MERCHANT",
+          cleared: true,
+          categoryNames: [],
+          searchText: ["Merchant"]
+        }
+      ],
+      removedImportedIds: [],
+      configPatch: {}
+    });
     const syncReviewService = createSyncReviewService({
       database: prisma,
       actual: {
         listCategories: vi.fn().mockResolvedValue([]),
-        previewImportTransactions: vi.fn(),
+        previewImportTransactions: vi.fn().mockResolvedValue({
+          errors: [],
+          updatedPreview: [
+            {
+              transaction: {
+                imported_id: "sf-1"
+              },
+              existing: false,
+              ignored: false
+            }
+          ]
+        }),
         importTransactions: vi.fn(),
         reconcileTransactions: vi.fn().mockResolvedValue({
           added: 1,
@@ -417,23 +445,7 @@ describe.sequential("sync review service", () => {
       getProviderAdapter: () =>
         ({
           provider: "SIMPLEFIN",
-          syncAccountLink: vi.fn().mockResolvedValue({
-            imported: 1,
-            transactions: [
-              {
-                importedId: "sf-1",
-                date: "2026-05-05",
-                amount: -12.34,
-                payeeName: "Merchant",
-                importedPayee: "MERCHANT",
-                cleared: true,
-                categoryNames: [],
-                searchText: ["Merchant"]
-              }
-            ],
-            removedImportedIds: [],
-            configPatch: {}
-          })
+          syncAccountLink
         }) as never,
       buildSiblingLinks: vi.fn().mockResolvedValue([]),
       buildReconcileTransactions: vi.fn().mockReturnValue([
@@ -455,10 +467,13 @@ describe.sequential("sync review service", () => {
       now: () => new Date("2026-05-06T12:00:00.000Z")
     });
 
+    const preview = await syncReviewService.previewAccountSyncReview("actual-1");
     await syncReviewService.commitAccountSyncReview("actual-1", {
+      snapshotId: preview.snapshotId,
       importedIds: ["sf-1"]
     });
 
+    expect(syncAccountLink).toHaveBeenCalledTimes(1);
     expect(markActualExternalSyncPending).toHaveBeenCalledWith("actual-1");
     expect(syncActualExternalWriteback).toHaveBeenCalledWith({
       actualAccountId: "actual-1",

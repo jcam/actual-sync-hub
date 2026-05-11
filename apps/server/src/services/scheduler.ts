@@ -1,12 +1,18 @@
 import { prisma } from "../db.js";
 import { appService } from "./app-service.js";
+import { getNextAccountLinkDueAt, isAccountLinkDue } from "./account-link-schedule.js";
+
+export { getNextAccountLinkDueAt, isAccountLinkDue } from "./account-link-schedule.js";
 
 const DEFAULT_WAKEUP_DEBOUNCE_MS = 1_000;
 const DEFAULT_REQUESTED_SYNC_POLL_INTERVAL_MS = 10_000;
+const DEFAULT_SCHEDULE_SANITY_INTERVAL_MS = 4 * 60 * 60_000;
+const POST_SCHEDULED_SYNC_RECHECK_MS = 60_000;
 const RUNNING_WAKEUP_RETRY_MS = 250;
 
 type SchedulableLink = {
   id: string;
+  actualAccountId: string;
   syncFrequency: "MANUAL" | "HOURLY" | "DAILY" | "WEEKLY";
   syncHour: number | null;
   syncDayOfWeek: number | null;
@@ -14,42 +20,13 @@ type SchedulableLink = {
   isEnabled: boolean;
 };
 
-export function isAccountLinkDue(now: Date, link: SchedulableLink) {
-  if (!link.isEnabled || link.syncFrequency === "MANUAL") {
-    return false;
-  }
-
-  if (!link.lastSyncedAt) {
-    return true;
-  }
-
-  if (link.syncFrequency === "HOURLY") {
-    return now.getTime() - link.lastSyncedAt.getTime() >= 60 * 60 * 1000;
-  }
-
-  if (link.syncFrequency === "DAILY") {
-    const currentHour = now.getHours();
-    return currentHour >= (link.syncHour ?? 0) && now.toDateString() !== link.lastSyncedAt.toDateString();
-  }
-
-  if (link.syncFrequency === "WEEKLY") {
-    const currentHour = now.getHours();
-    const currentDay = now.getDay();
-    const sameWeek =
-      now.getFullYear() === link.lastSyncedAt.getFullYear() &&
-      Math.abs(now.getTime() - link.lastSyncedAt.getTime()) < 7 * 24 * 60 * 60 * 1000;
-
-    return currentDay === (link.syncDayOfWeek ?? 0) && currentHour >= (link.syncHour ?? 0) && !sameWeek;
-  }
-
-  return false;
-}
-
 export class SyncScheduler {
-  private timer?: NodeJS.Timeout;
+  private sanityTimer?: NodeJS.Timeout;
+  private scheduledTickTimer?: NodeJS.Timeout;
   private requestedSyncPollTimer?: NodeJS.Timeout;
   private wakeupTimer?: NodeJS.Timeout;
   private running = false;
+  private started = false;
   private requestedSyncPollPromise: Promise<void> | null = null;
   private requestedSyncAccountIds = new Set<string>();
 
@@ -65,22 +42,34 @@ export class SyncScheduler {
   ) {}
 
   start() {
+    if (this.started) {
+      return;
+    }
+
+    this.started = true;
     this.requestedSyncPollTimer = setInterval(() => {
       void this.pollRequestedExternalSyncs();
     }, this.deps.requestedSyncPollIntervalMs ?? DEFAULT_REQUESTED_SYNC_POLL_INTERVAL_MS);
-    this.timer = setInterval(() => {
-      void this.tick();
-    }, this.deps.intervalMs ?? 60_000);
+    this.sanityTimer = setInterval(() => {
+      this.requestWakeup(0);
+    }, this.deps.intervalMs ?? DEFAULT_SCHEDULE_SANITY_INTERVAL_MS);
     void this.pollRequestedExternalSyncs();
     void this.tick();
   }
 
   stop() {
-    if (this.timer) {
-      clearInterval(this.timer);
+    this.started = false;
+    if (this.sanityTimer) {
+      clearInterval(this.sanityTimer);
+      this.sanityTimer = undefined;
+    }
+    if (this.scheduledTickTimer) {
+      clearTimeout(this.scheduledTickTimer);
+      this.scheduledTickTimer = undefined;
     }
     if (this.requestedSyncPollTimer) {
       clearInterval(this.requestedSyncPollTimer);
+      this.requestedSyncPollTimer = undefined;
     }
     if (this.wakeupTimer) {
       clearTimeout(this.wakeupTimer);
@@ -89,6 +78,11 @@ export class SyncScheduler {
   }
 
   requestWakeup(delayMs = this.deps.wakeupDebounceMs ?? DEFAULT_WAKEUP_DEBOUNCE_MS) {
+    if (this.scheduledTickTimer) {
+      clearTimeout(this.scheduledTickTimer);
+      this.scheduledTickTimer = undefined;
+    }
+
     if (this.wakeupTimer) {
       return;
     }
@@ -146,6 +140,10 @@ export class SyncScheduler {
           this.requestedSyncAccountIds.delete(actualAccountId);
         }
       }
+
+      if (this.started && uniqueRequestedActualAccountIds.length > 0) {
+        this.armScheduledTick(0);
+      }
     })();
 
     try {
@@ -155,47 +153,119 @@ export class SyncScheduler {
     }
   }
 
+  private armScheduledTick(delayMs: number) {
+    if (!this.started) {
+      return;
+    }
+
+    if (this.scheduledTickTimer) {
+      clearTimeout(this.scheduledTickTimer);
+    }
+
+    this.scheduledTickTimer = setTimeout(() => {
+      this.scheduledTickTimer = undefined;
+      void this.tick();
+    }, Math.max(0, delayMs));
+  }
+
+  private async scheduleNextTick() {
+    if (!this.started) {
+      return;
+    }
+
+    const database = this.deps.prisma ?? prisma;
+    const now = this.deps.now ?? (() => new Date());
+    const currentTime = now();
+    const requestedActualAccountIds = new Set(this.requestedSyncAccountIds);
+    const nextLink = await database.accountLink.findFirst({
+      where: {
+        isEnabled: true,
+        status: {
+          in: ["ACTIVE", "MIGRATING"]
+        },
+        syncFrequency: {
+          not: "MANUAL"
+        },
+        nextSyncAt: {
+          not: null
+        },
+        ...(requestedActualAccountIds.size > 0
+          ? {
+              actualAccountId: {
+                notIn: [...requestedActualAccountIds]
+              }
+            }
+          : {})
+      },
+      select: {
+        nextSyncAt: true
+      },
+      orderBy: [
+        {
+          nextSyncAt: "asc"
+        }
+      ]
+    });
+
+    if (nextLink?.nextSyncAt) {
+      this.armScheduledTick(Math.max(0, nextLink.nextSyncAt.getTime() - currentTime.getTime()));
+    }
+  }
+
   async tick() {
     if (this.running) {
       return;
     }
 
     this.running = true;
+    let processedDueLinks = false;
 
     try {
       const database = this.deps.prisma ?? prisma;
       const service = this.deps.appService ?? appService;
       const now = this.deps.now ?? (() => new Date());
       await this.requestedSyncPollPromise;
+      const currentTime = now();
       const requestedActualAccountIds = new Set(this.requestedSyncAccountIds);
       const links = await database.accountLink.findMany({
         where: {
           isEnabled: true,
           status: {
             in: ["ACTIVE", "MIGRATING"]
-          }
+          },
+          syncFrequency: {
+            not: "MANUAL"
+          },
+          nextSyncAt: {
+            lte: currentTime
+          },
+          ...(requestedActualAccountIds.size > 0
+            ? {
+                actualAccountId: {
+                  notIn: [...requestedActualAccountIds]
+                }
+              }
+            : {})
+        },
+        select: {
+          id: true
         }
       });
-      const currentTime = now();
-      const dueLinkIds: string[] = [];
-
-      for (const link of links) {
-        if (requestedActualAccountIds.has(link.actualAccountId)) {
-          continue;
-        }
-
-        if (!isAccountLinkDue(currentTime, link)) {
-          continue;
-        }
-
-        dueLinkIds.push(link.id);
-      }
+      const dueLinkIds = links.map(link => link.id);
 
       if (dueLinkIds.length > 0) {
+        processedDueLinks = true;
         await service.runScheduledLinkSyncs(dueLinkIds);
       }
     } finally {
       this.running = false;
+      if (this.started) {
+        if (processedDueLinks) {
+          this.armScheduledTick(POST_SCHEDULED_SYNC_RECHECK_MS);
+        } else if ((this.scheduledTickTimer ?? null) == null) {
+          await this.scheduleNextTick();
+        }
+      }
     }
   }
 }
