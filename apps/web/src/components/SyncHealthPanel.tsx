@@ -45,7 +45,7 @@ export function SyncHealthPanel({
             connectionId={connectionId}
             provider={provider}
             label={getSyncHealthActionLabel(health)}
-            onCompleted={onReauthenticated}
+            {...(onReauthenticated ? { onCompleted: onReauthenticated } : {})}
           />
         ) : null}
         <Link className="ghost-button inline-link-button" to={path}>

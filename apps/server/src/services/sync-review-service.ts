@@ -7,6 +7,7 @@ import type {
   Provider
 } from "@actual-sync/shared";
 import type { prisma } from "../db.js";
+import { stripUndefined } from "../lib/strip-undefined.js";
 import type { ActualService, ReconcileTransactionInput } from "./actual-service.js";
 import { getNextAccountLinkDueAt } from "./account-link-schedule.js";
 import { pruneImportedTransactionLedger } from "./imported-transaction-ledger.js";
@@ -412,14 +413,14 @@ export function createSyncReviewService<TSiblingLinks>({
                     importedId: transaction.imported_id
                 }
                 },
-                update: {
+                update: stripUndefined({
                   transactionDate: transaction.date,
                   actualTransactionId: importedTransactionByImportedId.get(transaction.imported_id)?.id ?? null,
                   primarySourceCategory: getPrimarySourceCategory(selectedTransactions[index]!),
                   appliedCategoryId: transaction.resolved_category_id ?? null,
                   lastSeenAt: now()
-                },
-                create: {
+                }),
+                create: stripUndefined({
                   accountLinkId: link.id,
                   importedId: transaction.imported_id,
                   transactionDate: transaction.date,
@@ -428,7 +429,7 @@ export function createSyncReviewService<TSiblingLinks>({
                   appliedCategoryId: transaction.resolved_category_id ?? null,
                   observedCategoryId: transaction.resolved_category_id ?? null,
                   lastSeenAt: now()
-                }
+                })
               })
             )
           );

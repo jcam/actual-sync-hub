@@ -11,6 +11,7 @@ import {
 } from "plaid";
 import { prisma } from "../db.js";
 import { decryptString, encryptString } from "../lib/crypto.js";
+import { stripUndefined } from "../lib/strip-undefined.js";
 import { buildPlaidCategoryNames } from "./category-matching.js";
 import { parseLinkConfig } from "./link-config.js";
 import { createProviderSettingsService } from "./provider-settings-service.js";
@@ -93,7 +94,9 @@ function classifyPlaidError(error: unknown) {
   }
 
   return new ProviderOperationError(message, {
-    code: errorCode,
+    ...stripUndefined({
+      code: errorCode
+    }),
     healthState: "ERROR",
     healthScope: "CONNECTION_AUTH",
     healthAction: "RETRY"
@@ -323,9 +326,10 @@ export function createPlaidService({
       if (parts.length !== 3) {
         return false;
       }
+      const [encodedHeader, encodedPayload, encodedSignature] = parts as [string, string, string];
 
       try {
-        const decodedHeader = decodeJwtSegment(parts[0]);
+        const decodedHeader = decodeJwtSegment(encodedHeader);
         if (decodedHeader.alg !== "ES256" || typeof decodedHeader.kid !== "string" || !decodedHeader.kid) {
           return false;
         }
@@ -347,8 +351,8 @@ export function createPlaidService({
           },
           format: "jwk"
         });
-        const signature = Buffer.from(parts[2], "base64url");
-        const signedContent = Buffer.from(`${parts[0]}.${parts[1]}`, "utf8");
+        const signature = Buffer.from(encodedSignature, "base64url");
+        const signedContent = Buffer.from(`${encodedHeader}.${encodedPayload}`, "utf8");
         const signatureValid = crypto.verify(
           "sha256",
           signedContent,
@@ -362,7 +366,7 @@ export function createPlaidService({
           return false;
         }
 
-        const decodedPayload = decodeJwtSegment(parts[1]);
+        const decodedPayload = decodeJwtSegment(encodedPayload);
         if (typeof decodedPayload.iat !== "number" || !Number.isFinite(decodedPayload.iat)) {
           return false;
         }
@@ -634,7 +638,7 @@ export function createPlaidService({
 
       while (hasMore) {
         try {
-          const response = await client.transactionsSync({
+          const response = await client.transactionsSync(stripUndefined({
           access_token: accessToken,
           cursor,
           options: {
@@ -643,7 +647,7 @@ export function createPlaidService({
             personal_finance_category_version:
               effectiveConfig.personalFinanceCategoryVersion as PersonalFinanceCategoryVersion
           }
-        });
+        }));
 
           const page = response.data;
           const transactions = [...page.added, ...page.modified]
@@ -654,7 +658,7 @@ export function createPlaidService({
                 transaction.counterparties?.[0]?.name ||
                 transaction.name;
 
-              return {
+              return stripUndefined({
                 date: transaction.authorized_date || transaction.date,
                 amount: transaction.amount * -1,
                 payeeName,
@@ -665,10 +669,10 @@ export function createPlaidService({
                 }),
                 importedId: transaction.pending_transaction_id || transaction.transaction_id,
                 cleared: !transaction.pending,
-                categoryNames: buildPlaidCategoryNames({
+                categoryNames: buildPlaidCategoryNames(stripUndefined({
                   detailed: transaction.personal_finance_category?.detailed,
                   primary: transaction.personal_finance_category?.primary
-                }),
+                })),
                 searchText: [...new Set(
                   [
                     transaction.name,
@@ -677,7 +681,7 @@ export function createPlaidService({
                     ...((transaction.counterparties || []).map(counterparty => counterparty.name))
                   ].filter((value): value is string => Boolean(value))
                 )]
-              };
+              });
             });
 
           for (const transaction of page.removed.filter(

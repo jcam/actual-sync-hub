@@ -1,7 +1,7 @@
 import type { SyncHealthAction, SyncHealthDto, SyncHealthScope, SyncHealthState } from "@actual-sync/shared";
 
 export class ProviderOperationError extends Error {
-  readonly code?: string;
+  readonly code: string | undefined;
   readonly healthState: SyncHealthState;
   readonly healthScope: SyncHealthScope;
   readonly healthAction: SyncHealthAction;

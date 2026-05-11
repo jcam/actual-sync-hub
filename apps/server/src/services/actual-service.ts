@@ -7,6 +7,7 @@ import type * as ActualApi from "@actual-app/api";
 import type { ActualBankSyncSource, ActualBankSyncStatus } from "@actual-sync/shared";
 import type { APIAccountEntity, APICategoryEntity } from "@actual-app/api/models";
 import { env } from "../env.js";
+import { stripUndefined } from "../lib/strip-undefined.js";
 
 const READ_CACHE_TTL_MS = 10_000;
 const RETRY_DELAY_MS = 2_000;
@@ -336,7 +337,7 @@ export type ActualService = {
 }
 
 export function createActualService({
-  config = {
+  config = stripUndefined({
     dataDir: path.join(env.ACTUAL_DATA_DIR, "cache"),
     serverURL: env.ACTUAL_SERVER_URL,
     password: env.ACTUAL_SERVER_PASSWORD,
@@ -345,7 +346,7 @@ export function createActualService({
     apiLocalEntry: env.ACTUAL_API_LOCAL_ENTRY || undefined,
     apiVersionMatchMode: env.actualApiVersionMatchMode,
     syncEventDebug: env.actualSyncEventDebug
-  } satisfies ActualConfig
+  }) satisfies ActualConfig
 }: {
   config?: ActualConfig;
 } = {}): ActualService {
@@ -655,12 +656,19 @@ export function createActualService({
     },
 
     async updateExternalSyncAccountStatus(accountId: string, status: ActualBankSyncStatus, lastSync?: string | null) {
-      await runWorker<void>({
-        operation: "updateExternalSyncAccountStatus",
-        accountId,
-        status,
-        lastSync
-      });
+      const payload: WorkerCommandPayload = lastSync === undefined
+        ? {
+            operation: "updateExternalSyncAccountStatus",
+            accountId,
+            status
+          }
+        : {
+            operation: "updateExternalSyncAccountStatus",
+            accountId,
+            status,
+            lastSync
+          };
+      await runWorker<void>(payload);
       clearReadCaches();
     },
 
@@ -674,32 +682,46 @@ export function createActualService({
     },
 
     async importTransactions(accountId: string, transactions: ImportTransactionInput[], options?: ActualImportBehaviorOptions) {
+      const payload: WorkerCommandPayload = options === undefined
+        ? {
+            operation: "importTransactions",
+            accountId,
+            transactions
+          }
+        : {
+            operation: "importTransactions",
+            accountId,
+            transactions,
+            options
+          };
       const result = await runWorker<{
         added: string[];
         updated: string[];
         errors: Array<{ message: string }>;
-      }>({
-        operation: "importTransactions",
-        accountId,
-        transactions,
-        options
-      });
+      }>(payload);
       clearReadCaches();
       return result;
     },
 
     async previewImportTransactions(accountId: string, transactions: ImportTransactionInput[], options?: ActualImportBehaviorOptions) {
+      const payload: WorkerCommandPayload = options === undefined
+        ? {
+            operation: "previewImportTransactions",
+            accountId,
+            transactions
+          }
+        : {
+            operation: "previewImportTransactions",
+            accountId,
+            transactions,
+            options
+          };
       return runWorker<{
         added: string[];
         updated: string[];
         errors: Array<{ message: string }>;
         updatedPreview: PreviewImportMatchRecord[];
-      }>({
-        operation: "previewImportTransactions",
-        accountId,
-        transactions,
-        options
-      });
+      }>(payload);
     },
 
     async reconcileTransactions(
@@ -709,6 +731,22 @@ export function createActualService({
       removedActualTransactionIds: string[] = [],
       options?: ActualImportBehaviorOptions
     ) {
+      const payload: WorkerCommandPayload = options === undefined
+        ? {
+            operation: "reconcileTransactions",
+            accountId,
+            transactions,
+            removedImportedIds,
+            removedActualTransactionIds
+          }
+        : {
+            operation: "reconcileTransactions",
+            accountId,
+            transactions,
+            removedImportedIds,
+            removedActualTransactionIds,
+            options
+          };
       const result = await runWorker<{
         added: number;
         updated: number;
@@ -716,14 +754,7 @@ export function createActualService({
         renamedPayees: number;
         addedIds?: string[];
         updatedIds?: string[];
-      }>({
-        operation: "reconcileTransactions",
-        accountId,
-        transactions,
-        removedImportedIds,
-        removedActualTransactionIds,
-        options
-      });
+      }>(payload);
       clearReadCaches();
       return result;
     }

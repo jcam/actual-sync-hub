@@ -54,8 +54,8 @@ export function StripeLinkPanel({
 
               await api.finalizeStripeSession({
                 sessionId: result.financialConnectionsSession?.id || session.sessionId,
-                label: label.trim() || undefined,
-                accountIds
+                accountIds,
+                ...(label.trim() ? { label: label.trim() } : {})
               });
               setLabel("");
               setMessage("Stripe connection saved.");

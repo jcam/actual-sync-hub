@@ -25,6 +25,7 @@ import type { Prisma, Provider as PrismaProvider } from "../generated/prisma/cli
 import { prisma } from "../db.js";
 import { env } from "../env.js";
 import { encryptString } from "../lib/crypto.js";
+import { stripUndefined } from "../lib/strip-undefined.js";
 import { actualService } from "./actual-service.js";
 import type {
   ActualExternalSyncAccountRecord,
@@ -44,7 +45,8 @@ import {
   getPrimarySourceCategory,
   normalizeActualExternalSyncPrefs,
   resolveTransactionCategoryId,
-  resolveTransferActualAccountId
+  resolveTransferActualAccountId,
+  toImportTransactionInput
 } from "./provider-sync-helpers.js";
 import { createProviderSettingsService } from "./provider-settings-service.js";
 import type { ProviderSettingsService } from "./provider-settings-service.js";
@@ -153,8 +155,8 @@ function getPlaidMetadata(metadata: Record<string, unknown>) {
   return typeof metadata.plaid === "object" && metadata.plaid ? (metadata.plaid as Record<string, unknown>) : {};
 }
 
-function toPrismaProvider(provider: Provider | null | undefined): PrismaProvider | null | undefined {
-  return provider as PrismaProvider | null | undefined;
+function toPrismaProvider(provider: Provider | null | undefined): PrismaProvider | null {
+  return provider == null ? null : (provider as PrismaProvider);
 }
 
 function toActualLastSyncValue(value: Date | string | null | undefined) {
@@ -809,7 +811,7 @@ export function createAppService({
         categoryMappings: linkConfig.categoryMappings || []
       });
 
-      return {
+      return stripUndefined({
         date: transaction.date,
         amount: transaction.amount,
         payee_name: transaction.payeeName,
@@ -834,7 +836,7 @@ export function createAppService({
           })),
           currentActualAccountId: actualAccountId
         })
-      };
+      }) satisfies ReconcileTransactionInput;
     });
 
   const getAutomaticSyncBlockReason = (link: Pick<SyncableLink, "configJson" | "connection">) => {
@@ -1198,17 +1200,7 @@ export function createAppService({
       importedId => !reconcileImportedIds.has(importedId)
     );
     const migrating = link.status === "MIGRATING";
-    const migrationImportPayload = reconcileTransactions.map(transaction => ({
-      date: transaction.date,
-      amount: transaction.amount,
-      payee_name: transaction.payee_name,
-      imported_payee: transaction.imported_payee,
-      notes: transaction.notes,
-      imported_id: transaction.imported_id,
-      cleared: transaction.cleared,
-      category: transaction.resolved_category_id,
-      transfer_actual_account_id: transaction.transfer_actual_account_id
-    }));
+    const migrationImportPayload = reconcileTransactions.map(toImportTransactionInput);
     const migrationResult = migrating
       ? await actual.importTransactions(link.actualAccountId, migrationImportPayload, {
           reimportDeleted: actualExternalSyncPrefs.reimportDeleted,
@@ -1277,14 +1269,14 @@ export function createAppService({
                   importedId: transaction.imported_id
                 }
               },
-              update: {
+              update: stripUndefined({
                 transactionDate: transaction.date,
                 actualTransactionId,
                 primarySourceCategory,
                 appliedCategoryId: transaction.resolved_category_id ?? null,
                 lastSeenAt: ledgerSeenAt
-              },
-              create: {
+              }),
+              create: stripUndefined({
                 accountLinkId: link.id,
                 importedId: transaction.imported_id,
                 transactionDate: transaction.date,
@@ -1293,7 +1285,7 @@ export function createAppService({
                 appliedCategoryId: transaction.resolved_category_id ?? null,
                 observedCategoryId: transaction.resolved_category_id ?? null,
                 lastSeenAt: ledgerSeenAt
-              }
+              })
             });
           })
         )
@@ -1826,12 +1818,12 @@ export function createAppService({
             connection.provider === "HOME_VALUES" &&
             typeof metadata.homeValues === "object" &&
             metadata.homeValues
-              ? (metadata.homeValues as ConnectionDto["homeValues"])
+              ? (metadata.homeValues as Exclude<ConnectionDto["homeValues"], undefined>)
               : null,
           accounts: connection.accounts.map(account => {
             const simplefinRaw =
               connection.provider === "SIMPLEFIN" ? parseSimpleFinAccountRawJson(account.rawJson) : null;
-            return {
+            return stripUndefined({
               id: account.id,
               externalAccountId: account.externalAccountId,
               name: account.name,
@@ -1849,7 +1841,7 @@ export function createAppService({
                 account.providerConnectionName ??
                 connection.institutionName ??
                 null
-            };
+            });
           })
         };
       });
@@ -1913,8 +1905,8 @@ export function createAppService({
           id: account.id,
           name: account.name,
           balance: account.balance,
-          offbudget: account.offbudget,
-          closed: account.closed,
+          offbudget: account.offbudget ?? false,
+          closed: account.closed ?? false,
           link: toLinkDto(link, {
             actualAccountId: account.id,
             actualAccountName: account.name
@@ -2273,12 +2265,12 @@ export function createAppService({
       const mappingChanged = linkIdentityChanged(currentLink, payload);
       const existingConfig = parseLinkConfig(currentLink?.configJson);
       const normalizedSchedulePayload = await normalizeHomeValueLinkSchedule(payload, currentLink);
-      const nextConfig = {
+      const nextConfig = stripUndefined({
         providerSyncState: mappingChanged ? undefined : existingConfig.providerSyncState,
         health: mappingChanged ? null : existingConfig.health ?? null,
         categoryMappings: mappingChanged ? [] : payload.categoryMappings,
         seenCategoryNames: mappingChanged ? [] : existingConfig.seenCategoryNames || []
-      };
+      }) satisfies LinkConfigData;
 
       const hasHistoricalImports = currentLink
         ? (await database.importedTransaction.count({

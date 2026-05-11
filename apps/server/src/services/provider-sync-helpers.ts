@@ -1,4 +1,5 @@
 import type { ActualCategoryDto, CategoryMappingDto } from "@actual-sync/shared";
+import { stripUndefined } from "../lib/strip-undefined.js";
 import type { ImportTransactionInput, PreviewImportMatchRecord, ReconcileTransactionInput } from "./actual-service.js";
 import type { ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
 import { resolveActualCategoryId } from "./category-matching.js";
@@ -85,7 +86,7 @@ export function sanitizeProviderSyncResult(result: ProviderSyncResult): Provider
       continue;
     }
 
-    const sanitizedTransaction = {
+    const sanitizedTransaction = stripUndefined({
       ...transaction,
       importedId,
       date,
@@ -98,7 +99,7 @@ export function sanitizeProviderSyncResult(result: ProviderSyncResult): Provider
       searchText: transaction.searchText
         ? [...new Set(transaction.searchText.map(value => value.trim()).filter(Boolean))]
         : undefined
-    } satisfies ProviderSyncTransaction;
+    }) satisfies ProviderSyncTransaction;
 
     const existingIndex = indexByImportedId.get(importedId);
     if (existingIndex == null) {
@@ -150,10 +151,12 @@ export function applyActualExternalSyncPrefsToProviderSyncResult(
 
   const filteredTransactions = result.transactions
     .filter(transaction => normalizedPrefs.importPending || transaction.cleared)
-    .map(transaction => ({
-      ...transaction,
-      notes: normalizedPrefs.importNotes ? transaction.notes : undefined
-    }));
+    .map(transaction =>
+      stripUndefined({
+        ...transaction,
+        notes: normalizedPrefs.importNotes ? transaction.notes : undefined
+      })
+    );
 
   return sanitizeProviderSyncResult({
     ...result,
@@ -179,10 +182,12 @@ export function resolveTransactionCategoryId({
     return explicitMapping.actualCategoryId;
   }
 
-  return resolveActualCategoryId({
-    categoryNames: transaction.categoryNames,
-    actualCategories
-  });
+  return resolveActualCategoryId(
+    stripUndefined({
+      categoryNames: transaction.categoryNames,
+      actualCategories
+    })
+  );
 }
 
 export function resolveTransferActualAccountId({
@@ -240,7 +245,7 @@ export function resolveTransferActualAccountId({
 }
 
 export function toImportTransactionInput(transaction: ReconcileTransactionInput): ImportTransactionInput {
-  return {
+  return stripUndefined({
     date: transaction.date,
     amount: transaction.amount,
     payee_name: transaction.payee_name,
@@ -250,7 +255,7 @@ export function toImportTransactionInput(transaction: ReconcileTransactionInput)
     cleared: transaction.cleared,
     category: transaction.resolved_category_id,
     transfer_actual_account_id: transaction.transfer_actual_account_id
-  };
+  });
 }
 
 export function mapPreviewItemByImportedId(updatedPreview: PreviewImportMatchRecord[]) {

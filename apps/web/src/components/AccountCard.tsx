@@ -245,7 +245,7 @@ export function AccountCard({
           health={account.link.health}
           provider={account.link.provider}
           scope="account"
-          connectionId={account.link.connectionId}
+          connectionId={account.link.connectionId ?? null}
           onReauthenticated={onRefresh}
         />
       ) : null}

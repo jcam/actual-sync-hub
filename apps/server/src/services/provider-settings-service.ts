@@ -6,6 +6,7 @@ import type {
 } from "@actual-sync/shared";
 import { z } from "zod";
 import { prisma } from "../db.js";
+import { stripUndefined } from "../lib/strip-undefined.js";
 
 type DatabaseClient = typeof prisma;
 
@@ -219,13 +220,13 @@ export function createProviderSettingsService({
       const rows = await database.providerSetting.findMany();
       const byProvider = new Map(rows.map(row => [row.provider, row.settingsJson] as const));
 
-      return {
+      return stripUndefined({
         PLAID: parseProviderSettings("PLAID", byProvider.get("PLAID")) ?? defaults.PLAID,
         STRIPE: reconcileStripeEnvironment(parseProviderSettings("STRIPE", byProvider.get("STRIPE")) ?? defaults.STRIPE),
         TELLER: parseProviderSettings("TELLER", byProvider.get("TELLER")) ?? defaults.TELLER,
         SIMPLEFIN: parseProviderSettings("SIMPLEFIN", byProvider.get("SIMPLEFIN")) ?? defaults.SIMPLEFIN,
         HOME_VALUES: parseProviderSettings("HOME_VALUES", byProvider.get("HOME_VALUES")) ?? defaults.HOME_VALUES
-      };
+      });
     },
 
     async get<T extends Provider>(provider: T) {

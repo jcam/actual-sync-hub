@@ -2,6 +2,7 @@ import { prisma } from "../db.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import type { ProviderConnectResult } from "@actual-sync/shared";
 import { decryptString, encryptString } from "../lib/crypto.js";
+import { stripUndefined } from "../lib/strip-undefined.js";
 import { buildProviderCategoryNames } from "./category-matching.js";
 import { parseLinkConfig } from "./link-config.js";
 import { providerFixtureCache } from './provider-fixture-cache.js';
@@ -324,18 +325,20 @@ function normalizeSimpleFinTransactions({
 
       const payeeName = transaction.payee?.trim() || transaction.description?.trim() || account.name;
       const importedPayee = transaction.payee?.trim() || transaction.description?.trim() || payeeName;
-      const notes = buildImportedTransactionNotes({
-        payeeName,
-        description: transaction.description,
-        memo: transaction.memo
-      });
+      const notes = buildImportedTransactionNotes(
+        stripUndefined({
+          payeeName,
+          description: transaction.description,
+          memo: transaction.memo
+        })
+      );
       const amount = parseCurrency(transaction.amount);
       if (amount == null) {
         return [];
       }
 
       return [
-        {
+        stripUndefined({
           date,
           amount,
           payeeName,
@@ -347,7 +350,7 @@ function normalizeSimpleFinTransactions({
           searchText: [transaction.payee?.trim(), transaction.description?.trim(), transaction.memo?.trim()].filter(
             (value): value is string => Boolean(value)
           )
-        }
+        })
       ];
     })
     .sort((left, right) => right.date.localeCompare(left.date));
@@ -556,10 +559,10 @@ export function createSimpleFinService({
 
     async connectSetupToken(payload: SimpleFinConnectPayload) {
       const accessKey = await exchangeSetupToken(payload.setupToken, fetchImpl);
-      return connectAccessKey({
+      return connectAccessKey(stripUndefined({
         accessKey,
         label: payload.label
-      });
+      }));
     },
 
     async reuseCachedConnection(label) {
@@ -573,10 +576,10 @@ export function createSimpleFinService({
       }
 
       try {
-        return await connectAccessKey({
+        return await connectAccessKey(stripUndefined({
           accessKey: cached.accessKey,
           label
-        });
+        }));
       } catch (error) {
         const providerError = classifySimpleFinError(error);
         if (providerError.code === "INVALID_ACCESS_TOKEN") {
@@ -690,9 +693,11 @@ export function createSimpleFinService({
             accessKey,
             fetchImpl,
             accountIds: [...new Set(syncPlans.map(plan => plan.link.connectionAccount!.externalAccountId))],
-            startDate: requestStartDate,
             endDate: today,
-            balancesOnly: false
+            balancesOnly: false,
+            ...stripUndefined({
+              startDate: requestStartDate
+            })
           });
           const errorMessages = formatSimpleFinErrors(response);
           if (errorMessages.length > 0) {

@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { URL } from "node:url";
 import type { ConnectionReauthSessionDto, ProviderConnectResult, TellerConnectConfigDto } from "@actual-sync/shared";
 import { prisma } from "../db.js";
+import { stripUndefined } from "../lib/strip-undefined.js";
 import { parseLinkConfig } from "./link-config.js";
 import { decryptString, encryptString } from "../lib/crypto.js";
 import { buildProviderCategoryNames } from "./category-matching.js";
@@ -781,7 +782,9 @@ export function createTellerService({
             enrollmentId: cached.enrollmentId,
             userId: cached.userId ?? null,
             institutionName: cached.institutionName ?? null,
-            label: label ?? undefined
+            ...stripUndefined({
+              label
+            })
           },
           environment: (await getEffectiveConfig()).environment
         });
@@ -931,21 +934,23 @@ export function createTellerService({
             const counterpartyName = transaction.details?.counterparty?.name?.trim() || undefined;
             const description = transaction.description?.trim() || transaction.type;
 
-            return {
-              date: transaction.date,
-              amount: Number(transaction.amount),
-              payeeName: counterpartyName || description,
-              importedPayee: description,
-              notes: buildImportedTransactionNotes({
+          return {
+              ...stripUndefined({
+                date: transaction.date,
+                amount: Number(transaction.amount),
                 payeeName: counterpartyName || description,
-                description
-              }),
-              importedId: transaction.id,
-              cleared: transaction.status === "posted",
-              categoryNames: getTellerCategoryNames(transaction),
-              searchText: [description, counterpartyName, transaction.type].filter(
-                (value): value is string => Boolean(value)
-              )
+                importedPayee: description,
+                notes: buildImportedTransactionNotes({
+                  payeeName: counterpartyName || description,
+                  description
+                }),
+                importedId: transaction.id,
+                cleared: transaction.status === "posted",
+                categoryNames: getTellerCategoryNames(transaction),
+                searchText: [description, counterpartyName, transaction.type].filter(
+                  (value): value is string => Boolean(value)
+                )
+              })
             };
           }),
           removedImportedIds: [],

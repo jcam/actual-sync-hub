@@ -13,6 +13,7 @@ import type {
 } from "@actual-sync/shared";
 import { prisma } from "../db.js";
 import { encryptString } from "../lib/crypto.js";
+import { stripUndefined } from "../lib/strip-undefined.js";
 import { parseConnectionMetadata } from "./connection-metadata.js";
 import { sanitizeProviderSyncResult } from "./provider-sync-helpers.js";
 import { createProviderSettingsService } from "./provider-settings-service.js";
@@ -888,16 +889,18 @@ export function createHomeValuesService({
     const sourceStates =
       mode === "cached"
         ? buildSourceStates(payload, existingDetails)
-        : await resolveSourceStates({
-            payload,
-            existingDetails,
-            mode,
-            fetchImpl,
-            execFileImpl,
-            fetchMethods: effectiveSettings,
-            now: effectiveNow,
-            getLatestFetchAt: key => getLatestFetchAt(key, currentConnectionId)
-          });
+        : await resolveSourceStates(
+            stripUndefined({
+              payload,
+              existingDetails,
+              mode,
+              fetchImpl,
+              execFileImpl,
+              fetchMethods: effectiveSettings,
+              now: effectiveNow,
+              getLatestFetchAt: (key: SourceKey) => getLatestFetchAt(key, currentConnectionId)
+            })
+          );
     return toPersistedDetails(payload, toTimestamp(effectiveNow), sourceStates);
   };
 
@@ -993,11 +996,11 @@ export function createHomeValuesService({
         mode: "force",
         currentConnectionId: connectionId
       });
-      await persistConnectionDetails({
+      await persistConnectionDetails(stripUndefined({
         connectionId,
         label: payload.label,
         details
-      });
+      }));
 
       return { connectionId };
     },

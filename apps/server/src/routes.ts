@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppContext } from "./app-context.js";
+import { stripUndefined } from "./lib/strip-undefined.js";
 import { providerSchemas } from "./services/provider-settings-service.js";
 import type { PlaidWebhookEvent } from "./services/plaid-service.js";
 import type { TellerWebhookEvent } from "./services/teller-service.js";
@@ -327,7 +328,7 @@ export async function registerRoutes(
       })
       .parse(request.body ?? {});
 
-    return context.stripeService!.finalizeAccounts(body);
+    return context.stripeService!.finalizeAccounts(stripUndefined(body));
   });
 
   app.post("/api/connections/:id/stripe/reauth-finalize", async (request, reply) => {
@@ -343,10 +344,10 @@ export async function registerRoutes(
       })
       .parse(request.body ?? {});
 
-    return context.stripeService!.finalizeReauthSession({
+    return context.stripeService!.finalizeReauthSession(stripUndefined({
       connectionId: params.id,
       ...body
-    });
+    }));
   });
 
   app.post("/api/connections/simplefin/connect", async (request, reply) => {
@@ -361,7 +362,7 @@ export async function registerRoutes(
       })
       .parse(request.body);
 
-    return await context.simplefinService.connectSetupToken(body);
+    return await context.simplefinService.connectSetupToken(stripUndefined(body));
   });
 
   app.post("/api/connections/simplefin/reuse-cached", async (request, reply) => {
@@ -375,7 +376,7 @@ export async function registerRoutes(
       })
       .parse(request.body ?? {});
 
-    return await context.simplefinService.reuseCachedConnection(body.label);
+    return await context.simplefinService.reuseCachedConnection(body.label ?? null);
   });
 
   app.post("/api/connections/simplefin/import-existing", async (request, reply) => {
@@ -398,7 +399,7 @@ export async function registerRoutes(
     }
 
     const body = homeValueConnectionBodySchema.parse(request.body ?? {});
-    return context.appService.createHomeValueConnection(body);
+    return context.appService.createHomeValueConnection(stripUndefined(body));
   });
 
   app.put("/api/connections/:id/home-values", async (request, reply) => {
@@ -408,7 +409,7 @@ export async function registerRoutes(
 
     const params = connectionIdParamsSchema.parse(request.params);
     const body = homeValueConnectionBodySchema.parse(request.body ?? {});
-    return context.appService.updateHomeValueConnection(params.id, body);
+    return context.appService.updateHomeValueConnection(params.id, stripUndefined(body));
   });
 
   app.get("/api/connections/teller/connect-config", async (request, reply) => {
@@ -434,7 +435,7 @@ export async function registerRoutes(
       })
       .parse(request.body);
 
-    return await context.tellerService.enrollConnection(body);
+    return await context.tellerService.enrollConnection(stripUndefined(body));
   });
 
   app.post("/api/connections/teller/reuse-cached", async (request, reply) => {
@@ -448,7 +449,7 @@ export async function registerRoutes(
       })
       .parse(request.body ?? {});
 
-    return await context.tellerService.reuseCachedConnection(body.label);
+    return await context.tellerService.reuseCachedConnection(body.label ?? null);
   });
 
   app.post("/api/connections/teller/sandbox/seed-connection", async (request, reply) => {
@@ -577,7 +578,7 @@ export async function registerRoutes(
       })
       .parse(request.body);
 
-    await context.appService.upsertAccountLink(params.actualAccountId, body);
+    await context.appService.upsertAccountLink(params.actualAccountId, stripUndefined(body));
     context.scheduler?.requestWakeup();
     return {
       ok: true

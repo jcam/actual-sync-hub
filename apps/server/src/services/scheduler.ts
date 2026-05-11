@@ -1,6 +1,5 @@
 import { prisma } from "../db.js";
 import { appService } from "./app-service.js";
-import { getNextAccountLinkDueAt, isAccountLinkDue } from "./account-link-schedule.js";
 
 export { getNextAccountLinkDueAt, isAccountLinkDue } from "./account-link-schedule.js";
 
@@ -10,21 +9,11 @@ const DEFAULT_SCHEDULE_SANITY_INTERVAL_MS = 4 * 60 * 60_000;
 const POST_SCHEDULED_SYNC_RECHECK_MS = 60_000;
 const RUNNING_WAKEUP_RETRY_MS = 250;
 
-type SchedulableLink = {
-  id: string;
-  actualAccountId: string;
-  syncFrequency: "MANUAL" | "HOURLY" | "DAILY" | "WEEKLY";
-  syncHour: number | null;
-  syncDayOfWeek: number | null;
-  lastSyncedAt: Date | null;
-  isEnabled: boolean;
-};
-
 export class SyncScheduler {
-  private sanityTimer?: NodeJS.Timeout;
-  private scheduledTickTimer?: NodeJS.Timeout;
-  private requestedSyncPollTimer?: NodeJS.Timeout;
-  private wakeupTimer?: NodeJS.Timeout;
+  private sanityTimer: NodeJS.Timeout | undefined;
+  private scheduledTickTimer: NodeJS.Timeout | undefined;
+  private requestedSyncPollTimer: NodeJS.Timeout | undefined;
+  private wakeupTimer: NodeJS.Timeout | undefined;
   private running = false;
   private started = false;
   private requestedSyncPollPromise: Promise<void> | null = null;

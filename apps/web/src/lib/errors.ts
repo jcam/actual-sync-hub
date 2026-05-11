@@ -1,9 +1,9 @@
 export class ApiError extends Error {
   status: number;
-  issues?: Array<{
+  issues: Array<{
     path?: Array<string | number>;
     message?: string;
-  }>;
+  }> | undefined;
 
   constructor(
     message: string,

@@ -7,6 +7,7 @@ import type {
   SyncHealthDto,
   UpdateAccountLinkPayload
 } from "@actual-sync/shared";
+import { stripUndefined } from "../lib/strip-undefined.js";
 
 export type LinkConfigData = {
   providerSyncState?: ProviderSyncStateDto;
@@ -48,7 +49,7 @@ export function parseLinkConfig(configJson: string | null | undefined): LinkConf
               null
           }
         : null;
-    return {
+    return stripUndefined({
       providerSyncState: providerSyncState ?? undefined,
       health: parsed.health ?? null,
       categoryMappings: (parsed.categoryMappings || []).filter(
@@ -64,23 +65,23 @@ export function parseLinkConfig(configJson: string | null | undefined): LinkConf
           ? parsed.automaticSyncFailureCount
           : 0,
       actualExternalLinked: parsed.actualExternalLinked === true
-    };
+    });
   } catch {
     return {};
   }
 }
 
 export function serializeLinkConfig(config: LinkConfigData) {
-  const nextConfig: LinkConfigData = {
+  const nextConfig = stripUndefined({
     providerSyncState:
       config.providerSyncState?.cursor ||
       config.providerSyncState?.windowStartDate ||
       config.providerSyncState?.windowEndDate
-        ? {
+        ? stripUndefined({
             cursor: config.providerSyncState?.cursor || undefined,
             windowStartDate: config.providerSyncState?.windowStartDate || undefined,
             windowEndDate: config.providerSyncState?.windowEndDate || undefined
-          }
+          })
         : undefined,
     health: config.health ?? null,
     categoryMappings: (config.categoryMappings || []).filter(
@@ -95,7 +96,7 @@ export function serializeLinkConfig(config: LinkConfigData) {
         ? config.automaticSyncFailureCount
         : undefined,
     actualExternalLinked: config.actualExternalLinked === true ? true : undefined
-  };
+  }) satisfies LinkConfigData;
 
   return JSON.stringify(nextConfig);
 }

@@ -10,6 +10,7 @@ import type {
   ActualBankSyncSource,
 } from "@actual-sync/shared";
 import type { APIAccountEntity, APICategoryEntity, APICategoryGroupEntity, APIPayeeEntity } from "@actual-app/api/models";
+import { stripUndefined } from "../lib/strip-undefined.js";
 import { resolveActualCategoryId } from "./category-matching.js";
 import { DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS } from "./provider-sync-helpers.js";
 
@@ -394,7 +395,7 @@ function toActualImportTransaction(
   accountId: string,
   transaction: ImportTransactionInput
 ): ActualImportTransaction {
-  return {
+  return stripUndefined({
     account: accountId,
     date: transaction.date,
     amount: amountToInteger(transaction.amount),
@@ -405,7 +406,7 @@ function toActualImportTransaction(
     imported_id: transaction.imported_id,
     cleared: transaction.cleared ?? true,
     category: transaction.category
-  };
+  });
 }
 
 function buildActualImportPayload(accountId: string, transactions: ImportTransactionInput[]) {
@@ -643,10 +644,10 @@ async function initializeActual(config: ActualConfig) {
 
 function toResponseError(error: unknown) {
   if (error instanceof Error) {
-    return {
+    return stripUndefined({
       message: error.message,
       stack: error.stack
-    };
+    });
   }
 
   return {
@@ -964,23 +965,25 @@ async function main() {
             command.accountId,
             command.transactions.map(transaction => ({
               ...transaction,
-              payee:
-                transaction.transfer_actual_account_id
-                  ? transferPayeeByAccountId.get(transaction.transfer_actual_account_id)?.id
-                  : transaction.payee
+              ...stripUndefined({
+                payee:
+                  transaction.transfer_actual_account_id
+                    ? transferPayeeByAccountId.get(transaction.transfer_actual_account_id)?.id
+                    : transaction.payee
+              })
             }))
           );
 
-          const result = await actual.importTransactions(command.accountId, payload, {
+          const result = await actual.importTransactions(command.accountId, payload, stripUndefined({
             defaultCleared: true,
             reimportDeleted: command.options?.reimportDeleted
-          });
+          }));
           if (command.options?.updateDates && payload.length > 0 && result.updated.length > 0) {
-            const previewResult = (await actual.importTransactions(command.accountId, payload, {
+            const previewResult = (await actual.importTransactions(command.accountId, payload, stripUndefined({
               defaultCleared: true,
               dryRun: true,
               reimportDeleted: command.options?.reimportDeleted
-            })) as PreviewImportResult;
+            }))) as PreviewImportResult;
             const dateUpdates = collectDateUpdates({
               updatedPreview: previewResult.updatedPreview,
               transactions: command.transactions,
@@ -1009,18 +1012,20 @@ async function main() {
             command.accountId,
             command.transactions.map(transaction => ({
               ...transaction,
-              payee:
-                transaction.transfer_actual_account_id
-                  ? transferPayeeByAccountId.get(transaction.transfer_actual_account_id)?.id
-                  : transaction.payee
+              ...stripUndefined({
+                payee:
+                  transaction.transfer_actual_account_id
+                    ? transferPayeeByAccountId.get(transaction.transfer_actual_account_id)?.id
+                    : transaction.payee
+              })
             }))
           );
 
-          const result = await actual.importTransactions(command.accountId, payload, {
+          const result = await actual.importTransactions(command.accountId, payload, stripUndefined({
             defaultCleared: true,
             dryRun: true,
             reimportDeleted: command.options?.reimportDeleted
-          });
+          }));
 
           return {
             id: command.id,
@@ -1041,15 +1046,17 @@ async function main() {
           let removed = 0;
           let renamedPayees = 0;
           const resolvedTransactions = command.transactions.map(transaction => {
-            const resolvedCategoryId = transaction.resolved_category_id || resolveActualCategoryId({
-              categoryNames: transaction.category_names,
-              actualCategories
-            });
+            const resolvedCategoryId = transaction.resolved_category_id || resolveActualCategoryId(
+              stripUndefined({
+                categoryNames: transaction.category_names,
+                actualCategories
+              })
+            );
             const resolvedTransferPayee = transaction.transfer_actual_account_id
               ? transferPayeeByAccountId.get(transaction.transfer_actual_account_id)
               : undefined;
 
-            return {
+            return stripUndefined({
               date: transaction.date,
               amount: transaction.amount,
               payee: resolvedTransferPayee?.id,
@@ -1059,7 +1066,7 @@ async function main() {
               imported_id: transaction.imported_id,
               cleared: transaction.cleared,
               category: resolvedCategoryId
-            } satisfies ImportTransactionInput;
+            }) satisfies ImportTransactionInput;
           });
           const importPayload = buildActualImportPayload(command.accountId, resolvedTransactions);
 
@@ -1079,20 +1086,20 @@ async function main() {
             updatedPreview: []
           };
           if (resolvedTransactions.length > 0) {
-            previewResult = (await actual.importTransactions(command.accountId, importPayload, {
+            previewResult = (await actual.importTransactions(command.accountId, importPayload, stripUndefined({
               defaultCleared: true,
               dryRun: true,
               reimportDeleted: command.options?.reimportDeleted
-            })) as PreviewImportResult;
+            }))) as PreviewImportResult;
 
             if (previewResult.errors.length > 0) {
               throw new Error(previewResult.errors[0]?.message || "Actual reconcile preview failed");
             }
 
-            const importResult = await actual.importTransactions(command.accountId, importPayload, {
+            const importResult = await actual.importTransactions(command.accountId, importPayload, stripUndefined({
               defaultCleared: true,
               reimportDeleted: command.options?.reimportDeleted
-            });
+            }));
 
             if (importResult.errors.length > 0) {
               throw new Error(importResult.errors[0]?.message || "Actual reconcile import failed");

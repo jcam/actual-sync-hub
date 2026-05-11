@@ -2,6 +2,7 @@ import type { ProviderConnectResult, SyncHealthDto } from "@actual-sync/shared";
 import { getActiveStripeEnvironmentSettings } from "@actual-sync/shared";
 import Stripe from "stripe";
 import { prisma } from "../db.js";
+import { stripUndefined } from "../lib/strip-undefined.js";
 import { parseLinkConfig } from "./link-config.js";
 import { createProviderSettingsService } from "./provider-settings-service.js";
 import type { ProviderSettingsService } from "./provider-settings-service.js";
@@ -144,7 +145,9 @@ function classifyStripeError(error: unknown) {
   }
 
   return new ProviderOperationError(message, {
-    code: code ?? undefined,
+    ...stripUndefined({
+      code
+    }),
     healthState: "ERROR",
     healthScope: "CONNECTION_AUTH",
     healthAction: "RETRY"
@@ -313,13 +316,13 @@ async function listStripeTransactions({
   do {
     const startTime = Math.floor(Date.now() / 1000) - (initialDays - 1) * 24 * 60 * 60;
     const page = await stripe.financialConnections.transactions.list(
-      {
+      stripUndefined({
         account: accountId,
         limit: 100,
         starting_after: startingAfter ?? undefined,
         transaction_refresh: afterRefreshId ? { after: afterRefreshId } : undefined,
         transacted_at: afterRefreshId ? undefined : { gte: startTime }
-      }
+      })
     );
     transactions.push(...page.data);
     startingAfter = page.has_more ? (page.data[page.data.length - 1]?.id ?? null) : null;
