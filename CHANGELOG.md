@@ -7,6 +7,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+- Direct `actual-service` worker-path coverage for preview imports, reconcile-side payee/date mutation handling, and child-process recovery after an `out-of-sync` Actual session failure.
+
 ## [0.25.0] - 2026-05-11
 
 ### Removed
