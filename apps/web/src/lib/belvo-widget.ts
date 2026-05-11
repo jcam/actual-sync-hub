@@ -14,17 +14,19 @@ export type BelvoWidgetGlobal = {
   createWidget(accessToken: string, config: BelvoWidgetCallbacks): BelvoWidgetInstance;
 };
 
-declare global {
-  interface Window {
-    belvoSDK?: BelvoWidgetGlobal;
-  }
-}
-
 let belvoWidgetLoader: Promise<BelvoWidgetGlobal> | null = null;
 
+function getBelvoWindow() {
+  return window as Window & {
+    belvoSDK?: BelvoWidgetGlobal;
+  };
+}
+
 export function loadBelvoWidget() {
-  if (window.belvoSDK) {
-    return Promise.resolve(window.belvoSDK);
+  const belvoWindow = getBelvoWindow();
+
+  if (belvoWindow.belvoSDK) {
+    return Promise.resolve(belvoWindow.belvoSDK);
   }
 
   if (belvoWidgetLoader) {
@@ -35,11 +37,11 @@ export function loadBelvoWidget() {
     const existing = document.querySelector<HTMLScriptElement>('script[data-belvo-widget="true"]');
     if (existing) {
       existing.addEventListener("load", () => {
-        if (!window.belvoSDK) {
+        if (!belvoWindow.belvoSDK) {
           reject(new Error("Belvo widget failed to initialize"));
           return;
         }
-        resolve(window.belvoSDK);
+        resolve(belvoWindow.belvoSDK);
       });
       existing.addEventListener("error", () => reject(new Error("Failed to load the Belvo widget")));
       return;
@@ -50,11 +52,11 @@ export function loadBelvoWidget() {
     script.async = true;
     script.dataset.belvoWidget = "true";
     script.addEventListener("load", () => {
-      if (!window.belvoSDK) {
+      if (!belvoWindow.belvoSDK) {
         reject(new Error("Belvo widget failed to initialize"));
         return;
       }
-      resolve(window.belvoSDK);
+      resolve(belvoWindow.belvoSDK);
     });
     script.addEventListener("error", () => reject(new Error("Failed to load the Belvo widget")));
     document.head.appendChild(script);

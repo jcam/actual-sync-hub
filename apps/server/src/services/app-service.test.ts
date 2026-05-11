@@ -1608,6 +1608,157 @@ describe.sequential("app service", () => {
     expect(metadata.belvo.lastWebhookSyncedAt).toBe("2026-05-05T05:05:00.000Z");
   });
 
+  it("applies Belvo deleted-transaction webhooks to imported transactions immediately", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "BELVO",
+        label: "Primary Belvo",
+        providerItemId: "belvo-link-delete-sync",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "belvo-account-1",
+        name: "Belvo Checking",
+        type: "depository"
+      }
+    });
+
+    const link = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-belvo-3",
+        actualAccountName: "Belvo Checking",
+        assetType: "BANK",
+        provider: "BELVO",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "MANUAL",
+        isEnabled: false
+      }
+    });
+
+    await prisma.importedTransaction.createMany({
+      data: [
+        {
+          accountLinkId: link.id,
+          importedId: "belvo-deleted-1",
+          transactionDate: "2026-05-04",
+          actualTransactionId: "actual-tx-1",
+          updatedAt: new Date("2026-05-04T00:00:00.000Z")
+        },
+        {
+          accountLinkId: link.id,
+          importedId: "belvo-still-here",
+          transactionDate: "2026-05-04",
+          actualTransactionId: "actual-tx-2",
+          updatedAt: new Date("2026-05-04T00:00:00.000Z")
+        }
+      ]
+    });
+
+    const reconcileTransactions = vi.fn().mockResolvedValue({
+      added: 0,
+      updated: 0,
+      removed: 1,
+      renamedPayees: 0,
+      addedIds: [],
+      updatedIds: []
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        getExternalSyncAccount: vi.fn().mockResolvedValue({
+          id: "actual-belvo-3",
+          linked: true,
+          syncSource: "external",
+          providerAccountId: "belvo-account-1",
+          institutionName: "Belvo Bank",
+          institutionExternalId: "belvo-bank",
+          mask: "1234",
+          officialName: "Belvo Checking",
+          balanceCurrent: 50000,
+          balanceAvailable: 50000,
+          balanceLimit: null,
+          lastSync: null,
+          prefs: {
+            importPending: true,
+            importNotes: true,
+            reimportDeleted: false,
+            importTransactions: true,
+            updateDates: true
+          }
+        }),
+        reconcileTransactions
+      } as never,
+      now: () => new Date("2026-05-05T05:07:00.000Z")
+    });
+
+    await service.handleBelvoWebhook({
+      webhook_id: "wh-belvo-transactions-deleted",
+      webhook_type: "TRANSACTIONS",
+      process_type: "recurrent_update",
+      webhook_code: "transactions_deleted",
+      link_id: "belvo-link-delete-sync",
+      request_id: "req-belvo-transactions-deleted",
+      data: {
+        count: 1,
+        deleted_transactions: ["belvo-deleted-1"]
+      }
+    });
+
+    expect(reconcileTransactions).toHaveBeenCalledWith(
+      "actual-belvo-3",
+      [],
+      ["belvo-deleted-1"],
+      ["actual-tx-1"],
+      {
+        reimportDeleted: false,
+        updateDates: true
+      }
+    );
+
+    expect(
+      await prisma.importedTransaction.findUnique({
+        where: {
+          accountLinkId_importedId: {
+            accountLinkId: link.id,
+            importedId: "belvo-deleted-1"
+          }
+        }
+      })
+    ).toBeNull();
+
+    expect(
+      await prisma.importedTransaction.findUnique({
+        where: {
+          accountLinkId_importedId: {
+            accountLinkId: link.id,
+            importedId: "belvo-still-here"
+          }
+        }
+      })
+    ).not.toBeNull();
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+    expect(metadata.belvo.lastWebhookCode).toBe("transactions_deleted");
+    expect(metadata.belvo.lastTransactionDeletionAppliedAt).toBe("2026-05-05T05:07:00.000Z");
+    expect(metadata.belvo.lastWebhookData).toMatchObject({
+      deletedTransactionCount: 1
+    });
+  });
+
   it("marks Belvo connections reauth-required when Belvo reports a token challenge", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);

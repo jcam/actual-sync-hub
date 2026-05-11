@@ -50,6 +50,8 @@ Important caveat:
 - Teller's free `development` tier is a lifetime-created-enrollments limit, not an active-enrollments limit.
 - Teller's own docs explicitly say deleting an enrollment does not restore your development enrollment count.
 - In practice, that means a hobbyist self-hosted deployment should treat every real-bank Teller enrollment as consuming one of the 100 slots permanently.
+- Teller recommends syncing with an overlap window because pending transactions can post with changed dates, and in some cases with a new transaction id.
+- This repo follows that guidance and treats previously imported transactions that disappear inside the active overlap window as removals during reconcile, so a replaced pending transaction does not stay behind in Actual forever.
 - Teller's delete API is authenticated with the enrollment access token itself, not just your app-level dashboard credentials.
 - If you lose the stored Teller access token for a live development enrollment, assume that enrollment is effectively stranded for this deployment: you may no longer be able to fetch it, repair it, or explicitly delete it from this app.
 - Teller also polls connected institutions on its own schedule for transaction processing. If a stranded enrollment never reaches a disconnected state, Teller may keep attempting to connect to that bank until the enrollment is explicitly removed or otherwise invalidated.

@@ -1678,6 +1678,30 @@ export function createAppService({
     };
   };
 
+  const applyRemovedImportedIdsToLink = async ({
+    link,
+    removedImportedIds
+  }: {
+    link: SyncableLink;
+    removedImportedIds: string[];
+  }) => {
+    const actualExternalSyncPrefs = normalizeActualExternalSyncPrefs(
+      await getActualExternalSyncPrefs(link.actualAccountId)
+    );
+
+    if (!actualExternalSyncPrefs.importTransactions || removedImportedIds.length === 0) {
+      return { removedCount: 0 };
+    }
+
+    return applyReconcilePhase({
+      link,
+      providerTransactions: [],
+      reconcileTransactions: [],
+      removedImportedIds,
+      actualExternalSyncPrefs
+    });
+  };
+
   const runLoadedLinkSyncBatch = async (links: SyncableLink[]) => {
     const eligibleLinks: SyncableLink[] = [];
 
@@ -2993,14 +3017,62 @@ export function createAppService({
       }
 
       if (event.webhook_type === "TRANSACTIONS" && event.webhook_code === "transactions_deleted") {
+        const deletedTransactions = Array.isArray(data?.deleted_transactions)
+          ? data.deleted_transactions.filter((value): value is string => typeof value === "string" && value.length > 0)
+          : [];
+
         await updateBelvoWebhookMetadata({
           connectionId: connection.id,
           event,
           nowIso,
-          extra: {
-            lastTransactionDeletionWebhookAt: nowIso
-          }
+          extra: stripUndefined({
+            lastTransactionDeletionWebhookAt: nowIso,
+            lastTransactionDeletionAppliedAt: deletedTransactions.length > 0 ? nowIso : undefined
+          })
         });
+
+        if (deletedTransactions.length === 0) {
+          return;
+        }
+
+        const affectedLinks = await database.accountLink.findMany({
+          where: {
+            connectionId: connection.id,
+            provider: "BELVO",
+            status: {
+              in: ["ACTIVE", "MIGRATING"]
+            },
+            importedTransactions: {
+              some: {
+                importedId: {
+                  in: deletedTransactions
+                }
+              }
+            }
+          },
+          include: currentLinkInclude
+        });
+
+        for (const link of affectedLinks) {
+          const linkRemovedImportedIds = (
+            await database.importedTransaction.findMany({
+              where: {
+                accountLinkId: link.id,
+                importedId: {
+                  in: deletedTransactions
+                }
+              },
+              select: {
+                importedId: true
+              }
+            })
+          ).map(transaction => transaction.importedId);
+
+          await applyRemovedImportedIdsToLink({
+            link,
+            removedImportedIds: linkRemovedImportedIds
+          });
+        }
         return;
       }
 

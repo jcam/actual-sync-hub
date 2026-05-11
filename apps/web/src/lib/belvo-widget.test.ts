@@ -1,20 +1,29 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+function getBelvoWindow() {
+  return window as Window & {
+    belvoSDK?: {
+      createWidget: ReturnType<typeof vi.fn>;
+    };
+  };
+}
+
 describe("belvo-widget", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();
-    delete window.belvoSDK;
+    delete getBelvoWindow().belvoSDK;
     document.head.querySelectorAll('script[data-belvo-widget="true"]').forEach(node => node.remove());
   });
 
   it("uses an already-loaded Belvo widget global", async () => {
     const build = vi.fn();
-    window.belvoSDK = {
+    const sdk = {
       createWidget: vi.fn().mockReturnValue({
         build
       })
     };
+    getBelvoWindow().belvoSDK = sdk;
 
     const { openBelvoWidget } = await import("./belvo-widget");
     await openBelvoWidget(
@@ -26,7 +35,7 @@ describe("belvo-widget", () => {
       }
     );
 
-    expect(window.belvoSDK.createWidget).toHaveBeenCalledWith("widget-token", {
+    expect(sdk.createWidget).toHaveBeenCalledWith("widget-token", {
       callback: expect.any(Function)
     });
     expect(build).toHaveBeenCalledOnce();
@@ -40,7 +49,7 @@ describe("belvo-widget", () => {
     };
     const appendSpy = vi.spyOn(document.head, "appendChild").mockImplementation(node => {
       setTimeout(() => {
-        window.belvoSDK = sdk;
+        getBelvoWindow().belvoSDK = sdk;
         node.dispatchEvent(new Event("load"));
       }, 0);
       return node;

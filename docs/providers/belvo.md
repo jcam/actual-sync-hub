@@ -58,7 +58,7 @@ Important caveats:
 - Belvo recurrent links are not just a one-time connect. Their docs describe periodic provider-side refreshes and recommend informing users that their credentials will be used to keep data up to date.
 - Production access is not just a key flip. Belvo's docs describe a production access request and certification process before full live use.
 - This repo uses the hosted widget for both connect and reauth/update flows. That is the right path here, but it also means the Belvo integration is less self-contained than providers where all link lifecycle steps are already fully automated server-side.
-- Belvo can send `transactions_deleted` webhooks when it deduplicates upstream data. This repo records those events, but it does not yet apply provider-side deletions back into Actual automatically.
+- Belvo can send `transactions_deleted` webhooks when it deduplicates upstream data. This repo now applies those deleted transaction ids back into Actual immediately through the normal reconcile/delete path.
 
 ## Where to get credentials
 

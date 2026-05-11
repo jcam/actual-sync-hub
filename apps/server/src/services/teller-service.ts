@@ -914,6 +914,23 @@ export function createTellerService({
           startDate,
           endDate
         });
+        const currentImportedIds = new Set(tellerTransactions.map(transaction => transaction.id));
+        const removedImportedIds = (
+          await database.importedTransaction.findMany({
+            where: {
+              accountLinkId: link.id,
+              transactionDate: {
+                gte: startDate,
+                lte: endDate
+              }
+            },
+            select: {
+              importedId: true
+            }
+          })
+        )
+          .map(transaction => transaction.importedId)
+          .filter(importedId => !currentImportedIds.has(importedId));
 
         const metadata = parseConnectionMetadata(link.connection.metadataJson);
         await database.connection.update({
@@ -955,7 +972,7 @@ export function createTellerService({
               })
             };
           }),
-          removedImportedIds: [],
+          removedImportedIds,
           configPatch: {
             providerSyncState: {
               cursor: null,

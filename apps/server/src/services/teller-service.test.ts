@@ -422,6 +422,127 @@ describe.sequential("teller service", () => {
     ]);
   });
 
+  it("marks previously imported Teller transactions as removed when they disappear inside the sync window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-04T12:00:00.000Z"));
+
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "TELLER",
+        label: "Primary Teller",
+        providerItemId: "enr-123",
+        accessTokenCiphertext: encryptString("teller-token")
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "acct-ext-1",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    const link = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Sandbox Checking",
+        assetType: "BANK",
+        provider: "TELLER",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "MANUAL",
+        isEnabled: true,
+        configJson: JSON.stringify({
+          providerSyncState: {
+            windowEndDate: "2026-05-01"
+          }
+        })
+      }
+    });
+
+    await prisma.importedTransaction.createMany({
+      data: [
+        {
+          accountLinkId: link.id,
+          importedId: "txn-current",
+          transactionDate: "2026-05-03",
+          updatedAt: new Date("2026-05-03T00:00:00.000Z")
+        },
+        {
+          accountLinkId: link.id,
+          importedId: "txn-gone",
+          transactionDate: "2026-05-02",
+          updatedAt: new Date("2026-05-02T00:00:00.000Z")
+        },
+        {
+          accountLinkId: link.id,
+          importedId: "txn-outside-window",
+          transactionDate: "2026-04-10",
+          updatedAt: new Date("2026-04-10T00:00:00.000Z")
+        }
+      ]
+    });
+
+    const request = vi.fn().mockResolvedValue([
+      {
+        id: "txn-current",
+        account_id: "acct-ext-1",
+        date: "2026-05-03",
+        amount: "-12.34",
+        description: "Coffee Shop",
+        status: "posted",
+        type: "card_payment",
+        details: {
+          category: "dining",
+          counterparty: {
+            name: "Coffee Shop"
+          }
+        }
+      },
+      {
+        id: "txn-replacement",
+        account_id: "acct-ext-1",
+        date: "2026-05-04",
+        amount: "-45.67",
+        description: "Restaurant",
+        status: "posted",
+        type: "card_payment",
+        details: {
+          category: "dining",
+          counterparty: {
+            name: "Restaurant"
+          }
+        }
+      }
+    ]);
+
+    const service = createTellerService({
+      prisma,
+      config: {
+        appId: "teller-app-id",
+        environment: "sandbox",
+        certificateFile: "",
+        keyFile: "",
+        sandboxAccessToken: "",
+        transactionsInitialDays: 90,
+        transactionsOverlapDays: 10,
+        webhookSigningSecrets: [],
+        webhookToleranceSeconds: 180
+      } satisfies TellerConfig,
+      request
+    });
+
+    const result = await service.syncAccountLink(link.id);
+
+    expect(result.removedImportedIds).toEqual(["txn-gone"]);
+    expect(result.transactions.map(transaction => transaction.importedId)).toEqual(["txn-current", "txn-replacement"]);
+  });
+
   it("verifies Teller webhook signatures against configured secrets", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-05T00:00:00.000Z"));

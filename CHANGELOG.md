@@ -7,11 +7,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-05-11
+
 ### Added
 - Belvo webhook ingestion at `/api/webhooks/belvo`, including optional dashboard-configured `Authorization` verification, webhook-driven account refreshes, transaction sync triggers, and persisted Belvo link lifecycle metadata for async account and transaction events.
+- Belvo `transactions_deleted` webhook handling that immediately removes the affected imported transactions from Actual through the normal reconcile/delete pipeline.
 
 ### Changed
 - Preserved Belvo webhook metadata across Belvo refresh and sync operations, and exposed per-environment Belvo webhook authorization settings in Sync Hub so the current Belvo async flow no longer depends on manual post-connect refreshes for normal webhook-backed updates.
+- Added Teller overlap-window deletion handling so transactions that disappear inside the active window are reconciled as removals, matching Teller's pending-to-posted replacement guidance more closely.
+- Updated provider setup docs to use a consistent structure, include hobbyist pricing and credential guidance, document webhook/delete gotchas, and reflect the current Belvo and Teller deletion behavior.
+
 
 ## [0.30.0] - 2026-05-11
 
