@@ -19,12 +19,14 @@ function getStripeRelinkFailureMessage(session: {
   };
 }) {
   switch (session.relink_result?.failure_reason) {
+    case undefined:
+    case null:
+    case "other":
+      return "Stripe reauthentication failed.";
     case "no_account":
       return "Stripe reauthentication completed, but the expected bank account was not relinked.";
     case "no_authorization":
       return "Stripe reauthentication was not completed.";
-    default:
-      return "Stripe reauthentication failed.";
   }
 }
 

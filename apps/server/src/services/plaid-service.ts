@@ -108,7 +108,7 @@ export type PlaidWebhookEvent = {
   webhook_type: string;
   webhook_code: string;
   item_id?: string;
-  environment?: "sandbox" | "production" | string;
+  environment?: string;
   initial_update_complete?: boolean;
   historical_update_complete?: boolean;
   error?: unknown;

@@ -612,7 +612,7 @@ function parseCommand() {
     raw === "stop" ||
     raw === "remove-node-modules-volume"
   ) {
-    return raw;
+    return raw satisfies Command;
   }
 
   throw new Error(

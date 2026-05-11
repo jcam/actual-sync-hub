@@ -18,16 +18,16 @@ type StripeFinancialConnectionsClient = {
   }): Promise<StripeFinancialConnectionsResult>;
 };
 
-declare global {
-  interface Window {
-    Stripe?: (publishableKey: string) => StripeFinancialConnectionsClient;
-  }
-}
-
 let scriptPromise: Promise<void> | null = null;
 
+function getStripeConstructor() {
+  return (window as Window & {
+    Stripe?: (publishableKey: string) => StripeFinancialConnectionsClient;
+  }).Stripe;
+}
+
 function loadStripeScript() {
-  if (window.Stripe) {
+  if (getStripeConstructor()) {
     return Promise.resolve();
   }
 
@@ -55,9 +55,10 @@ function loadStripeScript() {
 
 export async function loadStripeFinancialConnections(publishableKey: string) {
   await loadStripeScript();
-  if (!window.Stripe) {
+  const Stripe = getStripeConstructor();
+  if (!Stripe) {
     throw new Error("Stripe.js did not initialize correctly.");
   }
 
-  return window.Stripe(publishableKey);
+  return Stripe(publishableKey);
 }

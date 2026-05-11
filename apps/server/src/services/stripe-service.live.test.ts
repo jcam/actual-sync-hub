@@ -129,8 +129,7 @@ describe.skipIf(!credentialsEnabled)("stripe service live", () => {
     });
     expect(refreshedConnection.accounts.length).toBeGreaterThan(0);
 
-    expect(service.createReauthSession).toBeTruthy();
-    if (!service.createReauthSession) {
+    if (typeof service.createReauthSession !== "function") {
       throw new Error("Stripe service does not expose reauth support");
     }
 

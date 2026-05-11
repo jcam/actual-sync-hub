@@ -7,6 +7,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+- Cleaned up the remaining type-aware lint warnings and errors across Stripe reconnect UI, Stripe live-test coverage, Plaid webhook typing, and live-sandbox command parsing so `npm run lint` now passes cleanly again.
+
 ## [0.22.0] - 2026-05-11
 
 ### Added
