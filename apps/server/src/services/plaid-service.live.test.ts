@@ -20,9 +20,14 @@ const plaidTestConfig = {
 };
 
 function createSandboxClient() {
+  const basePath = PlaidEnvironments[plaidTestConfig.environment];
+  if (!basePath) {
+    throw new Error(`Unsupported Plaid environment: ${plaidTestConfig.environment}`);
+  }
+
   return new PlaidApi(
     new Configuration({
-      basePath: PlaidEnvironments[plaidTestConfig.environment],
+      basePath,
       baseOptions: {
         headers: {
           "PLAID-CLIENT-ID": plaidTestConfig.clientId,
@@ -35,6 +40,10 @@ function createSandboxClient() {
 
 async function createSandboxTransactions(accessToken: string) {
   const serverUrl = PlaidEnvironments[plaidTestConfig.environment];
+  if (!serverUrl) {
+    throw new Error(`Unsupported Plaid environment: ${plaidTestConfig.environment}`);
+  }
+
   const today = new Date().toISOString().slice(0, 10);
   const response = await fetch(`${serverUrl}/sandbox/transactions/create`, {
     method: "POST",

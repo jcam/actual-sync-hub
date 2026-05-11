@@ -36,9 +36,14 @@ function getPlaidClient(config: PlaidConfig) {
     throw new Error("Plaid is not configured");
   }
 
+  const basePath = PlaidEnvironments[config.environment];
+  if (!basePath) {
+    throw new Error(`Unsupported Plaid environment: ${config.environment}`);
+  }
+
   return new PlaidApi(
     new Configuration({
-      basePath: PlaidEnvironments[config.environment],
+      basePath,
       baseOptions: {
         headers: {
           "PLAID-CLIENT-ID": config.clientId,

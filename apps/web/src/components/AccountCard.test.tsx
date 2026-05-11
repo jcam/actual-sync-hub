@@ -77,6 +77,8 @@ const options: ConnectionAccountOptionDto[] = [
   }
 ];
 
+const primaryOption = options[0]!;
+
 describe("AccountCard", () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -264,7 +266,7 @@ describe("AccountCard", () => {
         }}
         options={[
           {
-            ...options[0],
+            ...primaryOption,
             connectionHealth: {
               state: "REAUTH_REQUIRED",
               scope: "CONNECTION_AUTH",

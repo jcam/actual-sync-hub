@@ -115,7 +115,12 @@ export async function learnCategoryMappingsFromHistory({
       continue;
     }
 
-    const [actualCategoryId, count] = ranked[0];
+    const topMatch = ranked[0];
+    if (!topMatch) {
+      continue;
+    }
+
+    const [actualCategoryId, count] = topMatch;
     if (count < CATEGORY_LEARNING_MIN_MATCHES || !knownCategoryIds.has(actualCategoryId)) {
       continue;
     }
