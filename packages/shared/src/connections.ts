@@ -61,7 +61,7 @@ export type ConnectionReauthSessionDto =
       publishableKey: string;
     }
   | {
-      provider: "SIMPLEFIN" | "STRIPE";
+      provider: "SIMPLEFIN" | "STRIPE" | "BELVO";
       connectionId: string;
       mode: "manual";
       message: string;

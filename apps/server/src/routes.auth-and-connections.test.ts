@@ -713,6 +713,50 @@ describe("server auth and connection routes", () => {
     expect(importExistingSimpleFinLinks).toHaveBeenCalledWith("connection-simplefin-1");
   });
 
+  it("connects a Belvo link for the authenticated user", async () => {
+    const connectLink = vi.fn().mockResolvedValue({
+      connectionId: "connection-belvo-1"
+    });
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-belvo",
+              username: "admin"
+            })
+          },
+          belvoService: {
+            connectLink
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/connections/belvo/connect",
+      payload: {
+        linkId: "belvo-link-123",
+        label: "Primary Belvo"
+      },
+      cookies: await loginAsAdmin(app)
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      connectionId: "connection-belvo-1"
+    });
+    expect(connectLink).toHaveBeenCalledWith({
+      linkId: "belvo-link-123",
+      label: "Primary Belvo"
+    });
+  });
+
   it("disconnects a SimpleFIN connection", async () => {
     const disconnectConnection = vi.fn().mockResolvedValue(undefined);
 
@@ -744,6 +788,89 @@ describe("server auth and connection routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ ok: true });
     expect(disconnectConnection).toHaveBeenCalledWith("conn-simplefin-1");
+  });
+
+  it("rejects uncovered protected routes without a session", async () => {
+    const connectLink = vi.fn();
+    const importExistingSimpleFinLinks = vi.fn();
+    const createHomeValueConnection = vi.fn();
+    const seedSandboxTransactions = vi.fn();
+    const listActualAccounts = vi.fn();
+    const listSyncRuns = vi.fn();
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          belvoService: {
+            connectLink
+          },
+          plaidService: {
+            seedSandboxTransactions
+          },
+          appService: {
+            importExistingSimpleFinLinks,
+            createHomeValueConnection,
+            listActualAccounts,
+            listSyncRuns
+          }
+        })
+      })
+    );
+
+    const responses = await Promise.all([
+      app.inject({
+        method: "POST",
+        url: "/api/connections/belvo/connect",
+        payload: {
+          linkId: "belvo-link-unauth"
+        }
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/connections/simplefin/import-existing",
+        payload: {
+          connectionId: "connection-simplefin-1"
+        }
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/connections/home-values",
+        payload: {
+          address: "123 Main St",
+          source: "AVERAGE"
+        }
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/connections/conn-seeded/plaid/sandbox/seed-transactions",
+        payload: {
+          count: 1
+        }
+      }),
+      app.inject({
+        method: "GET",
+        url: "/api/actual/accounts"
+      }),
+      app.inject({
+        method: "GET",
+        url: "/api/sync-runs"
+      })
+    ]);
+
+    for (const response of responses) {
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({ error: "Unauthorized" });
+    }
+
+    expect(connectLink).not.toHaveBeenCalled();
+    expect(importExistingSimpleFinLinks).not.toHaveBeenCalled();
+    expect(createHomeValueConnection).not.toHaveBeenCalled();
+    expect(seedSandboxTransactions).not.toHaveBeenCalled();
+    expect(listActualAccounts).not.toHaveBeenCalled();
+    expect(listSyncRuns).not.toHaveBeenCalled();
   });
 
   it("creates a Home Values connection", async () => {
@@ -1579,7 +1706,7 @@ describe("server auth and connection routes", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({
-      error: "Provider must be one of PLAID, STRIPE, TELLER, MONO, SIMPLEFIN, HOME_VALUES, VEHICLE_VALUES."
+      error: "Provider must be one of PLAID, STRIPE, TELLER, MONO, SIMPLEFIN, BELVO, HOME_VALUES, VEHICLE_VALUES."
     });
     expect(get).not.toHaveBeenCalled();
   });

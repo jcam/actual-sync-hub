@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import dotenv from "dotenv";
 
-const providerChoices = ["PLAID", "MONO", "STRIPE", "TELLER", "SIMPLEFIN", "HOME_VALUES"];
+const providerChoices = ["PLAID", "MONO", "STRIPE", "TELLER", "SIMPLEFIN", "BELVO", "HOME_VALUES"];
 
 function parseArgs(argv) {
   const args = {};
@@ -300,6 +300,24 @@ async function buildProviderUpdates(provider, rl, args) {
         }
       };
     }
+    case "BELVO": {
+      const environment = args.env || (await askChoice(rl, "Belvo environment", ["sandbox", "production"], "sandbox"));
+      const secretId = args["secret-id"] || (await ask(rl, "BELVO_TEST_SECRET_ID", { required: true }));
+      const secretPassword =
+        args["secret-password"] || (await ask(rl, "BELVO_TEST_SECRET_PASSWORD", { required: true }));
+      const linkId =
+        args["link-id"] || (await ask(rl, "BELVO_TEST_LINK_ID (optional preferred link for verification)", { defaultValue: "" }));
+      return {
+        title: "Belvo development / test credentials",
+        updates: {
+          BELVO_TEST_RUN_LIVE: "1",
+          BELVO_TEST_ENV: environment,
+          BELVO_TEST_SECRET_ID: secretId,
+          BELVO_TEST_SECRET_PASSWORD: secretPassword,
+          BELVO_TEST_LINK_ID: linkId
+        }
+      };
+    }
     case "HOME_VALUES":
       return {
         title: "Home Values provider note",
@@ -352,6 +370,9 @@ async function main() {
     }
     if (provider === "SIMPLEFIN") {
       console.log("  4. Your `.env` now stores the claimed access key, not the one-time setup token.");
+    }
+    if (provider === "BELVO") {
+      console.log("  4. Create or identify a Belvo link first, then paste its `link.id` into the Belvo Connections page.");
     }
     if (provider === "TELLER" && updates.TELLER_TEST_ENV !== "sandbox") {
       console.log("  4. Make sure the certificate and key file paths are readable from this machine.");

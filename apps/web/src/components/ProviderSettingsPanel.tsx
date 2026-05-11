@@ -78,6 +78,17 @@ type SimpleFinSettingsDraft = {
   automaticSyncConcurrency: string;
 };
 
+type BelvoSettingsDraft = {
+  environment: "sandbox" | "production";
+  sandboxSecretId: string;
+  sandboxSecretPassword: string;
+  productionSecretId: string;
+  productionSecretPassword: string;
+  transactionsInitialDays: string;
+  transactionsOverlapDays: string;
+  automaticSyncConcurrency: string;
+};
+
 type HomeValuesSettingsDraft = {
   automaticSyncConcurrency: string;
   redfinFetchMethod: "node_fetch" | "curl" | "wget" | "disabled";
@@ -98,6 +109,7 @@ type ProviderSettingsDraft =
   | TellerSettingsDraft
   | MonoSettingsDraft
   | SimpleFinSettingsDraft
+  | BelvoSettingsDraft
   | HomeValuesSettingsDraft
   | VehicleValuesSettingsDraft;
 
@@ -233,6 +245,23 @@ function validateDraft(provider: Provider, draft: ProviderSettingsDraft) {
         requireIntegerInRange("Automatic sync concurrency", simpleFinDraft.automaticSyncConcurrency, 1, 20)
       );
     }
+    case "BELVO": {
+      const belvoDraft = draft as BelvoSettingsDraft;
+      const secretId = belvoDraft.environment === "sandbox" ? belvoDraft.sandboxSecretId : belvoDraft.productionSecretId;
+      const secretPassword =
+        belvoDraft.environment === "sandbox" ? belvoDraft.sandboxSecretPassword : belvoDraft.productionSecretPassword;
+      if (!secretId.trim()) {
+        return "Secret ID is required.";
+      }
+      if (!secretPassword.trim()) {
+        return "Secret password is required.";
+      }
+      return (
+        requireIntegerInRange("Initial transaction window", belvoDraft.transactionsInitialDays, 1, 3650) ??
+        requireIntegerInRange("Overlap window", belvoDraft.transactionsOverlapDays, 1, 90) ??
+        requireIntegerInRange("Automatic sync concurrency", belvoDraft.automaticSyncConcurrency, 1, 20)
+      );
+    }
     case "HOME_VALUES": {
       const homeValuesDraft = draft as HomeValuesSettingsDraft;
       return requireIntegerInRange("Automatic sync concurrency", homeValuesDraft.automaticSyncConcurrency, 1, 20);
@@ -344,6 +373,19 @@ function toDraft<T extends Provider>(
         kbbFetchMethod: vehicleValuesSettings.kbbFetchMethod,
         hagertyFetchMethod: vehicleValuesSettings.hagertyFetchMethod
       } satisfies VehicleValuesSettingsDraft;
+    }
+    case "BELVO": {
+      const belvoSettings = settings as ProviderSettingsByProviderDto<"BELVO">;
+      return {
+        environment: belvoSettings.environment ?? "sandbox",
+        sandboxSecretId: belvoSettings.sandbox?.secretId ?? "",
+        sandboxSecretPassword: belvoSettings.sandbox?.secretPassword ?? "",
+        productionSecretId: belvoSettings.production?.secretId ?? "",
+        productionSecretPassword: belvoSettings.production?.secretPassword ?? "",
+        transactionsInitialDays: String(belvoSettings.transactionsInitialDays),
+        transactionsOverlapDays: String(belvoSettings.transactionsOverlapDays),
+        automaticSyncConcurrency: String(belvoSettings.automaticSyncConcurrency)
+      } satisfies BelvoSettingsDraft;
     }
   }
 }
@@ -465,6 +507,23 @@ function toPayload<T extends Provider>(
         automaticSyncConcurrency: Number(simpleFinDraft.automaticSyncConcurrency)
       } as ProviderSettingsByProviderDto<T>;
     }
+    case "BELVO": {
+      const belvoDraft = draft as BelvoSettingsDraft;
+      return {
+        environment: belvoDraft.environment,
+        sandbox: {
+          secretId: belvoDraft.sandboxSecretId.trim(),
+          secretPassword: belvoDraft.sandboxSecretPassword
+        },
+        production: {
+          secretId: belvoDraft.productionSecretId.trim(),
+          secretPassword: belvoDraft.productionSecretPassword
+        },
+        transactionsInitialDays: Number(belvoDraft.transactionsInitialDays),
+        transactionsOverlapDays: Number(belvoDraft.transactionsOverlapDays),
+        automaticSyncConcurrency: Number(belvoDraft.automaticSyncConcurrency)
+      } as ProviderSettingsByProviderDto<T>;
+    }
     case "HOME_VALUES": {
       const homeValuesDraft = draft as HomeValuesSettingsDraft;
       return {
@@ -535,6 +594,7 @@ export function ProviderSettingsPanel<T extends Provider>({
   const tellerDraft = provider === "TELLER" ? (draft as TellerSettingsDraft) : null;
   const monoDraft = provider === "MONO" ? (draft as MonoSettingsDraft) : null;
   const simpleFinDraft = provider === "SIMPLEFIN" ? (draft as SimpleFinSettingsDraft) : null;
+  const belvoDraft = provider === "BELVO" ? (draft as BelvoSettingsDraft) : null;
   const homeValuesDraft = provider === "HOME_VALUES" ? (draft as HomeValuesSettingsDraft) : null;
   const vehicleValuesDraft = provider === "VEHICLE_VALUES" ? (draft as VehicleValuesSettingsDraft) : null;
 
@@ -1239,6 +1299,110 @@ export function ProviderSettingsPanel<T extends Provider>({
                   const next = event.target.value;
                   setDraft(current => ({
                     ...(current as SimpleFinSettingsDraft),
+                    automaticSyncConcurrency: next
+                  }));
+                }}
+              />
+            </label>
+          </>
+        ) : null}
+
+        {belvoDraft ? (
+          <>
+            <label>
+              <span>Environment</span>
+              <select
+                value={belvoDraft.environment}
+                onChange={event => {
+                  const next = event.target.value as BelvoSettingsDraft["environment"];
+                  setDraft(current => ({
+                    ...(current as BelvoSettingsDraft),
+                    environment: next
+                  }));
+                }}
+              >
+                <option value="sandbox">sandbox</option>
+                <option value="production">production</option>
+              </select>
+            </label>
+            <label>
+              <span>{belvoDraft.environment === "sandbox" ? "Sandbox secret ID" : "Production secret ID"}</span>
+              <input
+                type="text"
+                value={belvoDraft.environment === "sandbox" ? belvoDraft.sandboxSecretId : belvoDraft.productionSecretId}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as BelvoSettingsDraft),
+                    ...(belvoDraft.environment === "sandbox" ? { sandboxSecretId: next } : { productionSecretId: next })
+                  }));
+                }}
+                placeholder="Belvo secret id"
+              />
+            </label>
+            <label>
+              <span>{belvoDraft.environment === "sandbox" ? "Sandbox secret password" : "Production secret password"}</span>
+              <input
+                type="password"
+                value={
+                  belvoDraft.environment === "sandbox"
+                    ? belvoDraft.sandboxSecretPassword
+                    : belvoDraft.productionSecretPassword
+                }
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as BelvoSettingsDraft),
+                    ...(belvoDraft.environment === "sandbox"
+                      ? { sandboxSecretPassword: next }
+                      : { productionSecretPassword: next })
+                  }));
+                }}
+                placeholder="Belvo secret password"
+              />
+            </label>
+            <label>
+              <span>Initial transaction window (days)</span>
+              <input
+                type="number"
+                min={1}
+                value={belvoDraft.transactionsInitialDays}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as BelvoSettingsDraft),
+                    transactionsInitialDays: next
+                  }));
+                }}
+              />
+            </label>
+            <label>
+              <span>Overlap window (days)</span>
+              <input
+                type="number"
+                min={1}
+                max={90}
+                value={belvoDraft.transactionsOverlapDays}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as BelvoSettingsDraft),
+                    transactionsOverlapDays: next
+                  }));
+                }}
+              />
+            </label>
+            <label>
+              <span>Automatic sync concurrency</span>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={belvoDraft.automaticSyncConcurrency}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as BelvoSettingsDraft),
                     automaticSyncConcurrency: next
                   }));
                 }}

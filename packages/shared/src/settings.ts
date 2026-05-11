@@ -108,6 +108,21 @@ export type SimpleFinProviderSettingsDto = {
   automaticSyncConcurrency: number;
 }
 
+export type BelvoProviderSettingsDto = {
+  environment: "sandbox" | "production";
+  sandbox: {
+    secretId: string;
+    secretPassword: string;
+  };
+  production: {
+    secretId: string;
+    secretPassword: string;
+  };
+  transactionsInitialDays: number;
+  transactionsOverlapDays: number;
+  automaticSyncConcurrency: number;
+}
+
 export type HomeValuesProviderSettingsDto = {
   automaticSyncConcurrency: number;
   redfinFetchMethod: HomeValuesFetchMethod;
@@ -122,6 +137,7 @@ export type ProviderSettingsDto = {
   TELLER: TellerProviderSettingsDto;
   MONO: MonoProviderSettingsDto;
   SIMPLEFIN: SimpleFinProviderSettingsDto;
+  BELVO?: BelvoProviderSettingsDto;
   HOME_VALUES?: HomeValuesProviderSettingsDto;
   VEHICLE_VALUES?: VehicleValuesProviderSettingsDto;
 };
@@ -136,9 +152,11 @@ export type ProviderSettingsByProviderDto<T extends Provider = Provider> = T ext
         ? TellerProviderSettingsDto
         : T extends "SIMPLEFIN"
           ? SimpleFinProviderSettingsDto
-          : T extends "HOME_VALUES"
-            ? HomeValuesProviderSettingsDto
-            : VehicleValuesProviderSettingsDto;
+          : T extends "BELVO"
+            ? BelvoProviderSettingsDto
+            : T extends "HOME_VALUES"
+              ? HomeValuesProviderSettingsDto
+              : VehicleValuesProviderSettingsDto;
 
 export function getActivePlaidEnvironmentSettings(settings: PlaidProviderSettingsDto) {
   return settings[settings.environment];
@@ -158,4 +176,8 @@ export function getActiveMonoEnvironmentSettings(settings: MonoProviderSettingsD
 
 export function getActiveSimpleFinModeSettings(settings: SimpleFinProviderSettingsDto) {
   return settings.mode === "development" ? settings.development : null;
+}
+
+export function getActiveBelvoEnvironmentSettings(settings: BelvoProviderSettingsDto) {
+  return settings[settings.environment];
 }

@@ -27,6 +27,7 @@ npm run dev:env:init:mono
 npm run dev:env:init:stripe
 npm run dev:env:init:teller
 npm run dev:env:init:simplefin
+npm run dev:env:init:belvo
 npm run dev:env:init:home-values
 ```
 
@@ -58,4 +59,5 @@ For a real self-hosted deployment, expect this split:
 - [Stripe](./stripe.md)
 - [Teller](./teller.md)
 - [SimpleFIN](./simplefin.md)
+- [Belvo](./belvo.md)
 - [Home Values](./home-values.md)

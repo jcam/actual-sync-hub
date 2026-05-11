@@ -16,6 +16,12 @@ describe("createProviderSettingsService", () => {
         countryCodes: ["US"],
         automaticSyncConcurrency: 2
       }));
+      await expect(service.get("BELVO")).resolves.toEqual(expect.objectContaining({
+        environment: "sandbox",
+        transactionsInitialDays: 90,
+        transactionsOverlapDays: 7,
+        automaticSyncConcurrency: 2
+      }));
     } finally {
       await cleanup();
     }

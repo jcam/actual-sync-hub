@@ -13,6 +13,7 @@ enum Provider {
   TELLER
   MONO
   SIMPLEFIN
+  BELVO
   HOME_VALUES
   VEHICLE_VALUES
 }

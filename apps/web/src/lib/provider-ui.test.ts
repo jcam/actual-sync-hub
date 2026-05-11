@@ -52,7 +52,9 @@ describe("supportsInlineReauth", () => {
 describe("provider-ui helpers", () => {
   it("maps provider routes and labels with sensible fallbacks", () => {
     expect(getProviderConnectionsPath("PLAID")).toBe("/plaid-connections");
+    expect(getProviderConnectionsPath("BELVO")).toBe("/belvo-connections");
     expect(getProviderConnectionsPath(undefined)).toBe("/accounts");
+    expect(getProviderConnectionsLabel("BELVO")).toBe("Belvo Connections");
     expect(getProviderConnectionsLabel("TELLER")).toBe("Teller.io Connections");
     expect(getProviderConnectionsLabel(null)).toBe("Connections");
   });

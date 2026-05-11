@@ -44,6 +44,10 @@ export type RuntimeInfoDto = {
     mode: "sandbox" | "development" | "production";
     requiresSetupToken: boolean;
   };
+  belvo?: {
+    enabled: boolean;
+    environment: "sandbox" | "production";
+  };
   actual: {
     serverUrl: string;
     budgetSyncIdConfigured: boolean;

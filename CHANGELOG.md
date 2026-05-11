@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-05-11
+
+### Added
+- Belvo as a first-class provider, including persisted provider settings, shared runtime/provider metadata, managed-connections UI wiring, and a Belvo-specific manual link-import page for bringing existing Belvo `link.id` records into Sync Hub.
+- A Belvo server adapter built on the official Belvo Node SDK for link hydration, account refresh, transaction sync, reconnect-state surfacing, and a gated live sandbox smoke test driven by `BELVO_TEST_*` environment variables.
+
+### Changed
+- Expanded route, provider-settings, and adapter coverage to include the Belvo connect flow plus additional auth/error/fallback branches, and added `belvo-service.ts` to the enforced per-file provider coverage thresholds alongside Mono, Plaid, SimpleFIN, and Teller.
+
 ## [0.29.0] - 2026-05-11
 
 ### Added

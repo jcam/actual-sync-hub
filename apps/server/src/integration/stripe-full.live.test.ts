@@ -7,6 +7,7 @@ import { createAppService } from "../services/app-service.js";
 import { createAuthService } from "../services/auth.js";
 import { createActualService } from "../services/actual-service.js";
 import { createHomeValuesService } from "../services/home-values-service.js";
+import { belvoService } from "../services/belvo-service.js";
 import { plaidService } from "../services/plaid-service.js";
 import { createProviderSettingsService } from "../services/provider-settings-service.js";
 import { simplefinService } from "../services/simplefin-service.js";
@@ -155,6 +156,7 @@ describe.skipIf(!liveEnabled)("stripe full live integration", () => {
         prisma,
         actualService,
         homeValuesService,
+        belvoService,
         plaidService,
         providerSettingsService,
         simplefinService,

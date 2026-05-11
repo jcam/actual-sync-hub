@@ -5,6 +5,7 @@ const {
   actualServiceMock,
   appServiceMock,
   authServiceMock,
+  belvoServiceMock,
   databaseMock,
   homeValuesServiceMock,
   monoServiceMock,
@@ -28,6 +29,9 @@ const {
   },
   authServiceMock: {
     name: "auth-service"
+  },
+  belvoServiceMock: {
+    name: "belvo-service"
   },
   databaseMock: {
     name: "prisma"
@@ -91,6 +95,10 @@ vi.mock("./services/mono-service.js", () => ({
   monoService: monoServiceMock
 }));
 
+vi.mock("./services/belvo-service.js", () => ({
+  belvoService: belvoServiceMock
+}));
+
 vi.mock("./services/plaid-service.js", () => ({
   plaidService: plaidServiceMock
 }));
@@ -143,6 +151,7 @@ describe("createAppContext", () => {
       actualService: actualServiceMock,
       homeValuesService: homeValuesServiceMock,
       monoService: monoServiceMock,
+      belvoService: belvoServiceMock,
       vehicleValuesService: vehicleValuesServiceMock,
       plaidService: plaidServiceMock,
       providerSettingsService: providerSettingsServiceMock,
@@ -156,6 +165,7 @@ describe("createAppContext", () => {
       actualService: actualServiceMock,
       homeValuesService: homeValuesServiceMock,
       monoService: monoServiceMock,
+      belvoService: belvoServiceMock,
       vehicleValuesService: vehicleValuesServiceMock,
       plaidService: plaidServiceMock,
       providerSettingsService: providerSettingsServiceMock,
@@ -183,6 +193,9 @@ describe("createAppContext", () => {
       },
       vehicleValuesService: {
         name: "override-vehicle-values"
+      },
+      belvoService: {
+        name: "override-belvo"
       },
       providerSettingsService: {
         name: "override-provider-settings"
@@ -223,6 +236,7 @@ describe("createAppContext", () => {
       actualService: overrides.actualService,
       homeValuesService: overrides.homeValuesService,
       monoService: overrides.monoService,
+      belvoService: overrides.belvoService,
       vehicleValuesService: overrides.vehicleValuesService,
       plaidService: overrides.plaidService,
       providerSettingsService: overrides.providerSettingsService,

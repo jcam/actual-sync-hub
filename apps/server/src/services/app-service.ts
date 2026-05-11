@@ -1,4 +1,5 @@
 import type {
+  BelvoProviderSettingsDto,
   ActualAccountDto,
   ActualAccountsResponseDto,
   ActualBankSyncStatus,
@@ -18,6 +19,7 @@ import type {
   WriteMode
 } from "@actual-sync/shared";
 import {
+  getActiveBelvoEnvironmentSettings,
   getActivePlaidEnvironmentSettings,
   getActiveMonoEnvironmentSettings,
   getActiveStripeEnvironmentSettings,
@@ -42,6 +44,8 @@ import { CURRENT_LINK_STATUSES, linkIdentityChanged, parseLinkConfig, selectCurr
 import type { LinkConfigData } from "./link-config.js";
 import { plaidService } from "./plaid-service.js";
 import type { PlaidService, PlaidWebhookEvent } from "./plaid-service.js";
+import { belvoService } from "./belvo-service.js";
+import type { BelvoService } from "./belvo-service.js";
 import {
   applyWriteModeToProviderSyncResult,
   buildSnapshotDeltaTransaction,
@@ -121,6 +125,21 @@ type ExistingExternalSyncMetadata = Pick<
   | "balanceLimit"
   | "lastSync"
 >;
+
+const defaultBelvoSettings: BelvoProviderSettingsDto = {
+  environment: "sandbox",
+  sandbox: {
+    secretId: "",
+    secretPassword: ""
+  },
+  production: {
+    secretId: "",
+    secretPassword: ""
+  },
+  transactionsInitialDays: 90,
+  transactionsOverlapDays: 7,
+  automaticSyncConcurrency: 2
+};
 
 const currentLinkOrderBy = [
   {
@@ -283,8 +302,9 @@ export function createAppService({
   prisma: database = prisma,
   actualService: actual = actualService,
   homeValuesService: homeValues = homeValuesService,
-  vehicleValuesService: vehicleValues = vehicleValuesService,
+  belvoService: belvo = belvoService,
   monoService: mono = monoService,
+  vehicleValuesService: vehicleValues = vehicleValuesService,
   plaidService: plaid = plaidService,
   providerSettingsService: settings = createProviderSettingsService({ prisma: database }),
   simplefinService: simplefin = simplefinService,
@@ -303,8 +323,9 @@ export function createAppService({
   prisma?: DatabaseClient;
   actualService?: ActualService;
   homeValuesService?: HomeValuesService;
-  vehicleValuesService?: VehicleValuesService;
+  belvoService?: BelvoService;
   monoService?: MonoService;
+  vehicleValuesService?: VehicleValuesService;
   plaidService?: PlaidService;
   providerSettingsService?: ProviderSettingsService;
   simplefinService?: SimpleFinService;
@@ -321,6 +342,7 @@ export function createAppService({
   now?: () => Date;
 } = {}): AppService {
   const providerAdapters = {
+    BELVO: belvo,
     HOME_VALUES: homeValues,
     MONO: mono,
     PLAID: plaid,
@@ -416,6 +438,7 @@ export function createAppService({
 
   const isProviderConfigured = async (provider: Provider) => {
     const providerSettings = await getEffectiveProviderSettings();
+    const belvoSettings = providerSettings.BELVO ?? defaultBelvoSettings;
 
     if (isValuationProvider(provider)) {
       return true;
@@ -424,6 +447,11 @@ export function createAppService({
     if (provider === "PLAID") {
       const activePlaidSettings = getActivePlaidEnvironmentSettings(providerSettings.PLAID);
       return Boolean(activePlaidSettings.clientId && activePlaidSettings.secret);
+    }
+
+    if (provider === "BELVO") {
+      const activeBelvoSettings = getActiveBelvoEnvironmentSettings(belvoSettings);
+      return Boolean(activeBelvoSettings.secretId.trim() && activeBelvoSettings.secretPassword);
     }
 
     if (provider === "TELLER") {
@@ -451,6 +479,9 @@ export function createAppService({
     const activePlaidSettings = getActivePlaidEnvironmentSettings(effectiveProviderSettings.PLAID);
     const plaidEnabled = Boolean(activePlaidSettings.clientId && activePlaidSettings.secret);
     const plaidSandboxToolsEnabled = plaidEnvironment === "sandbox";
+    const belvoSettings = effectiveProviderSettings.BELVO ?? defaultBelvoSettings;
+    const activeBelvoSettings = getActiveBelvoEnvironmentSettings(belvoSettings);
+    const belvoEnabled = Boolean(activeBelvoSettings.secretId.trim() && activeBelvoSettings.secretPassword);
     const stripeEnvironment = effectiveProviderSettings.STRIPE.environment;
     const activeStripeSettings = getActiveStripeEnvironmentSettings(effectiveProviderSettings.STRIPE);
     const stripePublishableKeyConfigured = Boolean(activeStripeSettings.publishableKey.trim());
@@ -478,6 +509,17 @@ export function createAppService({
       Boolean(getActiveSimpleFinModeSettings(effectiveProviderSettings.SIMPLEFIN)?.serverUrl);
 
     return [
+      {
+        provider: "BELVO",
+        label: "Belvo",
+        enabled: belvoEnabled,
+        ready: belvoEnabled,
+        environment: belvoSettings.environment,
+        issues: belvoEnabled ? [] : ["Enter a Belvo secret ID and secret password to enable Belvo link imports."],
+        notes: [
+          "Belvo currently uses a manual import flow: connect the existing Belvo link ID, then sync accounts and transactions through the server-side SDK."
+        ]
+      },
       {
         provider: "HOME_VALUES",
         label: "Home Values",
@@ -620,6 +662,7 @@ export function createAppService({
   const runWithProviderBackgroundGate = async <T>(provider: Provider, task: () => Promise<T>) => {
     const providerSettings = await getEffectiveProviderSettings();
     const dynamicAutomaticSyncConcurrency: AutomaticSyncConcurrencyConfig = {
+      BELVO: providerSettings.BELVO?.automaticSyncConcurrency ?? defaultBelvoSettings.automaticSyncConcurrency,
       HOME_VALUES: providerSettings.HOME_VALUES?.automaticSyncConcurrency ?? 1,
       MONO: getMonoSettingsWithFallback(providerSettings).automaticSyncConcurrency,
       PLAID: providerSettings.PLAID.automaticSyncConcurrency,
@@ -1907,6 +1950,8 @@ export function createAppService({
       const providers = await getProviderRuntimeInfo(effectiveSettings);
       const activePlaidSettings = getActivePlaidEnvironmentSettings(effectiveSettings.PLAID);
       const plaidEnabled = Boolean(activePlaidSettings.clientId && activePlaidSettings.secret);
+      const belvoSettings = effectiveSettings.BELVO ?? defaultBelvoSettings;
+      const activeBelvoSettings = getActiveBelvoEnvironmentSettings(belvoSettings);
       const activeStripeSettings = getActiveStripeEnvironmentSettings(effectiveSettings.STRIPE);
       const stripePublishableKeyConfigured = Boolean(activeStripeSettings.publishableKey.trim());
       const stripeSecretKeyConfigured = Boolean(activeStripeSettings.secretKey);
@@ -1955,6 +2000,10 @@ export function createAppService({
           enabled: true,
           mode: effectiveSettings.SIMPLEFIN.mode,
           requiresSetupToken: true
+        },
+        belvo: {
+          enabled: Boolean(activeBelvoSettings.secretId.trim() && activeBelvoSettings.secretPassword),
+          environment: belvoSettings.environment
         },
         actual: {
           serverUrl: runtime.actualServerUrl,
@@ -2302,6 +2351,15 @@ export function createAppService({
         };
       }
 
+      if (connection.provider === "BELVO") {
+        return {
+          provider: "BELVO",
+          connectionId,
+          mode: "manual",
+          message: "Belvo reconnection currently requires re-linking or completing the provider challenge from the Belvo Connections page."
+        };
+      }
+
       throw new Error("Reauthentication is not supported for this provider");
     },
 
@@ -2342,7 +2400,10 @@ export function createAppService({
       const metadata = parseConnectionMetadata(connection.metadataJson);
       const providerKey = connection.provider.toLowerCase();
       const healthAction =
-        connection.provider === "SIMPLEFIN" || connection.provider === "STRIPE" || connection.provider === "MONO"
+        connection.provider === "SIMPLEFIN" ||
+        connection.provider === "STRIPE" ||
+        connection.provider === "MONO" ||
+        connection.provider === "BELVO"
           ? "MANUAL_RECONNECT"
           : "REAUTH_CONNECTION";
       const providerLabel =
@@ -2354,6 +2415,8 @@ export function createAppService({
             ? "Plaid"
             : connection.provider === "STRIPE"
               ? "Stripe"
+              : connection.provider === "BELVO"
+                ? "Belvo"
             : connection.provider === "SIMPLEFIN"
               ? "SimpleFIN"
               : "Home Values";

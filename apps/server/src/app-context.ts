@@ -10,6 +10,8 @@ import { createHomeValuesService } from './services/home-values-service.js';
 import type { HomeValuesService } from './services/home-values-service.js';
 import { monoService } from './services/mono-service.js';
 import type { MonoService } from './services/mono-service.js';
+import { belvoService } from './services/belvo-service.js';
+import type { BelvoService } from './services/belvo-service.js';
 import { plaidService } from './services/plaid-service.js';
 import type { PlaidService } from './services/plaid-service.js';
 import { createProviderSettingsService } from './services/provider-settings-service.js';
@@ -33,8 +35,9 @@ export type AppContext = {
   authService: AuthService;
   appService: AppService;
   homeValuesService: HomeValuesService;
-  vehicleValuesService?: VehicleValuesService;
+  belvoService: BelvoService;
   monoService?: MonoService;
+  vehicleValuesService?: VehicleValuesService;
   plaidService: PlaidService;
   providerSettingsService: ProviderSettingsService;
   simplefinService: SimpleFinService;
@@ -48,8 +51,9 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
   const database = overrides.prisma ?? prisma;
   const settings = overrides.providerSettingsService ?? createProviderSettingsService({ prisma: database });
   const homeValues = overrides.homeValuesService ?? createHomeValuesService({ prisma: database, providerSettings: settings });
-  const vehicleValues = overrides.vehicleValuesService ?? createVehicleValuesService({ prisma: database });
+  const belvo = overrides.belvoService ?? belvoService;
   const mono = overrides.monoService ?? monoService;
+  const vehicleValues = overrides.vehicleValuesService ?? createVehicleValuesService({ prisma: database });
   const plaid = overrides.plaidService ?? plaidService;
   const simplefin = overrides.simplefinService ?? simplefinService;
   const stripe = overrides.stripeService ?? stripeService;
@@ -59,8 +63,9 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
     prisma: database,
     actualService: overrides.actualService ?? actualService,
     homeValuesService: homeValues,
-    vehicleValuesService: vehicleValues,
+    belvoService: belvo,
     monoService: mono,
+    vehicleValuesService: vehicleValues,
     plaidService: plaid,
     providerSettingsService: settings,
     simplefinService: simplefin,
@@ -76,13 +81,14 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
         prisma: database,
         actualService: overrides.actualService ?? actualService,
         homeValuesService: homeValues,
+        belvoService: belvo,
         monoService: mono,
-        vehicleValuesService: vehicleValues,
         plaidService: plaid,
         providerSettingsService: settings,
         simplefinService: simplefin,
         stripeService: stripe,
-        tellerService: teller
+        tellerService: teller,
+        vehicleValuesService: vehicleValues
       })
   };
 }

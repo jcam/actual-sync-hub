@@ -127,6 +127,15 @@ export const api = {
       })
     });
   },
+  connectBelvoLink(linkId: string, label?: string) {
+    return request<ProviderConnectResult>("/api/connections/belvo/connect", {
+      method: "POST",
+      body: JSON.stringify({
+        linkId,
+        ...(label ? { label } : {})
+      })
+    });
+  },
   reuseCachedSimpleFinConnection(label?: string) {
     return request<ProviderConnectResult>("/api/connections/simplefin/reuse-cached", {
       method: "POST",

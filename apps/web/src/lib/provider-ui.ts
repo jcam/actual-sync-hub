@@ -16,6 +16,8 @@ export function getProviderConnectionsPath(provider: Provider | null | undefined
       return "/mono-connections";
     case "SIMPLEFIN":
       return "/simplefin-connections";
+    case "BELVO":
+      return "/belvo-connections";
     case "HOME_VALUES":
       return "/home-values-connections";
     case "VEHICLE_VALUES":
@@ -41,6 +43,8 @@ export function getProviderConnectionsLabel(provider: Provider | null | undefine
       return "Mono Connections";
     case "SIMPLEFIN":
       return "SimpleFIN Connections";
+    case "BELVO":
+      return "Belvo Connections";
     case "HOME_VALUES":
       return "Home Values";
     case "VEHICLE_VALUES":

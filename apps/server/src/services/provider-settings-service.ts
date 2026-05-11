@@ -92,6 +92,20 @@ const simpleFinSettingsSchema = z.object({
   automaticSyncConcurrency: z.coerce.number().int().min(1).max(20)
 });
 
+const belvoEnvironmentSettingsSchema = z.object({
+  secretId: z.string(),
+  secretPassword: z.string()
+});
+
+const belvoSettingsSchema = z.object({
+  environment: z.enum(["sandbox", "production"]),
+  sandbox: belvoEnvironmentSettingsSchema,
+  production: belvoEnvironmentSettingsSchema,
+  transactionsInitialDays: z.coerce.number().int().min(1).max(3650),
+  transactionsOverlapDays: z.coerce.number().int().min(1).max(90),
+  automaticSyncConcurrency: z.coerce.number().int().min(1).max(20)
+});
+
 const homeValuesSettingsSchema = z.object({
   automaticSyncConcurrency: z.coerce.number().int().min(1).max(20),
   redfinFetchMethod: z.enum(["node_fetch", "curl", "wget", "disabled"]).default("curl"),
@@ -112,6 +126,7 @@ export const providerSchemas = {
   TELLER: tellerSettingsSchema,
   MONO: monoSettingsSchema,
   SIMPLEFIN: simpleFinSettingsSchema,
+  BELVO: belvoSettingsSchema,
   HOME_VALUES: homeValuesSettingsSchema,
   VEHICLE_VALUES: vehicleValuesSettingsSchema
 } as const;
@@ -201,6 +216,20 @@ function defaultProviderSettings(): ProviderSettingsDto {
       transactionsInitialDays: 45,
       automaticSyncConcurrency: 2
     },
+    BELVO: {
+      environment: "sandbox",
+      sandbox: {
+        secretId: "",
+        secretPassword: ""
+      },
+      production: {
+        secretId: "",
+        secretPassword: ""
+      },
+      transactionsInitialDays: 90,
+      transactionsOverlapDays: 7,
+      automaticSyncConcurrency: 2
+    },
     HOME_VALUES: {
       automaticSyncConcurrency: 1,
       redfinFetchMethod: "curl",
@@ -270,6 +299,7 @@ export function createProviderSettingsService({
         TELLER: parseProviderSettings("TELLER", byProvider.get("TELLER")) ?? defaults.TELLER,
         MONO: parseProviderSettings("MONO", byProvider.get("MONO")) ?? defaults.MONO,
         SIMPLEFIN: parseProviderSettings("SIMPLEFIN", byProvider.get("SIMPLEFIN")) ?? defaults.SIMPLEFIN,
+        BELVO: parseProviderSettings("BELVO", byProvider.get("BELVO")) ?? defaults.BELVO,
         HOME_VALUES: parseProviderSettings("HOME_VALUES", byProvider.get("HOME_VALUES")) ?? defaults.HOME_VALUES,
         VEHICLE_VALUES:
           parseProviderSettings("VEHICLE_VALUES", byProvider.get("VEHICLE_VALUES")) ?? defaults.VEHICLE_VALUES

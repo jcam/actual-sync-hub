@@ -29,7 +29,7 @@ const connectionIdParamsSchema = z.object({
 });
 
 const providerParamsSchema = z.object({
-  provider: z.enum(["PLAID", "STRIPE", "TELLER", "MONO", "SIMPLEFIN", "HOME_VALUES", "VEHICLE_VALUES"])
+  provider: z.enum(["PLAID", "STRIPE", "TELLER", "MONO", "SIMPLEFIN", "BELVO", "HOME_VALUES", "VEHICLE_VALUES"])
 });
 
 const homeValueConnectionBodySchema = z.object({
@@ -96,6 +96,11 @@ const simplefinConnectBodySchema = z.object({
   label: z.string().min(1).optional()
 });
 
+const belvoConnectBodySchema = z.object({
+  linkId: z.string().min(1),
+  label: z.string().min(1).optional()
+});
+
 const simplefinImportExistingBodySchema = z.object({
   connectionId: z.string().min(1)
 });
@@ -121,7 +126,8 @@ const accountLinkBodySchema = z.object({
   assetType: z.enum(["BANK", "LOAN", "INVESTMENT", "PROPERTY", "OTHER_ASSET", "OTHER_LIABILITY"]),
   writeMode: z.enum(["TRANSACTIONS", "SNAPSHOT_DELTA", "TRANSACTIONS_AND_SNAPSHOT_DELTA"]).optional(),
   snapshotHistory: z.boolean().optional(),
-  provider: z.enum(["PLAID", "STRIPE", "TELLER", "MONO", "SIMPLEFIN", "HOME_VALUES", "VEHICLE_VALUES"])
+  provider: z
+    .enum(["PLAID", "STRIPE", "TELLER", "MONO", "SIMPLEFIN", "BELVO", "HOME_VALUES", "VEHICLE_VALUES"])
     .nullable()
     .optional(),
   connectionId: z.string().nullable().optional(),
@@ -194,7 +200,7 @@ function assertAuthenticated(request: FastifyRequest, reply: FastifyReply) {
 
 export async function registerRoutes(
   app: FastifyInstance,
-  context: Pick<AppContext, "authService" | "appService" | "monoService" | "plaidService" | "providerSettingsService" | "simplefinService" | "stripeService" | "tellerService" | "scheduler">
+  context: Pick<AppContext, "authService" | "appService" | "belvoService" | "monoService" | "plaidService" | "providerSettingsService" | "simplefinService" | "stripeService" | "tellerService" | "scheduler">
 ) {
   const registerReviewRoutes = (prefix: "migration" | "sync-review") => {
     app.get(`/api/account-links/:actualAccountId/${prefix}/preview`, async (request, reply) => {
@@ -469,6 +475,16 @@ export async function registerRoutes(
     const body = parseRequestBody(simplefinConnectBodySchema, request);
 
     return await context.simplefinService.connectSetupToken(stripUndefined(body));
+  });
+
+  app.post("/api/connections/belvo/connect", async (request, reply) => {
+    if (!assertAuthenticated(request, reply)) {
+      return;
+    }
+
+    const body = parseRequestBody(belvoConnectBodySchema, request);
+
+    return await context.belvoService.connectLink(stripUndefined(body));
   });
 
   app.post("/api/connections/simplefin/reuse-cached", async (request, reply) => {

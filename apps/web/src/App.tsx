@@ -14,6 +14,7 @@ import { SimpleFinConnectionsPage } from "./routes/SimpleFinConnectionsPage";
 import { StripeConnectionsPage } from "./routes/StripeConnectionsPage";
 import { TellerConnectionsPage } from "./routes/TellerConnectionsPage";
 import { VehicleValuesConnectionsPage } from "./routes/VehicleValuesConnectionsPage";
+import { BelvoConnectionsPage } from "./routes/BelvoConnectionsPage";
 
 function Layout({
   session,
@@ -51,6 +52,9 @@ function Layout({
           <NavLink to="/simplefin-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             SimpleFIN Connections
           </NavLink>
+          <NavLink to="/belvo-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            Belvo Connections
+          </NavLink>
           <NavLink to="/home-values-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             Home Values
           </NavLink>
@@ -82,6 +86,7 @@ function Layout({
           <Route path="/teller-connections" element={<TellerConnectionsPage />} />
           <Route path="/mono-connections" element={<MonoConnectionsPage />} />
           <Route path="/simplefin-connections" element={<SimpleFinConnectionsPage />} />
+          <Route path="/belvo-connections" element={<BelvoConnectionsPage />} />
           <Route path="/home-values-connections" element={<HomeValuesConnectionsPage />} />
           <Route path="/vehicle-values-connections" element={<VehicleValuesConnectionsPage />} />
           <Route path="*" element={<Navigate to="/accounts" replace />} />

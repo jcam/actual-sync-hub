@@ -34,7 +34,7 @@ export default defineConfig({
           functions: 80,
           lines: 77
         },
-        "apps/server/src/services/{mono-service.ts,plaid-service.ts,simplefin-service.ts,teller-service.ts}": {
+        "apps/server/src/services/{belvo-service.ts,mono-service.ts,plaid-service.ts,simplefin-service.ts,teller-service.ts}": {
           statements: 70,
           branches: 60,
           functions: 66,

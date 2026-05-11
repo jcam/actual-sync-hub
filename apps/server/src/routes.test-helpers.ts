@@ -121,6 +121,20 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
             transactionsInitialDays: 45,
             automaticSyncConcurrency: 1
           },
+          BELVO: {
+            environment: "sandbox",
+            sandbox: {
+              secretId: "",
+              secretPassword: ""
+            },
+            production: {
+              secretId: "",
+              secretPassword: ""
+            },
+            transactionsInitialDays: 90,
+            transactionsOverlapDays: 7,
+            automaticSyncConcurrency: 2
+          },
           HOME_VALUES: {
             automaticSyncConcurrency: 1,
             redfinFetchMethod: "curl",
@@ -159,6 +173,10 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           enabled: true,
           mode: "sandbox",
           requiresSetupToken: true
+        },
+        belvo: {
+          enabled: false,
+          environment: "sandbox"
         },
         actual: {
           serverUrl: "http://localhost:5006",
@@ -278,6 +296,20 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           transactionsInitialDays: 45,
           automaticSyncConcurrency: 1
         },
+        BELVO: {
+          environment: "sandbox",
+          sandbox: {
+            secretId: "",
+            secretPassword: ""
+          },
+          production: {
+            secretId: "",
+            secretPassword: ""
+          },
+          transactionsInitialDays: 90,
+          transactionsOverlapDays: 7,
+          automaticSyncConcurrency: 2
+        },
         HOME_VALUES: {
           automaticSyncConcurrency: 1,
           redfinFetchMethod: "curl",
@@ -361,6 +393,16 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       refreshConnection: vi.fn(),
       syncAccountLink: vi.fn(),
       ...(overrides.simplefinService as object | undefined)
+    },
+    belvoService: {
+      provider: "BELVO" as const,
+      isConfigured: vi.fn().mockReturnValue(false),
+      connectLink: vi.fn(),
+      createReauthSession: vi.fn(),
+      disconnectConnection: vi.fn(),
+      refreshConnection: vi.fn(),
+      syncAccountLink: vi.fn(),
+      ...(overrides.belvoService as object | undefined)
     },
     homeValuesService: {
       provider: "HOME_VALUES" as const,
