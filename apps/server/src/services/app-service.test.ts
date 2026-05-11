@@ -1511,6 +1511,145 @@ describe.sequential("app service", () => {
     expect(metadata.plaid.lastWebhookSyncedAt).toBe("2026-05-05T04:00:00.000Z");
   });
 
+  it("coalesces overlapping Plaid webhook syncs for the same connection", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-overlap",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "acct-1",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    const scheduledLink = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Scheduled Plaid",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    let releaseFirstSync!: () => void;
+    const firstSyncStarted = new Promise<void>(resolve => {
+      releaseFirstSync = resolve;
+    });
+    let syncCallCount = 0;
+
+    const syncAccountLink = vi.fn().mockImplementation(async () => {
+      syncCallCount += 1;
+
+      if (syncCallCount === 1) {
+        await firstSyncStarted;
+      }
+
+      return {
+        imported: 0,
+        transactions: [],
+        removedImportedIds: [],
+        configPatch: {
+          providerSyncState: {
+            cursor: `cursor-${syncCallCount}`,
+            windowStartDate: null,
+            windowEndDate: null
+          }
+        }
+      };
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listCategories: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
+        reconcileTransactions: vi.fn().mockResolvedValue({
+          added: 0,
+          updated: 0,
+          removed: 0,
+          renamedPayees: 0,
+          addedIds: [],
+          updatedIds: []
+        }),
+        importTransactions: vi.fn(),
+        previewImportTransactions: vi.fn(),
+        getExternalSyncAccount: vi.fn().mockResolvedValue({
+          prefs: {
+            reimportDeleted: false,
+            updateDates: false
+          }
+        }),
+        linkExternalSyncAccount: vi.fn(),
+        unlinkExternalSyncAccount: vi.fn()
+      } as never,
+      plaidService: {
+        provider: "PLAID",
+        isConfigured: vi.fn().mockReturnValue(true),
+        createLinkToken: vi.fn(),
+        createUpdateLinkToken: vi.fn(),
+        exchangePublicToken: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection: vi.fn(),
+        syncAccountLink,
+        seedSandboxConnection: vi.fn(),
+        seedSandboxTransactions: vi.fn()
+      } as never,
+      now: () => new Date("2026-05-05T04:05:00.000Z")
+    });
+
+    const firstWebhook = service.handlePlaidWebhook({
+      webhook_type: "TRANSACTIONS",
+      webhook_code: "SYNC_UPDATES_AVAILABLE",
+      item_id: "item-overlap",
+      environment: "sandbox"
+    });
+
+    await vi.waitFor(() => {
+      expect(syncAccountLink).toHaveBeenCalledTimes(1);
+    });
+
+    const secondWebhook = service.handlePlaidWebhook({
+      webhook_type: "TRANSACTIONS",
+      webhook_code: "SYNC_UPDATES_AVAILABLE",
+      item_id: "item-overlap",
+      environment: "sandbox",
+      historical_update_complete: true
+    });
+
+    await secondWebhook;
+    expect(syncAccountLink).toHaveBeenCalledTimes(1);
+
+    releaseFirstSync();
+    await firstWebhook;
+
+    expect(syncAccountLink).toHaveBeenCalledTimes(2);
+    expect(syncAccountLink).toHaveBeenNthCalledWith(1, scheduledLink.id);
+    expect(syncAccountLink).toHaveBeenNthCalledWith(2, scheduledLink.id);
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+    expect(metadata.plaid.historicalUpdateComplete).toBe(true);
+    expect(metadata.plaid.lastWebhookSyncedAt).toBe("2026-05-05T04:05:00.000Z");
+  });
+
   it("ignores Plaid webhook types and codes that do not represent transaction sync updates", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);

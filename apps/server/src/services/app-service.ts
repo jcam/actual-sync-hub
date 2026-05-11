@@ -149,6 +149,10 @@ function createConcurrencyGate(limit: number) {
   };
 }
 
+function getPlaidMetadata(metadata: Record<string, unknown>) {
+  return typeof metadata.plaid === "object" && metadata.plaid ? (metadata.plaid as Record<string, unknown>) : {};
+}
+
 function toPrismaProvider(provider: Provider | null | undefined): PrismaProvider | null | undefined {
   return provider as PrismaProvider | null | undefined;
 }
@@ -274,6 +278,7 @@ export function createAppService({
     TELLER: teller
   } satisfies Record<Provider, ProviderAdapter>;
   const providerBackgroundSyncGates = new Map<Provider, ProviderBackgroundSyncGate>();
+  const activePlaidWebhookSyncs = new Map<string, { pending: boolean }>();
   const runImportedTransactionLedgerWrite = createConcurrencyGate(IMPORTED_TRANSACTION_LEDGER_WRITE_CONCURRENCY);
   const getEffectiveProviderSettings = () => settings.getAll();
   let actualCapabilitiesPromise: Promise<{
@@ -545,6 +550,49 @@ export function createAppService({
     }
 
     return gate.run(task);
+  };
+
+  const updatePlaidWebhookMetadata = async ({
+    connectionId,
+    event,
+    nowIso,
+    extra = {}
+  }: {
+    connectionId: string;
+    event: PlaidWebhookEvent;
+    nowIso: string;
+    extra?: Record<string, unknown>;
+  }) => {
+    const currentConnection = await database.connection.findUniqueOrThrow({
+      where: {
+        id: connectionId
+      },
+      select: {
+        metadataJson: true
+      }
+    });
+    const metadata = parseConnectionMetadata(currentConnection.metadataJson);
+    const plaidMetadata = getPlaidMetadata(metadata);
+
+    await database.connection.update({
+      where: {
+        id: connectionId
+      },
+      data: {
+        metadataJson: JSON.stringify({
+          ...metadata,
+          plaid: {
+            ...plaidMetadata,
+            lastWebhookAt: nowIso,
+            lastWebhookCode: event.webhook_code,
+            lastWebhookEnvironment: event.environment ?? null,
+            initialUpdateComplete: event.initial_update_complete ?? plaidMetadata.initialUpdateComplete ?? null,
+            historicalUpdateComplete: event.historical_update_complete ?? plaidMetadata.historicalUpdateComplete ?? null,
+            ...extra
+          }
+        })
+      }
+    });
   };
 
   const buildSiblingLinks = async (link: {
@@ -2477,114 +2525,121 @@ export function createAppService({
         return;
       }
 
-      const metadata = parseConnectionMetadata(connection.metadataJson);
-      const plaidMetadata =
-        typeof metadata.plaid === "object" && metadata.plaid ? (metadata.plaid as Record<string, unknown>) : {};
-      const nowIso = now().toISOString();
-
-      await database.connection.update({
-        where: {
-          id: connection.id
-        },
-        data: {
-          metadataJson: JSON.stringify({
-            ...metadata,
-            plaid: {
-              ...plaidMetadata,
-              lastWebhookAt: nowIso,
-              lastWebhookCode: event.webhook_code,
-              lastWebhookEnvironment: event.environment ?? null,
-              initialUpdateComplete: event.initial_update_complete ?? plaidMetadata.initialUpdateComplete ?? null,
-              historicalUpdateComplete: event.historical_update_complete ?? plaidMetadata.historicalUpdateComplete ?? null,
-              lastWebhookSyncStartedAt: nowIso
-            }
-          })
-        }
-      });
-
-      const eligibleLinks = await database.accountLink.findMany({
-        where: {
+      const activeSync = activePlaidWebhookSyncs.get(connection.id);
+      if (activeSync) {
+        activeSync.pending = true;
+        const queuedAt = now().toISOString();
+        await updatePlaidWebhookMetadata({
           connectionId: connection.id,
-          provider: "PLAID",
-          status: "ACTIVE",
-          isEnabled: true,
-          syncFrequency: {
-            not: "MANUAL"
-          }
-        },
-        include: currentLinkInclude
-      });
-
-      if (eligibleLinks.length === 0) {
-        await database.connection.update({
-          where: {
-            id: connection.id
-          },
-          data: {
-            metadataJson: JSON.stringify({
-              ...metadata,
-              plaid: {
-                ...plaidMetadata,
-                lastWebhookAt: nowIso,
-                lastWebhookCode: event.webhook_code,
-                lastWebhookEnvironment: event.environment ?? null,
-                initialUpdateComplete: event.initial_update_complete ?? plaidMetadata.initialUpdateComplete ?? null,
-                historicalUpdateComplete: event.historical_update_complete ?? plaidMetadata.historicalUpdateComplete ?? null,
-                lastWebhookSyncSkippedAt: nowIso,
-                lastWebhookSkipReason: "no_eligible_links"
-              }
-            })
+          event,
+          nowIso: queuedAt,
+          extra: {
+            lastWebhookSyncQueuedAt: queuedAt,
+            lastWebhookSkipReason: "coalesced"
           }
         });
         return;
       }
 
-      for (const link of eligibleLinks) {
-        const syncRun = await createSyncRunForLink(link);
-
-        try {
-          const syncResult = await runWithProviderBackgroundGate("PLAID", () => plaid.syncAccountLink(link.id));
-          await applySyncResultToLink({
-            link,
-            syncRunId: syncRun.id,
-            syncResult
-          });
-        } catch (error) {
-          await markSyncRunFailure({
-            link,
-            syncRunId: syncRun.id,
-            error,
-            automatic: true
-          });
-        }
-      }
-
-      const latestConnection = await database.connection.findUniqueOrThrow({
-        where: {
-          id: connection.id
-        },
-        select: {
-          metadataJson: true
-        }
+      activePlaidWebhookSyncs.set(connection.id, {
+        pending: false
       });
-      const latestMetadata = parseConnectionMetadata(latestConnection.metadataJson);
-      const latestPlaidMetadata =
-        typeof latestMetadata.plaid === "object" && latestMetadata.plaid ? (latestMetadata.plaid as Record<string, unknown>) : {};
 
-      await database.connection.update({
-        where: {
-          id: connection.id
-        },
-        data: {
-          metadataJson: JSON.stringify({
-            ...latestMetadata,
-            plaid: {
-              ...latestPlaidMetadata,
-              lastWebhookSyncedAt: now().toISOString()
+      try {
+        while (true) {
+          const startedAt = now().toISOString();
+          await updatePlaidWebhookMetadata({
+            connectionId: connection.id,
+            event,
+            nowIso: startedAt,
+            extra: {
+              lastWebhookSyncStartedAt: startedAt,
+              lastWebhookSyncQueuedAt: null,
+              lastWebhookSkipReason: null
             }
-          })
+          });
+
+          const eligibleLinks = await database.accountLink.findMany({
+            where: {
+              connectionId: connection.id,
+              provider: "PLAID",
+              status: "ACTIVE",
+              isEnabled: true,
+              syncFrequency: {
+                not: "MANUAL"
+              }
+            },
+            include: currentLinkInclude
+          });
+
+          if (eligibleLinks.length === 0) {
+            await updatePlaidWebhookMetadata({
+              connectionId: connection.id,
+              event,
+              nowIso: startedAt,
+              extra: {
+                lastWebhookSyncSkippedAt: startedAt,
+                lastWebhookSkipReason: "no_eligible_links"
+              }
+            });
+          } else {
+            for (const link of eligibleLinks) {
+              const syncRun = await createSyncRunForLink(link);
+
+              try {
+                const syncResult = await runWithProviderBackgroundGate("PLAID", () => plaid.syncAccountLink(link.id));
+                await applySyncResultToLink({
+                  link,
+                  syncRunId: syncRun.id,
+                  syncResult
+                });
+              } catch (error) {
+                await markSyncRunFailure({
+                  link,
+                  syncRunId: syncRun.id,
+                  error,
+                  automatic: true
+                });
+              }
+            }
+
+            const latestConnection = await database.connection.findUniqueOrThrow({
+              where: {
+                id: connection.id
+              },
+              select: {
+                metadataJson: true
+              }
+            });
+            const latestMetadata = parseConnectionMetadata(latestConnection.metadataJson);
+            const latestPlaidMetadata = getPlaidMetadata(latestMetadata);
+
+            await database.connection.update({
+              where: {
+                id: connection.id
+              },
+              data: {
+                metadataJson: JSON.stringify({
+                  ...latestMetadata,
+                  plaid: {
+                    ...latestPlaidMetadata,
+                    lastWebhookSyncedAt: now().toISOString()
+                  }
+                })
+              }
+            });
+          }
+
+          const nextSync = activePlaidWebhookSyncs.get(connection.id);
+          if (!nextSync?.pending) {
+            break;
+          }
+
+          nextSync.pending = false;
         }
-      });
+      } finally {
+        activePlaidWebhookSyncs.delete(connection.id);
+      }
     },
 
     async handleTellerWebhook(event: TellerWebhookEvent) {
