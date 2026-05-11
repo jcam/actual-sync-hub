@@ -58,6 +58,19 @@ type TellerSettingsDraft = {
   webhookToleranceSeconds: string;
 };
 
+type MonoSettingsDraft = {
+  environment: "sandbox" | "production";
+  sandboxPublicKey: string;
+  sandboxSecretKey: string;
+  sandboxWebhookSecret: string;
+  productionPublicKey: string;
+  productionSecretKey: string;
+  productionWebhookSecret: string;
+  transactionsInitialDays: string;
+  transactionsOverlapDays: string;
+  automaticSyncConcurrency: string;
+};
+
 type SimpleFinSettingsDraft = {
   mode: "sandbox" | "development" | "production";
   developmentServerUrl: string;
@@ -83,6 +96,7 @@ type ProviderSettingsDraft =
   | PlaidSettingsDraft
   | StripeSettingsDraft
   | TellerSettingsDraft
+  | MonoSettingsDraft
   | SimpleFinSettingsDraft
   | HomeValuesSettingsDraft
   | VehicleValuesSettingsDraft;
@@ -185,6 +199,24 @@ function validateDraft(provider: Provider, draft: ProviderSettingsDraft) {
         requireIntegerInRange("Automatic sync concurrency", stripeDraft.automaticSyncConcurrency, 1, 20)
       );
     }
+    case "MONO": {
+      const monoDraft = draft as MonoSettingsDraft;
+      const publicKey =
+        monoDraft.environment === "sandbox" ? monoDraft.sandboxPublicKey : monoDraft.productionPublicKey;
+      const secretKey =
+        monoDraft.environment === "sandbox" ? monoDraft.sandboxSecretKey : monoDraft.productionSecretKey;
+      if (!publicKey.trim()) {
+        return "Public key is required.";
+      }
+      if (!secretKey.trim()) {
+        return "Secret key is required.";
+      }
+      return (
+        requireIntegerInRange("Initial transaction window", monoDraft.transactionsInitialDays, 1, 3650) ??
+        requireIntegerInRange("Overlap window", monoDraft.transactionsOverlapDays, 1, 30) ??
+        requireIntegerInRange("Automatic sync concurrency", monoDraft.automaticSyncConcurrency, 1, 20)
+      );
+    }
     case "SIMPLEFIN": {
       const simpleFinDraft = draft as SimpleFinSettingsDraft;
       if (simpleFinDraft.mode === "development") {
@@ -270,6 +302,21 @@ function toDraft<T extends Provider>(
         webhookSyncDebounceSeconds: String(tellerSettings.webhookSyncDebounceSeconds),
         webhookToleranceSeconds: String(tellerSettings.webhookToleranceSeconds)
       } satisfies TellerSettingsDraft;
+    }
+    case "MONO": {
+      const monoSettings = settings as ProviderSettingsByProviderDto<"MONO">;
+      return {
+        environment: monoSettings.environment ?? "sandbox",
+        sandboxPublicKey: monoSettings.sandbox?.publicKey ?? "",
+        sandboxSecretKey: monoSettings.sandbox?.secretKey ?? "",
+        sandboxWebhookSecret: monoSettings.sandbox?.webhookSecret ?? "",
+        productionPublicKey: monoSettings.production?.publicKey ?? "",
+        productionSecretKey: monoSettings.production?.secretKey ?? "",
+        productionWebhookSecret: monoSettings.production?.webhookSecret ?? "",
+        transactionsInitialDays: String(monoSettings.transactionsInitialDays),
+        transactionsOverlapDays: String(monoSettings.transactionsOverlapDays),
+        automaticSyncConcurrency: String(monoSettings.automaticSyncConcurrency)
+      } satisfies MonoSettingsDraft;
     }
     case "SIMPLEFIN": {
       const simpleFinSettings = settings as ProviderSettingsByProviderDto<"SIMPLEFIN">;
@@ -388,6 +435,25 @@ function toPayload<T extends Provider>(
         webhookToleranceSeconds: Number(tellerDraft.webhookToleranceSeconds)
       } as ProviderSettingsByProviderDto<T>;
     }
+    case "MONO": {
+      const monoDraft = draft as MonoSettingsDraft;
+      return {
+        environment: monoDraft.environment,
+        sandbox: {
+          publicKey: monoDraft.sandboxPublicKey.trim(),
+          secretKey: monoDraft.sandboxSecretKey,
+          webhookSecret: monoDraft.sandboxWebhookSecret
+        },
+        production: {
+          publicKey: monoDraft.productionPublicKey.trim(),
+          secretKey: monoDraft.productionSecretKey,
+          webhookSecret: monoDraft.productionWebhookSecret
+        },
+        transactionsInitialDays: Number(monoDraft.transactionsInitialDays),
+        transactionsOverlapDays: Number(monoDraft.transactionsOverlapDays),
+        automaticSyncConcurrency: Number(monoDraft.automaticSyncConcurrency)
+      } as ProviderSettingsByProviderDto<T>;
+    }
     case "SIMPLEFIN": {
       const simpleFinDraft = draft as SimpleFinSettingsDraft;
       return {
@@ -467,6 +533,7 @@ export function ProviderSettingsPanel<T extends Provider>({
   const plaidDraft = provider === "PLAID" ? (draft as PlaidSettingsDraft) : null;
   const stripeDraft = provider === "STRIPE" ? (draft as StripeSettingsDraft) : null;
   const tellerDraft = provider === "TELLER" ? (draft as TellerSettingsDraft) : null;
+  const monoDraft = provider === "MONO" ? (draft as MonoSettingsDraft) : null;
   const simpleFinDraft = provider === "SIMPLEFIN" ? (draft as SimpleFinSettingsDraft) : null;
   const homeValuesDraft = provider === "HOME_VALUES" ? (draft as HomeValuesSettingsDraft) : null;
   const vehicleValuesDraft = provider === "VEHICLE_VALUES" ? (draft as VehicleValuesSettingsDraft) : null;
@@ -985,6 +1052,123 @@ export function ProviderSettingsPanel<T extends Provider>({
                   setDraft(current => ({
                     ...(current as TellerSettingsDraft),
                     webhookToleranceSeconds: next
+                  }));
+                }}
+              />
+            </label>
+          </>
+        ) : null}
+
+        {monoDraft ? (
+          <>
+            <label>
+              <span>Environment</span>
+              <select
+                value={monoDraft.environment}
+                onChange={event => {
+                  const next = event.target.value as MonoSettingsDraft["environment"];
+                  setDraft(current => ({
+                    ...(current as MonoSettingsDraft),
+                    environment: next
+                  }));
+                }}
+              >
+                <option value="sandbox">sandbox</option>
+                <option value="production">production</option>
+              </select>
+            </label>
+            <label>
+              <span>{monoDraft.environment === "sandbox" ? "Sandbox public key" : "Production public key"}</span>
+              <input
+                type="text"
+                value={monoDraft.environment === "sandbox" ? monoDraft.sandboxPublicKey : monoDraft.productionPublicKey}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as MonoSettingsDraft),
+                    ...(monoDraft.environment === "sandbox" ? { sandboxPublicKey: next } : { productionPublicKey: next })
+                  }));
+                }}
+                placeholder="mono_pub_..."
+              />
+            </label>
+            <label>
+              <span>{monoDraft.environment === "sandbox" ? "Sandbox secret key" : "Production secret key"}</span>
+              <input
+                type="password"
+                value={monoDraft.environment === "sandbox" ? monoDraft.sandboxSecretKey : monoDraft.productionSecretKey}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as MonoSettingsDraft),
+                    ...(monoDraft.environment === "sandbox" ? { sandboxSecretKey: next } : { productionSecretKey: next })
+                  }));
+                }}
+                placeholder="mono_sec_..."
+              />
+            </label>
+            <label>
+              <span>{monoDraft.environment === "sandbox" ? "Sandbox webhook secret" : "Production webhook secret"}</span>
+              <input
+                type="password"
+                value={
+                  monoDraft.environment === "sandbox" ? monoDraft.sandboxWebhookSecret : monoDraft.productionWebhookSecret
+                }
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as MonoSettingsDraft),
+                    ...(monoDraft.environment === "sandbox"
+                      ? { sandboxWebhookSecret: next }
+                      : { productionWebhookSecret: next })
+                  }));
+                }}
+                placeholder="mono_webhook_secret"
+              />
+            </label>
+            <label>
+              <span>Initial transaction window (days)</span>
+              <input
+                type="number"
+                min={1}
+                value={monoDraft.transactionsInitialDays}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as MonoSettingsDraft),
+                    transactionsInitialDays: next
+                  }));
+                }}
+              />
+            </label>
+            <label>
+              <span>Overlap window (days)</span>
+              <input
+                type="number"
+                min={1}
+                max={30}
+                value={monoDraft.transactionsOverlapDays}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as MonoSettingsDraft),
+                    transactionsOverlapDays: next
+                  }));
+                }}
+              />
+            </label>
+            <label>
+              <span>Automatic sync concurrency</span>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={monoDraft.automaticSyncConcurrency}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as MonoSettingsDraft),
+                    automaticSyncConcurrency: next
                   }));
                 }}
               />

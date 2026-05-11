@@ -97,6 +97,22 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
             webhookSyncDebounceSeconds: 30,
             webhookToleranceSeconds: 180
           },
+          MONO: {
+            environment: "sandbox",
+            sandbox: {
+              publicKey: "",
+              secretKey: "",
+              webhookSecret: ""
+            },
+            production: {
+              publicKey: "",
+              secretKey: "",
+              webhookSecret: ""
+            },
+            transactionsInitialDays: 90,
+            transactionsOverlapDays: 10,
+            automaticSyncConcurrency: 1
+          },
           SIMPLEFIN: {
             mode: "sandbox",
             development: {
@@ -132,6 +148,13 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           environment: "sandbox",
           mtlsConfigured: false
         },
+        mono: {
+          enabled: false,
+          environment: "sandbox",
+          publicKeyConfigured: false,
+          secretKeyConfigured: false,
+          webhooksConfigured: false
+        },
         simplefin: {
           enabled: true,
           mode: "sandbox",
@@ -163,6 +186,7 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       runScheduledLinkSyncs: vi.fn(),
       handlePlaidWebhook: vi.fn(),
       handleTellerWebhook: vi.fn(),
+      handleMonoWebhook: vi.fn(),
       handleStripeWebhook: vi.fn(),
       previewAccountSyncReview: vi.fn(),
       commitAccountSyncReview: vi.fn(),
@@ -229,6 +253,22 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           automaticSyncConcurrency: 2,
           webhookSyncDebounceSeconds: 30,
           webhookToleranceSeconds: 180
+        },
+        MONO: {
+          environment: "sandbox",
+          sandbox: {
+            publicKey: "",
+            secretKey: "",
+            webhookSecret: ""
+          },
+          production: {
+            publicKey: "",
+            secretKey: "",
+            webhookSecret: ""
+          },
+          transactionsInitialDays: 90,
+          transactionsOverlapDays: 10,
+          automaticSyncConcurrency: 1
         },
         SIMPLEFIN: {
           mode: "sandbox",
@@ -298,6 +338,19 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       refreshConnection: vi.fn(),
       syncAccountLink: vi.fn(),
       ...(overrides.tellerService as object | undefined)
+    },
+    monoService: {
+      provider: "MONO" as const,
+      isConfigured: vi.fn().mockReturnValue(false),
+      exchangeCode: vi.fn(),
+      getReauthConfig: vi.fn(),
+      createReauthSession: vi.fn(),
+      webhooksConfigured: vi.fn().mockReturnValue(false),
+      verifyWebhookSignature: vi.fn().mockReturnValue(false),
+      disconnectConnection: vi.fn(),
+      refreshConnection: vi.fn(),
+      syncAccountLink: vi.fn(),
+      ...(overrides.monoService as object | undefined)
     },
     simplefinService: {
       provider: "SIMPLEFIN" as const,

@@ -13,6 +13,7 @@
     "@actual-sync/shared": "*",
     "@fontsource/ibm-plex-mono": "^5.1.1",
     "@fontsource/space-grotesk": "^5.1.1",
+    "@mono.co/connect.js": "^2.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-plaid-link": "^4.0.1",

@@ -40,6 +40,135 @@ describe("server webhook and account-link routes", () => {
     });
   });
 
+  it("rejects Mono webhooks when webhook verification is not configured", async () => {
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          monoService: {
+            webhooksConfigured: vi.fn().mockReturnValue(false)
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/mono",
+      payload: {
+        event: "mono.events.account_updated",
+        data: {
+          account: {
+            id: "mono-acct-1"
+          }
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({
+      error: "Mono webhooks are not configured"
+    });
+  });
+
+  it("rejects Mono webhooks with invalid signatures", async () => {
+    const handleMonoWebhook = vi.fn().mockResolvedValue(undefined);
+    const verifyWebhookSignature = vi.fn().mockReturnValue(false);
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          appService: {
+            handleMonoWebhook
+          },
+          monoService: {
+            webhooksConfigured: vi.fn().mockReturnValue(true),
+            verifyWebhookSignature
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/mono",
+      headers: {
+        "mono-webhook-secret": "bad-secret"
+      },
+      payload: {
+        event: "mono.events.account_updated",
+        data: {
+          account: {
+            id: "mono-acct-1"
+          }
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({
+      error: "Invalid Mono webhook signature"
+    });
+    expect(handleMonoWebhook).not.toHaveBeenCalled();
+  });
+
+  it("accepts a verified Mono webhook and delegates it to the app service", async () => {
+    const handleMonoWebhook = vi.fn().mockResolvedValue(undefined);
+    const verifyWebhookSignature = vi.fn().mockReturnValue(true);
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          appService: {
+            handleMonoWebhook
+          },
+          monoService: {
+            webhooksConfigured: vi.fn().mockReturnValue(true),
+            verifyWebhookSignature
+          }
+        })
+      })
+    );
+
+    const payload = {
+      event: "mono.events.account_updated",
+      timestamp: "2026-05-05T00:00:00Z",
+      data: {
+        account: {
+          id: "mono-acct-1",
+          name: "Checking"
+        },
+        meta: {
+          sync_status: "ACTIVE"
+        }
+      }
+    };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/mono",
+      headers: {
+        "mono-webhook-secret": "mono-secret"
+      },
+      payload
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      ok: true
+    });
+    expect(verifyWebhookSignature).toHaveBeenCalledWith("mono-secret");
+    expect(handleMonoWebhook).toHaveBeenCalledWith(payload);
+  });
+
   it("accepts a verified Teller webhook and delegates it to the app service", async () => {
     const handleTellerWebhook = vi.fn().mockResolvedValue(undefined);
     const verifyWebhookSignature = vi.fn().mockReturnValue(true);

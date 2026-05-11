@@ -11,6 +11,7 @@ import {
 } from "./lib/request-parsing.js";
 import { stripUndefined } from "./lib/strip-undefined.js";
 import { providerSchemas } from "./services/provider-settings-service.js";
+import type { MonoWebhookEvent } from "./services/mono-service.js";
 import type { PlaidWebhookEvent } from "./services/plaid-service.js";
 import type { TellerWebhookEvent } from "./services/teller-service.js";
 
@@ -28,7 +29,7 @@ const connectionIdParamsSchema = z.object({
 });
 
 const providerParamsSchema = z.object({
-  provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "HOME_VALUES", "VEHICLE_VALUES"])
+  provider: z.enum(["PLAID", "STRIPE", "TELLER", "MONO", "SIMPLEFIN", "HOME_VALUES", "VEHICLE_VALUES"])
 });
 
 const homeValueConnectionBodySchema = z.object({
@@ -85,6 +86,11 @@ const stripeReauthFinalizeBodySchema = z.object({
   accountIds: z.array(z.string().min(1)).min(1)
 });
 
+const monoExchangeBodySchema = z.object({
+  code: z.string().min(1),
+  label: z.string().min(1).optional()
+});
+
 const simplefinConnectBodySchema = z.object({
   setupToken: z.string().min(1),
   label: z.string().min(1).optional()
@@ -115,7 +121,9 @@ const accountLinkBodySchema = z.object({
   assetType: z.enum(["BANK", "LOAN", "INVESTMENT", "PROPERTY", "OTHER_ASSET", "OTHER_LIABILITY"]),
   writeMode: z.enum(["TRANSACTIONS", "SNAPSHOT_DELTA", "TRANSACTIONS_AND_SNAPSHOT_DELTA"]).optional(),
   snapshotHistory: z.boolean().optional(),
-  provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "HOME_VALUES", "VEHICLE_VALUES"]).nullable().optional(),
+  provider: z.enum(["PLAID", "STRIPE", "TELLER", "MONO", "SIMPLEFIN", "HOME_VALUES", "VEHICLE_VALUES"])
+    .nullable()
+    .optional(),
   connectionId: z.string().nullable().optional(),
   connectionAccountId: z.string().nullable().optional(),
   syncFrequency: z.enum(["MANUAL", "HOURLY", "DAILY", "WEEKLY"]),
@@ -161,6 +169,18 @@ const plaidWebhookBodySchema = z.object({
   new_transactions: z.number().optional()
 }).passthrough();
 
+const monoWebhookBodySchema = z.object({
+  event: z.string().min(1),
+  event_id: z.string().optional(),
+  timestamp: z.string().optional(),
+  data: z
+    .object({
+      account: z.record(z.string(), z.unknown()).optional(),
+      meta: z.record(z.string(), z.unknown()).optional()
+    })
+    .optional()
+}).passthrough();
+
 function assertAuthenticated(request: FastifyRequest, reply: FastifyReply) {
   if (!request.session.user) {
     reply.status(401).send({
@@ -174,7 +194,7 @@ function assertAuthenticated(request: FastifyRequest, reply: FastifyReply) {
 
 export async function registerRoutes(
   app: FastifyInstance,
-  context: Pick<AppContext, "authService" | "appService" | "plaidService" | "providerSettingsService" | "simplefinService" | "stripeService" | "tellerService" | "scheduler">
+  context: Pick<AppContext, "authService" | "appService" | "monoService" | "plaidService" | "providerSettingsService" | "simplefinService" | "stripeService" | "tellerService" | "scheduler">
 ) {
   const registerReviewRoutes = (prefix: "migration" | "sync-review") => {
     app.get(`/api/account-links/:actualAccountId/${prefix}/preview`, async (request, reply) => {
@@ -223,6 +243,27 @@ export async function registerRoutes(
     }
 
     await context.appService.handleTellerWebhook(body as TellerWebhookEvent);
+    return {
+      ok: true
+    };
+  });
+
+  app.post("/api/webhooks/mono", async (request, reply) => {
+    const body = parseRequestBody(monoWebhookBodySchema, request, { fallbackToEmptyObject: true });
+
+    if (!context.monoService || !(await context.monoService.webhooksConfigured())) {
+      return reply.status(503).send({
+        error: "Mono webhooks are not configured"
+      });
+    }
+
+    if (!(await context.monoService.verifyWebhookSignature(request.headers["mono-webhook-secret"]))) {
+      return reply.status(401).send({
+        error: "Invalid Mono webhook signature"
+      });
+    }
+
+    await context.appService.handleMonoWebhook(body as MonoWebhookEvent);
     return {
       ok: true
     };
@@ -395,6 +436,15 @@ export async function registerRoutes(
     const body = parseRequestBody(stripeFinalizeBodySchema, request, { fallbackToEmptyObject: true });
 
     return context.stripeService!.finalizeAccounts(stripUndefined(body));
+  });
+
+  app.post("/api/connections/mono/exchange", async (request, reply) => {
+    if (!assertAuthenticated(request, reply)) {
+      return;
+    }
+
+    const body = parseRequestBody(monoExchangeBodySchema, request);
+    return context.monoService!.exchangeCode(stripUndefined(body));
   });
 
   app.post("/api/connections/:id/stripe/reauth-finalize", async (request, reply) => {

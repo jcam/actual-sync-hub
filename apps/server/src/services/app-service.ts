@@ -19,6 +19,7 @@ import type {
 } from "@actual-sync/shared";
 import {
   getActivePlaidEnvironmentSettings,
+  getActiveMonoEnvironmentSettings,
   getActiveStripeEnvironmentSettings,
   getActiveSimpleFinModeSettings,
   getActiveTellerEnvironmentSettings
@@ -69,6 +70,8 @@ import { homeValuesService } from "./home-values-service.js";
 import type { HomeValuesService } from "./home-values-service.js";
 import { vehicleValuesService } from "./vehicle-values-service.js";
 import type { VehicleValuesService } from "./vehicle-values-service.js";
+import { monoService } from "./mono-service.js";
+import type { MonoService, MonoWebhookEvent } from "./mono-service.js";
 import type Stripe from "stripe";
 
 type DatabaseClient = typeof prisma;
@@ -162,6 +165,29 @@ function getPlaidMetadata(metadata: Record<string, unknown>) {
   return typeof metadata.plaid === "object" && metadata.plaid ? (metadata.plaid as Record<string, unknown>) : {};
 }
 
+function getMonoSettingsWithFallback(
+  settings: Awaited<ReturnType<ProviderSettingsService["getAll"]>>
+) {
+  return (
+    settings.MONO ?? {
+      environment: "sandbox" as const,
+      sandbox: {
+        publicKey: "",
+        secretKey: "",
+        webhookSecret: ""
+      },
+      production: {
+        publicKey: "",
+        secretKey: "",
+        webhookSecret: ""
+      },
+      transactionsInitialDays: 90,
+      transactionsOverlapDays: 10,
+      automaticSyncConcurrency: 1
+    }
+  );
+}
+
 function toPrismaProvider(provider: Provider | null | undefined): PrismaProvider | null {
   return provider == null ? null : (provider as PrismaProvider);
 }
@@ -246,6 +272,7 @@ export type AppService = {
   runScheduledLinkSyncs(linkIds: string[]): Promise<void>;
   handlePlaidWebhook(event: PlaidWebhookEvent): Promise<void>;
   handleTellerWebhook(event: TellerWebhookEvent): Promise<void>;
+  handleMonoWebhook(event: MonoWebhookEvent): Promise<void>;
   handleStripeWebhook(event: Stripe.Event): Promise<void>;
   previewAccountSyncReview(actualAccountId: string): Promise<MigrationPreviewDto>;
   commitAccountSyncReview(actualAccountId: string, payload: CommitMigrationPayload): Promise<void>;
@@ -257,6 +284,7 @@ export function createAppService({
   actualService: actual = actualService,
   homeValuesService: homeValues = homeValuesService,
   vehicleValuesService: vehicleValues = vehicleValuesService,
+  monoService: mono = monoService,
   plaidService: plaid = plaidService,
   providerSettingsService: settings = createProviderSettingsService({ prisma: database }),
   simplefinService: simplefin = simplefinService,
@@ -276,6 +304,7 @@ export function createAppService({
   actualService?: ActualService;
   homeValuesService?: HomeValuesService;
   vehicleValuesService?: VehicleValuesService;
+  monoService?: MonoService;
   plaidService?: PlaidService;
   providerSettingsService?: ProviderSettingsService;
   simplefinService?: SimpleFinService;
@@ -293,6 +322,7 @@ export function createAppService({
 } = {}): AppService {
   const providerAdapters = {
     HOME_VALUES: homeValues,
+    MONO: mono,
     PLAID: plaid,
     SIMPLEFIN: simplefin,
     STRIPE: stripe,
@@ -400,6 +430,11 @@ export function createAppService({
       return Boolean(getActiveTellerEnvironmentSettings(providerSettings.TELLER).appId);
     }
 
+    if (provider === "MONO") {
+      const activeMonoSettings = getActiveMonoEnvironmentSettings(getMonoSettingsWithFallback(providerSettings));
+      return Boolean(activeMonoSettings.publicKey.trim() && activeMonoSettings.secretKey.trim());
+    }
+
     if (provider === "STRIPE") {
       const activeStripeSettings = getActiveStripeEnvironmentSettings(providerSettings.STRIPE);
       return Boolean(activeStripeSettings.publishableKey.trim() && activeStripeSettings.secretKey);
@@ -430,6 +465,13 @@ export function createAppService({
         ("certificatePem" in activeTellerSettings ? activeTellerSettings.certificatePem : "") &&
           ("keyPem" in activeTellerSettings ? activeTellerSettings.keyPem : "")
       );
+    const monoSettings = getMonoSettingsWithFallback(effectiveProviderSettings);
+    const monoEnvironment = monoSettings.environment;
+    const activeMonoSettings = getActiveMonoEnvironmentSettings(monoSettings);
+    const monoPublicKeyConfigured = Boolean(activeMonoSettings.publicKey.trim());
+    const monoSecretKeyConfigured = Boolean(activeMonoSettings.secretKey.trim());
+    const monoWebhooksConfigured = Boolean(activeMonoSettings.webhookSecret.trim());
+    const monoEnabled = monoPublicKeyConfigured && monoSecretKeyConfigured;
     const simpleFinMode = effectiveProviderSettings.SIMPLEFIN.mode;
     const simpleFinDevelopmentConfigured =
       simpleFinMode !== "development" ||
@@ -501,6 +543,22 @@ export function createAppService({
             : ["Webhook signing secrets are optional but recommended for automatic Teller syncs."]
       },
       {
+        provider: "MONO",
+        label: "Mono",
+        enabled: monoEnabled,
+        ready: monoEnabled,
+        environment: monoEnvironment,
+        issues: [
+          ...(monoPublicKeyConfigured ? [] : ["Enter a Mono public key to launch the current Mono Connect SDK."]),
+          ...(monoSecretKeyConfigured ? [] : ["Enter a Mono secret key to exchange auth codes and sync account data."])
+        ],
+        notes: [
+          monoWebhooksConfigured
+            ? "Mono webhooks are configured for account update and unlink events."
+            : "Add the Mono webhook secret to verify account update and unlink events."
+        ]
+      },
+      {
         provider: "SIMPLEFIN",
         label: "SimpleFIN",
         enabled: true,
@@ -563,6 +621,7 @@ export function createAppService({
     const providerSettings = await getEffectiveProviderSettings();
     const dynamicAutomaticSyncConcurrency: AutomaticSyncConcurrencyConfig = {
       HOME_VALUES: providerSettings.HOME_VALUES?.automaticSyncConcurrency ?? 1,
+      MONO: getMonoSettingsWithFallback(providerSettings).automaticSyncConcurrency,
       PLAID: providerSettings.PLAID.automaticSyncConcurrency,
       STRIPE: providerSettings.STRIPE.automaticSyncConcurrency,
       TELLER: providerSettings.TELLER.automaticSyncConcurrency,
@@ -1859,6 +1918,10 @@ export function createAppService({
           ("certificatePem" in activeTellerSettings ? activeTellerSettings.certificatePem : "") &&
             ("keyPem" in activeTellerSettings ? activeTellerSettings.keyPem : "")
         );
+      const monoSettings = getMonoSettingsWithFallback(effectiveSettings);
+      const activeMonoSettings = getActiveMonoEnvironmentSettings(monoSettings);
+      const monoPublicKeyConfigured = Boolean(activeMonoSettings.publicKey.trim());
+      const monoSecretKeyConfigured = Boolean(activeMonoSettings.secretKey.trim());
       const plaidSandboxToolsEnabled = effectiveSettings.PLAID.environment === "sandbox";
       return {
         instanceLabel: runtime.instanceLabel,
@@ -1880,6 +1943,13 @@ export function createAppService({
           enabled: tellerEnabled,
           environment: effectiveSettings.TELLER.environment,
           mtlsConfigured: tellerMtlsConfigured
+        },
+        mono: {
+          enabled: monoPublicKeyConfigured && monoSecretKeyConfigured,
+          environment: monoSettings.environment,
+          publicKeyConfigured: monoPublicKeyConfigured,
+          secretKeyConfigured: monoSecretKeyConfigured,
+          webhooksConfigured: Boolean(activeMonoSettings.webhookSecret.trim())
         },
         simplefin: {
           enabled: true,
@@ -2272,12 +2342,14 @@ export function createAppService({
       const metadata = parseConnectionMetadata(connection.metadataJson);
       const providerKey = connection.provider.toLowerCase();
       const healthAction =
-        connection.provider === "SIMPLEFIN" || connection.provider === "STRIPE"
+        connection.provider === "SIMPLEFIN" || connection.provider === "STRIPE" || connection.provider === "MONO"
           ? "MANUAL_RECONNECT"
           : "REAUTH_CONNECTION";
       const providerLabel =
         connection.provider === "TELLER"
           ? "Teller"
+          : connection.provider === "MONO"
+            ? "Mono"
           : connection.provider === "PLAID"
             ? "Plaid"
             : connection.provider === "STRIPE"
@@ -2926,6 +2998,204 @@ export function createAppService({
         where: {
           connectionId: connection.id,
           provider: "TELLER",
+          status: "ACTIVE",
+          isEnabled: true,
+          syncFrequency: {
+            not: "MANUAL"
+          }
+        },
+        select: {
+          id: true
+        }
+      });
+
+      await this.runScheduledLinkSyncs(eligibleLinks.map(link => link.id));
+    },
+
+    async handleMonoWebhook(event: MonoWebhookEvent) {
+      const accountId =
+        event.data?.account?._id ??
+        event.data?.account?.id ??
+        null;
+
+      if (!accountId) {
+        return;
+      }
+
+      const connection = await database.connection.findUnique({
+        where: {
+          provider_providerItemId: {
+            provider: "MONO",
+            providerItemId: accountId
+          }
+        },
+        include: {
+          accounts: true
+        }
+      });
+
+      if (!connection) {
+        return;
+      }
+
+      const metadata = parseConnectionMetadata(connection.metadataJson);
+      const monoMetadata =
+        typeof metadata.mono === "object" && metadata.mono ? (metadata.mono as Record<string, unknown>) : {};
+      const eventTimestamp = event.timestamp ?? now().toISOString();
+
+      if (event.event === "mono.events.account_unlinked") {
+        await database.connection.update({
+          where: {
+            id: connection.id
+          },
+          data: {
+            status: "DISCONNECTED",
+            metadataJson: JSON.stringify({
+              ...metadata,
+              mono: {
+                ...monoMetadata,
+                lastWebhookAt: eventTimestamp,
+                lastWebhookEvent: event.event,
+                lastUnlinkedAt: eventTimestamp
+              },
+              health: {
+                state: "REAUTH_REQUIRED",
+                scope: "CONNECTION_AUTH",
+                action: "MANUAL_RECONNECT",
+                code: "ACCOUNT_UNLINKED",
+                message: "Mono account was unlinked and must be reconnected.",
+                updatedAt: eventTimestamp
+              }
+            })
+          }
+        });
+
+        await database.accountLink.updateMany({
+          where: {
+            connectionId: connection.id,
+            status: {
+              in: ["ACTIVE", "MIGRATING"]
+            }
+          },
+          data: {
+            isEnabled: false,
+            nextSyncAt: null
+          }
+        });
+        return;
+      }
+
+      if (event.event !== "mono.events.account_updated") {
+        return;
+      }
+
+      const monoHealth = (() => {
+        const syncStatus = event.data?.meta?.sync_status?.toUpperCase();
+        const dataStatus = event.data?.meta?.data_status?.toUpperCase();
+
+        if (syncStatus === "REAUTHORISATION_REQUIRED") {
+          return {
+            state: "REAUTH_REQUIRED",
+            scope: "BANK_AUTH",
+            action: "REAUTH_BANK",
+            code: "REAUTHORISATION_REQUIRED",
+            message: "Mono requires the linked bank account to be reauthorised.",
+            updatedAt: eventTimestamp
+          } as const;
+        }
+
+        if (dataStatus === "PROCESSING") {
+          return {
+            state: "ATTENTION_REQUIRED",
+            scope: "CONNECTION_AUTH",
+            action: "RETRY",
+            code: "DATA_PROCESSING",
+            message: "Mono is still processing account data.",
+            updatedAt: eventTimestamp
+          } as const;
+        }
+
+        if (dataStatus === "FAILED" || dataStatus === "UNAVAILABLE") {
+          return {
+            state: "ATTENTION_REQUIRED",
+            scope: "CONNECTION_AUTH",
+            action: "RETRY",
+            code: dataStatus === "FAILED" ? "DATA_FAILED" : "DATA_UNAVAILABLE",
+            message: "Mono reported that account data is currently unavailable.",
+            updatedAt: eventTimestamp
+          } as const;
+        }
+
+        return clearSyncHealth();
+      })() as ReturnType<typeof toSyncHealth> | null;
+
+      const account = event.data?.account;
+      const externalAccountId = account?._id ?? account?.id ?? connection.providerItemId;
+      const existingAccount = connection.accounts[0] ?? null;
+
+      if (existingAccount && externalAccountId) {
+        await database.connectionAccount.update({
+          where: {
+            id: existingAccount.id
+          },
+          data: {
+            externalAccountId,
+            name: account?.name?.trim() || existingAccount.name,
+            officialName: account?.accountNumber ?? account?.name ?? existingAccount.officialName,
+            mask: account?.accountNumber?.trim() ? account.accountNumber.trim().slice(-4) : existingAccount.mask,
+            type: account?.type?.toLowerCase() || existingAccount.type,
+            currentBalance:
+              typeof account?.balance === "number" && Number.isFinite(account.balance)
+                ? account.balance / 100
+                : existingAccount.currentBalance,
+            availableBalance:
+              typeof account?.balance === "number" && Number.isFinite(account.balance)
+                ? account.balance / 100
+                : existingAccount.availableBalance,
+            providerInstitutionId: account?.institution?.bankCode ?? existingAccount.providerInstitutionId,
+            rawJson: JSON.stringify({
+              account,
+              meta: event.data?.meta ?? null
+            })
+          }
+        });
+      }
+
+      await database.connection.update({
+        where: {
+          id: connection.id
+        },
+        data: {
+          status: monoHealth ? "ERROR" : "ACTIVE",
+          institutionName: account?.institution?.name ?? connection.institutionName,
+          institutionId: account?.institution?.bankCode ?? connection.institutionId,
+          lastRefreshedAt: now(),
+          metadataJson: JSON.stringify({
+            ...metadata,
+            mono: {
+              ...monoMetadata,
+              accountId: externalAccountId,
+              authMethod: event.data?.meta?.auth_method ?? account?.authMethod ?? null,
+              dataStatus: event.data?.meta?.data_status ?? null,
+              syncStatus: event.data?.meta?.sync_status ?? null,
+              ref: event.data?.meta?.ref ?? null,
+              currency: account?.currency ?? null,
+              lastWebhookAt: eventTimestamp,
+              lastWebhookEvent: event.event
+            },
+            health: monoHealth
+          })
+        }
+      });
+
+      if (monoHealth) {
+        return;
+      }
+
+      const eligibleLinks = await database.accountLink.findMany({
+        where: {
+          connectionId: connection.id,
+          provider: "MONO",
           status: "ACTIVE",
           isEnabled: true,
           syncFrequency: {

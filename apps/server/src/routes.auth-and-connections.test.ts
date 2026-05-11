@@ -1579,9 +1579,122 @@ describe("server auth and connection routes", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({
-      error: "Provider must be one of PLAID, STRIPE, TELLER, SIMPLEFIN, HOME_VALUES, VEHICLE_VALUES."
+      error: "Provider must be one of PLAID, STRIPE, TELLER, MONO, SIMPLEFIN, HOME_VALUES, VEHICLE_VALUES."
     });
     expect(get).not.toHaveBeenCalled();
+  });
+
+  it("exchanges a Mono auth code for an authenticated user", async () => {
+    const exchangeCode = vi.fn().mockResolvedValue({
+      connectionId: "mono-connection-1"
+    });
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-mono",
+              username: "admin"
+            })
+          },
+          monoService: {
+            exchangeCode
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/connections/mono/exchange",
+      cookies: await loginAsAdmin(app),
+      payload: {
+        code: "mono-code-123",
+        label: "Mono Household"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      connectionId: "mono-connection-1"
+    });
+    expect(exchangeCode).toHaveBeenCalledWith({
+      code: "mono-code-123",
+      label: "Mono Household"
+    });
+  });
+
+  it("requires authentication for Mono auth code exchange", async () => {
+    const exchangeCode = vi.fn();
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          monoService: {
+            exchangeCode
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/connections/mono/exchange",
+      payload: {
+        code: "mono-code-123"
+      }
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({
+      error: "Unauthorized"
+    });
+    expect(exchangeCode).not.toHaveBeenCalled();
+  });
+
+  it("validates the Mono auth code exchange payload", async () => {
+    const exchangeCode = vi.fn();
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-mono",
+              username: "admin"
+            })
+          },
+          monoService: {
+            exchangeCode
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/connections/mono/exchange",
+      cookies: await loginAsAdmin(app),
+      payload: {
+        label: "Mono Household"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Code is required."
+    });
+    expect(exchangeCode).not.toHaveBeenCalled();
   });
 
   it("returns a 400 for an invalid home-values source enum", async () => {

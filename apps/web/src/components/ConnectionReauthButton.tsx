@@ -3,6 +3,7 @@ import type { ConnectionReauthSessionDto, Provider } from "@actual-sync/shared";
 import { usePlaidLink } from "react-plaid-link";
 import { api } from "../api";
 import { getDisplayErrorMessage } from "../lib/errors";
+import { loadMonoConnect } from "../lib/mono-connect";
 import { loadStripeFinancialConnections } from "../lib/stripe-financial-connections";
 import { loadTellerConnect } from "../lib/teller-connect";
 
@@ -122,6 +123,42 @@ export function ConnectionReauthButton({
                 }
               });
               teller.open();
+              return;
+            }
+
+            if (session.mode === "mono_reauth") {
+              const MonoConnect = await loadMonoConnect();
+              const mono = new MonoConnect({
+                key: session.config.publicKey,
+                scope: "auth",
+                onSuccess: () => {
+                  void (async () => {
+                    try {
+                      await api.refreshConnection(connectionId);
+                      await onCompleted?.();
+                    } catch (refreshError) {
+                      setError(getErrorMessage(refreshError));
+                    } finally {
+                      setBusy(false);
+                    }
+                  })();
+                },
+                onClose: () => {
+                  setBusy(false);
+                },
+                onEvent: (eventName, data) => {
+                  if (eventName === "ERROR") {
+                    const nextError =
+                      (typeof data.errorMessage === "string" && data.errorMessage) ||
+                      (typeof data.errorType === "string" && data.errorType) ||
+                      "Mono reauthentication failed.";
+                    setError(nextError);
+                    setBusy(false);
+                  }
+                }
+              });
+              mono.reauthorise(session.config.accountId);
+              mono.open();
               return;
             }
 

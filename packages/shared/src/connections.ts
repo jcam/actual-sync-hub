@@ -27,6 +27,12 @@ export type TellerReauthConfigDto = {
   enrollmentId: string;
 } & TellerConnectConfigDto;
 
+export type MonoReauthConfigDto = {
+  accountId: string;
+  publicKey: string;
+  environment: "sandbox" | "production";
+};
+
 export type ConnectionReauthSessionDto =
   | {
       provider: "PLAID";
@@ -39,6 +45,12 @@ export type ConnectionReauthSessionDto =
       connectionId: string;
       mode: "teller_repair";
       config: TellerReauthConfigDto;
+    }
+  | {
+      provider: "MONO";
+      connectionId: string;
+      mode: "mono_reauth";
+      config: MonoReauthConfigDto;
     }
   | {
       provider: "STRIPE";

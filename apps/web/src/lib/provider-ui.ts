@@ -12,6 +12,8 @@ export function getProviderConnectionsPath(provider: Provider | null | undefined
       return "/stripe-connections";
     case "TELLER":
       return "/teller-connections";
+    case "MONO":
+      return "/mono-connections";
     case "SIMPLEFIN":
       return "/simplefin-connections";
     case "HOME_VALUES":
@@ -35,6 +37,8 @@ export function getProviderConnectionsLabel(provider: Provider | null | undefine
       return "Stripe Connections";
     case "TELLER":
       return "Teller.io Connections";
+    case "MONO":
+      return "Mono Connections";
     case "SIMPLEFIN":
       return "SimpleFIN Connections";
     case "HOME_VALUES":

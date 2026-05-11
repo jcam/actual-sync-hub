@@ -100,6 +100,12 @@ export const api = {
       method: "POST"
     });
   },
+  exchangeMonoCode(code: string, label?: string) {
+    return request<ProviderConnectResult>("/api/connections/mono/exchange", {
+      method: "POST",
+      body: JSON.stringify({ code, label })
+    });
+  },
   finalizeStripeSession(payload: { sessionId?: string; label?: string; accountIds: string[] }) {
     return request<ProviderConnectResult>("/api/connections/stripe/finalize", {
       method: "POST",

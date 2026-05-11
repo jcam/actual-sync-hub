@@ -32,6 +32,13 @@ export type RuntimeInfoDto = {
     environment: "sandbox" | "development" | "production";
     mtlsConfigured: boolean;
   };
+  mono: {
+    enabled: boolean;
+    environment: "sandbox" | "production";
+    publicKeyConfigured: boolean;
+    secretKeyConfigured: boolean;
+    webhooksConfigured: boolean;
+  };
   simplefin: {
     enabled: boolean;
     mode: "sandbox" | "development" | "production";

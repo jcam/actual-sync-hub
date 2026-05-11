@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import dotenv from "dotenv";
 
-const providerChoices = ["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "HOME_VALUES"];
+const providerChoices = ["PLAID", "MONO", "STRIPE", "TELLER", "SIMPLEFIN", "HOME_VALUES"];
 
 function parseArgs(argv) {
   const args = {};
@@ -176,6 +176,34 @@ async function buildProviderUpdates(provider, rl, args) {
         }
       };
     }
+    case "MONO": {
+      const environment = args.env || (await askChoice(rl, "Mono environment", ["sandbox", "production"], "sandbox"));
+      const publicKey =
+        args["public-key"] || (await ask(rl, "MONO_TEST_PUBLIC_KEY (optional for API-only smoke tests)", { defaultValue: "" }));
+      const secretKey = args["secret-key"] || (await ask(rl, "MONO_TEST_SECRET_KEY", { required: true }));
+      const webhookSecret =
+        args["webhook-secret"] || (await ask(rl, "MONO_TEST_WEBHOOK_SECRET (optional)", { defaultValue: "" }));
+      const institutionId =
+        args["institution-id"] ||
+        (await ask(rl, "MONO_TEST_INSTITUTION_ID (optional; auto-discover when blank)", { defaultValue: "" }));
+      const authMethod =
+        args["auth-method"] ||
+        (await ask(rl, "MONO_TEST_AUTH_METHOD (optional; auto-discover when blank)", { defaultValue: "" }));
+      const accountId = args["account-id"] || (await ask(rl, "MONO_TEST_ACCOUNT_ID (optional)", { defaultValue: "" }));
+      return {
+        title: "Mono development / test credentials",
+        updates: {
+          MONO_TEST_RUN_LIVE: "1",
+          MONO_TEST_ENV: environment,
+          MONO_TEST_PUBLIC_KEY: publicKey,
+          MONO_TEST_SECRET_KEY: secretKey,
+          MONO_TEST_WEBHOOK_SECRET: webhookSecret,
+          MONO_TEST_INSTITUTION_ID: institutionId,
+          MONO_TEST_AUTH_METHOD: authMethod,
+          MONO_TEST_ACCOUNT_ID: accountId
+        }
+      };
+    }
     case "STRIPE": {
       const environment = args.env || (await askChoice(rl, "Stripe environment", ["test", "live"], "test"));
       const publishableKey =
@@ -315,6 +343,9 @@ async function main() {
     console.log("  3. Open the provider page in the UI and confirm the provider settings loaded.");
     if (provider === "PLAID") {
       console.log("  4. Use Plaid sandbox test credentials like `user_good` / `pass_good` in Link.");
+    }
+    if (provider === "MONO") {
+      console.log("  4. `npm run test:mono-live` uses the current Mono Partners API sandbox flow when MONO_TEST_ENV=sandbox.");
     }
     if (provider === "STRIPE") {
       console.log("  4. `npm run dev:live-sandbox` will seed Provider Settings > Stripe from these STRIPE_TEST_* values.");

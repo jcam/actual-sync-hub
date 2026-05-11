@@ -7,6 +7,7 @@ const {
   authServiceMock,
   databaseMock,
   homeValuesServiceMock,
+  monoServiceMock,
   plaidServiceMock,
   providerSettingsServiceMock,
   simplefinServiceMock,
@@ -33,6 +34,9 @@ const {
   },
   homeValuesServiceMock: {
     name: "home-values-service"
+  },
+  monoServiceMock: {
+    name: "mono-service"
   },
   plaidServiceMock: {
     name: "plaid-service"
@@ -81,6 +85,10 @@ vi.mock("./services/home-values-service.js", () => ({
 
 vi.mock("./services/vehicle-values-service.js", () => ({
   createVehicleValuesService: createVehicleValuesServiceMock
+}));
+
+vi.mock("./services/mono-service.js", () => ({
+  monoService: monoServiceMock
 }));
 
 vi.mock("./services/plaid-service.js", () => ({
@@ -134,6 +142,7 @@ describe("createAppContext", () => {
       prisma: databaseMock,
       actualService: actualServiceMock,
       homeValuesService: homeValuesServiceMock,
+      monoService: monoServiceMock,
       vehicleValuesService: vehicleValuesServiceMock,
       plaidService: plaidServiceMock,
       providerSettingsService: providerSettingsServiceMock,
@@ -146,6 +155,7 @@ describe("createAppContext", () => {
       prisma: databaseMock,
       actualService: actualServiceMock,
       homeValuesService: homeValuesServiceMock,
+      monoService: monoServiceMock,
       vehicleValuesService: vehicleValuesServiceMock,
       plaidService: plaidServiceMock,
       providerSettingsService: providerSettingsServiceMock,
@@ -167,6 +177,9 @@ describe("createAppContext", () => {
       },
       homeValuesService: {
         name: "override-home-values"
+      },
+      monoService: {
+        name: "override-mono"
       },
       vehicleValuesService: {
         name: "override-vehicle-values"
@@ -209,6 +222,7 @@ describe("createAppContext", () => {
       prisma: overrides.prisma,
       actualService: overrides.actualService,
       homeValuesService: overrides.homeValuesService,
+      monoService: overrides.monoService,
       vehicleValuesService: overrides.vehicleValuesService,
       plaidService: overrides.plaidService,
       providerSettingsService: overrides.providerSettingsService,

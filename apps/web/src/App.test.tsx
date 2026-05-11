@@ -29,6 +29,9 @@ vi.mock("./routes/PlaidConnectionsPage", () => ({
 vi.mock("./routes/StripeConnectionsPage", () => ({
   StripeConnectionsPage: () => <div>Stripe Connections</div>
 }));
+vi.mock("./routes/MonoConnectionsPage", () => ({
+  MonoConnectionsPage: () => <div>Mono Connections</div>
+}));
 vi.mock("./routes/HomeValuesConnectionsPage", () => ({
   HomeValuesConnectionsPage: () => <div>Home Values</div>
 }));

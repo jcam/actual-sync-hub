@@ -386,6 +386,25 @@ async function configureLiveSandboxProviderSettings(baseUrl: string) {
     webhookToleranceSeconds: 180
   });
 
+  await updateProviderSetting(baseUrl, sessionCookie, "MONO", {
+    environment: (process.env.MONO_TEST_ENV || "sandbox") === "production" ? "production" : "sandbox",
+    sandbox: {
+      publicKey: (process.env.MONO_TEST_ENV || "sandbox") === "sandbox" ? process.env.MONO_TEST_PUBLIC_KEY || "" : "",
+      secretKey: (process.env.MONO_TEST_ENV || "sandbox") === "sandbox" ? process.env.MONO_TEST_SECRET_KEY || "" : "",
+      webhookSecret:
+        (process.env.MONO_TEST_ENV || "sandbox") === "sandbox" ? process.env.MONO_TEST_WEBHOOK_SECRET || "" : ""
+    },
+    production: {
+      publicKey: (process.env.MONO_TEST_ENV || "sandbox") === "production" ? process.env.MONO_TEST_PUBLIC_KEY || "" : "",
+      secretKey: (process.env.MONO_TEST_ENV || "sandbox") === "production" ? process.env.MONO_TEST_SECRET_KEY || "" : "",
+      webhookSecret:
+        (process.env.MONO_TEST_ENV || "sandbox") === "production" ? process.env.MONO_TEST_WEBHOOK_SECRET || "" : ""
+    },
+    transactionsInitialDays: 90,
+    transactionsOverlapDays: 10,
+    automaticSyncConcurrency: 1
+  });
+
   await updateProviderSetting(baseUrl, sessionCookie, "SIMPLEFIN", {
     mode: "sandbox",
     development: {

@@ -82,6 +82,23 @@ export type TellerProviderSettingsDto = {
   webhookToleranceSeconds: number;
 }
 
+export type MonoProviderSettingsDto = {
+  environment: "sandbox" | "production";
+  sandbox: {
+    publicKey: string;
+    secretKey: string;
+    webhookSecret: string;
+  };
+  production: {
+    publicKey: string;
+    secretKey: string;
+    webhookSecret: string;
+  };
+  transactionsInitialDays: number;
+  transactionsOverlapDays: number;
+  automaticSyncConcurrency: number;
+}
+
 export type SimpleFinProviderSettingsDto = {
   mode: "sandbox" | "development" | "production";
   development: {
@@ -103,6 +120,7 @@ export type ProviderSettingsDto = {
   PLAID: PlaidProviderSettingsDto;
   STRIPE: StripeProviderSettingsDto;
   TELLER: TellerProviderSettingsDto;
+  MONO: MonoProviderSettingsDto;
   SIMPLEFIN: SimpleFinProviderSettingsDto;
   HOME_VALUES?: HomeValuesProviderSettingsDto;
   VEHICLE_VALUES?: VehicleValuesProviderSettingsDto;
@@ -112,13 +130,15 @@ export type ProviderSettingsByProviderDto<T extends Provider = Provider> = T ext
   ? PlaidProviderSettingsDto
   : T extends "STRIPE"
     ? StripeProviderSettingsDto
-    : T extends "TELLER"
-      ? TellerProviderSettingsDto
-    : T extends "SIMPLEFIN"
-      ? SimpleFinProviderSettingsDto
-      : T extends "HOME_VALUES"
-        ? HomeValuesProviderSettingsDto
-        : VehicleValuesProviderSettingsDto;
+    : T extends "MONO"
+      ? MonoProviderSettingsDto
+      : T extends "TELLER"
+        ? TellerProviderSettingsDto
+        : T extends "SIMPLEFIN"
+          ? SimpleFinProviderSettingsDto
+          : T extends "HOME_VALUES"
+            ? HomeValuesProviderSettingsDto
+            : VehicleValuesProviderSettingsDto;
 
 export function getActivePlaidEnvironmentSettings(settings: PlaidProviderSettingsDto) {
   return settings[settings.environment];
@@ -129,6 +149,10 @@ export function getActiveStripeEnvironmentSettings(settings: StripeProviderSetti
 }
 
 export function getActiveTellerEnvironmentSettings(settings: TellerProviderSettingsDto) {
+  return settings[settings.environment];
+}
+
+export function getActiveMonoEnvironmentSettings(settings: MonoProviderSettingsDto) {
   return settings[settings.environment];
 }
 

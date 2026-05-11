@@ -8,6 +8,8 @@ import { createAuthService } from './services/auth.js';
 import type { AuthService } from './services/auth.js';
 import { createHomeValuesService } from './services/home-values-service.js';
 import type { HomeValuesService } from './services/home-values-service.js';
+import { monoService } from './services/mono-service.js';
+import type { MonoService } from './services/mono-service.js';
 import { plaidService } from './services/plaid-service.js';
 import type { PlaidService } from './services/plaid-service.js';
 import { createProviderSettingsService } from './services/provider-settings-service.js';
@@ -32,6 +34,7 @@ export type AppContext = {
   appService: AppService;
   homeValuesService: HomeValuesService;
   vehicleValuesService?: VehicleValuesService;
+  monoService?: MonoService;
   plaidService: PlaidService;
   providerSettingsService: ProviderSettingsService;
   simplefinService: SimpleFinService;
@@ -46,6 +49,7 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
   const settings = overrides.providerSettingsService ?? createProviderSettingsService({ prisma: database });
   const homeValues = overrides.homeValuesService ?? createHomeValuesService({ prisma: database, providerSettings: settings });
   const vehicleValues = overrides.vehicleValuesService ?? createVehicleValuesService({ prisma: database });
+  const mono = overrides.monoService ?? monoService;
   const plaid = overrides.plaidService ?? plaidService;
   const simplefin = overrides.simplefinService ?? simplefinService;
   const stripe = overrides.stripeService ?? stripeService;
@@ -56,6 +60,7 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
     actualService: overrides.actualService ?? actualService,
     homeValuesService: homeValues,
     vehicleValuesService: vehicleValues,
+    monoService: mono,
     plaidService: plaid,
     providerSettingsService: settings,
     simplefinService: simplefin,
@@ -71,6 +76,7 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
         prisma: database,
         actualService: overrides.actualService ?? actualService,
         homeValuesService: homeValues,
+        monoService: mono,
         vehicleValuesService: vehicleValues,
         plaidService: plaid,
         providerSettingsService: settings,

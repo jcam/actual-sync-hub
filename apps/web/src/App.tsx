@@ -6,6 +6,7 @@ import { getDisplayErrorMessage } from "./lib/errors";
 import { AccountsPage } from "./routes/AccountsPage";
 import { CategoryMappingsPage } from "./routes/CategoryMappingsPage";
 import { LoginPage } from "./routes/LoginPage";
+import { MonoConnectionsPage } from "./routes/MonoConnectionsPage";
 import { PlaidConnectionsPage } from "./routes/PlaidConnectionsPage";
 import { ReviewPage } from "./routes/ReviewPage";
 import { HomeValuesConnectionsPage } from "./routes/HomeValuesConnectionsPage";
@@ -44,6 +45,9 @@ function Layout({
           <NavLink to="/teller-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             Teller.io Connections
           </NavLink>
+          <NavLink to="/mono-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            Mono Connections
+          </NavLink>
           <NavLink to="/simplefin-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             SimpleFIN Connections
           </NavLink>
@@ -76,6 +80,7 @@ function Layout({
           <Route path="/plaid-connections" element={<PlaidConnectionsPage />} />
           <Route path="/stripe-connections" element={<StripeConnectionsPage />} />
           <Route path="/teller-connections" element={<TellerConnectionsPage />} />
+          <Route path="/mono-connections" element={<MonoConnectionsPage />} />
           <Route path="/simplefin-connections" element={<SimpleFinConnectionsPage />} />
           <Route path="/home-values-connections" element={<HomeValuesConnectionsPage />} />
           <Route path="/vehicle-values-connections" element={<VehicleValuesConnectionsPage />} />

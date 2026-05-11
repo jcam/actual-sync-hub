@@ -1,6 +1,6 @@
 # Actual Sync Hub
 
-`Actual Sync Hub` is a TypeScript service and web app for running self-hosted bank sync alongside Actual Budget. It manages provider connections, account links, review-first imports, scheduled sync, and connection health for Plaid, Teller.io, SimpleFIN, Stripe, and Home Values.
+`Actual Sync Hub` is a TypeScript service and web app for running self-hosted bank sync alongside Actual Budget. It manages provider connections, account links, review-first imports, scheduled sync, and connection health for Plaid, Teller.io, Mono, SimpleFIN, Stripe, and Home Values.
 
 ## Stack
 
@@ -12,7 +12,7 @@
 ## Architecture
 
 - `apps/server`: API server, auth, scheduler, Actual client, provider adapters
-- `apps/web`: protected frontend for account mapping plus separate Plaid, Teller.io, and SimpleFIN connection surfaces
+- `apps/web`: protected frontend for account mapping plus separate Plaid, Teller.io, Mono, and SimpleFIN connection surfaces
 - `packages/shared`: shared DTOs and enums used by both apps
 - `prisma/schema.prisma`: persistence model for users, provider connections, linked accounts, and sync runs
 
@@ -42,6 +42,7 @@ What you get in this mode:
 - Plaid Connections page backed by real Plaid Sandbox APIs
 - Extra Plaid sandbox buttons to seed additional test bank connections
 - Extra Plaid sandbox buttons to seed additional test transactions on a connection
+- Mono Connections page seeded from `MONO_TEST_*` values when present
 - Separate Teller.io Connections page for enrollment, account discovery, and connection management
 
 ## Configuration model
@@ -52,6 +53,14 @@ What you get in this mode:
 - `HTTP_REQUEST_LOG_ENABLED=1` enables Fastify request logging. It defaults to on in development and off in test/production.
 
 Provider-specific setup docs live in [docs/providers/README.md](./docs/providers/README.md).
+
+## Mono
+
+- Mono connections are created through the current `@mono.co/connect.js` SDK on a dedicated Mono page.
+- The adapter exchanges Mono auth codes with `POST /v2/accounts/auth`, hydrates account details from the Bank Data API, and syncs transactions from `GET /v2/accounts/{id}/transactions`.
+- Reauthorization is supported through Mono’s current reauth flow and webhook-driven account updates.
+- Mono provider settings are managed in the app UI and currently support `sandbox` and `production`.
+- Optional live Mono smoke tests use the current Mono Partners API sandbox flow and are gated behind `MONO_TEST_*` env vars.
 
 ## Plaid
 
@@ -150,6 +159,7 @@ Useful scripts:
 npm run test:unit
 npm run test:watch
 npm run test:coverage
+npm run test:mono-live
 npm run test:ui
 npm run test:ui:headed
 ```
@@ -173,7 +183,7 @@ Coverage includes:
 Provider live validation is split into two layers:
 
 - Default mocked tests for routes and service orchestration. These are fast, deterministic, and always run in `npm test`.
-- Optional live provider smoke tests for the Plaid, Teller, SimpleFIN, and Stripe adapters. These only run when their `*_TEST_RUN_LIVE=1` gate is enabled and the required provider credentials are present.
+- Optional live provider smoke tests for the Plaid, Teller, Mono, SimpleFIN, and Stripe adapters. These only run when their `*_TEST_RUN_LIVE=1` gate is enabled and the required provider credentials are present.
 
 Run the optional live Plaid test:
 
@@ -185,6 +195,12 @@ Run the optional live Teller test:
 
 ```bash
 npm run test:teller-live
+```
+
+Run the optional live Mono test:
+
+```bash
+npm run test:mono-live
 ```
 
 Run the optional live SimpleFIN test:
@@ -213,6 +229,15 @@ Environment for live Teller tests:
 - `TELLER_TEST_APP_ID`
 - `TELLER_TEST_SANDBOX_ACCESS_TOKEN`
 - optional `TELLER_TEST_ACCOUNT_ID` to target a specific provider account
+
+Environment for live Mono tests:
+
+- `MONO_TEST_RUN_LIVE=1`
+- `MONO_TEST_SECRET_KEY`
+- optional `MONO_TEST_PUBLIC_KEY` for UI/widget testing
+- optional `MONO_TEST_INSTITUTION_ID` to force a specific sandbox institution
+- optional `MONO_TEST_AUTH_METHOD` to force a specific auth method
+- optional `MONO_TEST_ACCOUNT_ID` to target a specific provider account
 
 Environment for live SimpleFIN tests:
 

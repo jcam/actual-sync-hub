@@ -68,6 +68,21 @@ const tellerSettingsSchema = z.object({
   webhookToleranceSeconds: z.coerce.number().int().min(1).max(900)
 });
 
+const monoEnvironmentSettingsSchema = z.object({
+  publicKey: z.string(),
+  secretKey: z.string(),
+  webhookSecret: z.string()
+});
+
+const monoSettingsSchema = z.object({
+  environment: z.enum(["sandbox", "production"]),
+  sandbox: monoEnvironmentSettingsSchema,
+  production: monoEnvironmentSettingsSchema,
+  transactionsInitialDays: z.coerce.number().int().min(1).max(3650),
+  transactionsOverlapDays: z.coerce.number().int().min(1).max(30),
+  automaticSyncConcurrency: z.coerce.number().int().min(1).max(20)
+});
+
 const simpleFinSettingsSchema = z.object({
   mode: z.enum(["sandbox", "development", "production"]),
   development: z.object({
@@ -95,6 +110,7 @@ export const providerSchemas = {
   PLAID: plaidSettingsSchema,
   STRIPE: stripeSettingsSchema,
   TELLER: tellerSettingsSchema,
+  MONO: monoSettingsSchema,
   SIMPLEFIN: simpleFinSettingsSchema,
   HOME_VALUES: homeValuesSettingsSchema,
   VEHICLE_VALUES: vehicleValuesSettingsSchema
@@ -160,6 +176,22 @@ function defaultProviderSettings(): ProviderSettingsDto {
       automaticSyncConcurrency: 1,
       webhookSyncDebounceSeconds: 30,
       webhookToleranceSeconds: 180
+    },
+    MONO: {
+      environment: "sandbox",
+      sandbox: {
+        publicKey: "",
+        secretKey: "",
+        webhookSecret: ""
+      },
+      production: {
+        publicKey: "",
+        secretKey: "",
+        webhookSecret: ""
+      },
+      transactionsInitialDays: 90,
+      transactionsOverlapDays: 10,
+      automaticSyncConcurrency: 1
     },
     SIMPLEFIN: {
       mode: "sandbox",
@@ -236,6 +268,7 @@ export function createProviderSettingsService({
         PLAID: parseProviderSettings("PLAID", byProvider.get("PLAID")) ?? defaults.PLAID,
         STRIPE: reconcileStripeEnvironment(parseProviderSettings("STRIPE", byProvider.get("STRIPE")) ?? defaults.STRIPE),
         TELLER: parseProviderSettings("TELLER", byProvider.get("TELLER")) ?? defaults.TELLER,
+        MONO: parseProviderSettings("MONO", byProvider.get("MONO")) ?? defaults.MONO,
         SIMPLEFIN: parseProviderSettings("SIMPLEFIN", byProvider.get("SIMPLEFIN")) ?? defaults.SIMPLEFIN,
         HOME_VALUES: parseProviderSettings("HOME_VALUES", byProvider.get("HOME_VALUES")) ?? defaults.HOME_VALUES,
         VEHICLE_VALUES:
