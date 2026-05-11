@@ -15,6 +15,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Centralized Fastify route parsing behind shared request-boundary helpers and added a lint rule that forbids direct `request.body` / `request.params` / `request.query` access in route files, so HTTP validation stays explicit at the boundary.
 - Added targeted Vitest coverage thresholds for the best-covered server/core service groups, so future changes have to preserve baseline test depth in the sync and service logic without immediately forcing blanket coverage across every provider adapter and UI file.
 - Added focused low-coverage tests for auth, account-link scheduling, provider settings, request-boundary helpers, and server error handling to raise baseline service and boundary coverage before tightening thresholds further.
+- Added direct tests for provider fixture cache persistence/clearing behavior and app-context service wiring so those remaining low-coverage server helpers are covered before tightening thresholds further.
 
 ## [0.26.0] - 2026-05-11
 
