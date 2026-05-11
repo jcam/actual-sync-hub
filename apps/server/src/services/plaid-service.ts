@@ -11,6 +11,7 @@ import {
 } from "plaid";
 import { prisma } from "../db.js";
 import { decryptString, encryptString } from "../lib/crypto.js";
+import { parseJsonObject } from "../lib/json.js";
 import { stripUndefined } from "../lib/strip-undefined.js";
 import { buildPlaidCategoryNames } from "./category-matching.js";
 import { parseLinkConfig } from "./link-config.js";
@@ -60,7 +61,8 @@ function parseConnectionMetadata(json: string | null | undefined) {
   }
 
   try {
-    return JSON.parse(json) as Record<string, unknown>;
+    const parsed = parseJsonObject(json);
+    return parsed ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }
@@ -198,7 +200,8 @@ function getPlaidTransactionsConfig(config: PlaidConfig) {
 }
 
 function decodeJwtSegment(segment: string) {
-  return JSON.parse(Buffer.from(segment, "base64url").toString("utf8")) as Record<string, unknown>;
+  const parsed = parseJsonObject(Buffer.from(segment, "base64url").toString("utf8"));
+  return parsed ? (parsed as Record<string, unknown>) : {};
 }
 
 function constantTimeStringMatch(left: string, right: string) {

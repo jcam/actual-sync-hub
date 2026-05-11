@@ -1,4 +1,5 @@
 import type { SyncHealthDto } from "@actual-sync/shared";
+import { parseJsonObject } from "../lib/json.js";
 
 export function parseConnectionMetadata(json: string | null | undefined): { health?: SyncHealthDto | null } & Record<string, unknown> {
   if (!json) {
@@ -6,7 +7,8 @@ export function parseConnectionMetadata(json: string | null | undefined): { heal
   }
 
   try {
-    return JSON.parse(json) as Record<string, unknown>;
+    const parsed = parseJsonObject(json);
+    return parsed ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }

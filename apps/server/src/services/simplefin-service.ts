@@ -2,6 +2,7 @@ import { prisma } from "../db.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import type { ProviderConnectResult } from "@actual-sync/shared";
 import { decryptString, encryptString } from "../lib/crypto.js";
+import { parseJsonObject } from "../lib/json.js";
 import { stripUndefined } from "../lib/strip-undefined.js";
 import { buildProviderCategoryNames } from "./category-matching.js";
 import { parseLinkConfig } from "./link-config.js";
@@ -225,7 +226,8 @@ function parseConnectionMetadata(json: string | null | undefined) {
   }
 
   try {
-    return JSON.parse(json) as Record<string, unknown>;
+    const parsed = parseJsonObject(json);
+    return parsed ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }

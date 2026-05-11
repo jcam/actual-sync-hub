@@ -10,6 +10,7 @@ import type {
   ActualBankSyncSource,
 } from "@actual-sync/shared";
 import type { APIAccountEntity, APICategoryEntity, APICategoryGroupEntity, APIPayeeEntity } from "@actual-app/api/models";
+import { parseJsonObject } from "../lib/json.js";
 import { stripUndefined } from "../lib/strip-undefined.js";
 import { resolveActualCategoryId } from "./category-matching.js";
 import { DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS } from "./provider-sync-helpers.js";
@@ -545,7 +546,8 @@ async function readActualPackageVersionFromEntry(entryPath: string) {
   while (true) {
     const packageJsonPath = path.join(currentDir, "package.json");
     try {
-      const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8")) as {
+      const parsedPackageJson = parseJsonObject(await fs.readFile(packageJsonPath, "utf8"));
+      const packageJson = (parsedPackageJson ?? {}) as {
         name?: string;
         version?: string;
       };
@@ -716,7 +718,12 @@ async function main() {
     throw new Error("Missing Actual worker config");
   }
 
-  const config = JSON.parse(rawConfig) as ActualConfig;
+  const parsedConfig = parseJsonObject(rawConfig);
+  if (!parsedConfig) {
+    throw new Error("Invalid Actual worker config");
+  }
+
+  const config = parsedConfig as ActualConfig;
   const { actual, runtime } = await initializeActual(config);
   let lastSyncedAt = Date.now();
 

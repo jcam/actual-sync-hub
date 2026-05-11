@@ -1,4 +1,5 @@
 import type { ActualBankSyncSource } from "@actual-sync/shared";
+import { parseJsonObject } from "../lib/json.js";
 
 export type DesiredActualSimpleFinMetadata = {
   accountId: string;
@@ -32,7 +33,12 @@ export function parseSimpleFinAccountRawJson(rawJson: string | null | undefined)
   }
 
   try {
-    const parsed = JSON.parse(rawJson) as SimpleFinAccountRawJson;
+    const parsedObject = parseJsonObject(rawJson);
+    if (!parsedObject) {
+      return {};
+    }
+
+    const parsed = parsedObject as SimpleFinAccountRawJson;
     return {
       accountId: parsed.accountId ?? null,
       institution: parsed.institution ?? null,

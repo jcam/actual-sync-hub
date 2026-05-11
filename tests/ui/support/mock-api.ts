@@ -282,7 +282,8 @@ function createInitialState(options: MockOptions = {}): MockState {
 
 async function readJsonBody<T>(request: Request) {
   const body = request.postData();
-  return (body ? JSON.parse(body) : {}) as T;
+  const parsed: unknown = body ? JSON.parse(body) : {};
+  return parsed as T;
 }
 
 function json(body: unknown, status = 200) {

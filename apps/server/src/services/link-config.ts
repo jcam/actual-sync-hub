@@ -7,6 +7,7 @@ import type {
   SyncHealthDto,
   UpdateAccountLinkPayload
 } from "@actual-sync/shared";
+import { parseJsonObject } from "../lib/json.js";
 import { stripUndefined } from "../lib/strip-undefined.js";
 
 export type LinkConfigData = {
@@ -29,7 +30,12 @@ export function parseLinkConfig(configJson: string | null | undefined): LinkConf
   }
 
   try {
-    const parsed = JSON.parse(configJson) as LinkConfigData & {
+    const parsedObject = parseJsonObject(configJson);
+    if (!parsedObject) {
+      return {};
+    }
+
+    const parsed = parsedObject as LinkConfigData & {
       plaidCursor?: string;
       tellerLastSyncEndDate?: string;
       simplefinLastSyncEndDate?: string;

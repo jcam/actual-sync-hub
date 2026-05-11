@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { URL } from "node:url";
 import type { ConnectionReauthSessionDto, ProviderConnectResult, TellerConnectConfigDto } from "@actual-sync/shared";
 import { prisma } from "../db.js";
+import { parseJsonObject } from "../lib/json.js";
 import { stripUndefined } from "../lib/strip-undefined.js";
 import { parseLinkConfig } from "./link-config.js";
 import { decryptString, encryptString } from "../lib/crypto.js";
@@ -279,7 +280,8 @@ function parseConnectionMetadata(json: string | null | undefined) {
   }
 
   try {
-    return JSON.parse(json) as Record<string, unknown>;
+    const parsed = parseJsonObject(json);
+    return parsed ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }

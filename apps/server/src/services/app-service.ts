@@ -2777,10 +2777,7 @@ export function createAppService({
       }
 
       if (event.type === "enrollment.disconnected") {
-        const metadata =
-          connection.metadataJson && connection.metadataJson.length > 0
-            ? (JSON.parse(connection.metadataJson) as Record<string, unknown>)
-            : {};
+        const metadata = parseConnectionMetadata(connection.metadataJson);
         const disconnectReason = event.payload.reason ?? "Teller enrollment disconnected";
         const disconnectHealthState =
           disconnectReason.includes("user_action") || disconnectReason.includes("account_locked")

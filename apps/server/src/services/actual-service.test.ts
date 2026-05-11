@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { parseJsonArray } from "../lib/json.js";
 import { createActualService } from "./actual-service.js";
 
 type FakeActualCall = {
@@ -14,7 +15,8 @@ async function readFakeCalls(rootDir: string): Promise<FakeActualCall[]> {
 
   try {
     const raw = await fs.readFile(callsPath, "utf8");
-    return JSON.parse(raw) as FakeActualCall[];
+    const parsed = parseJsonArray(raw);
+    return parsed ? (parsed as FakeActualCall[]) : [];
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return [];

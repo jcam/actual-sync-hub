@@ -181,7 +181,7 @@ function parseProviderSettings<T extends Provider>(
   }
 
   try {
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed: unknown = JSON.parse(raw);
     return providerSchemas[provider].parse(parsed) as ProviderSettingsByProviderDto<T>;
   } catch {
     return null;

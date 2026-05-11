@@ -399,7 +399,8 @@ async function configureLiveSandboxProviderSettings(baseUrl: string) {
 async function readLiveSandboxState() {
   try {
     const raw = await fs.readFile(LIVE_SANDBOX_STATE_FILE, "utf8");
-    return JSON.parse(raw) as LiveSandboxState;
+    const parsed: unknown = JSON.parse(raw);
+    return parsed as LiveSandboxState;
   } catch {
     return null;
   }

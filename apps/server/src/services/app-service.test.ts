@@ -708,7 +708,8 @@ describe.sequential("app service", () => {
         connectionId: connection.id
       }
     });
-    const metadata = JSON.parse(updatedConnection.metadataJson || "{}") as {
+    const parsedMetadata: unknown = JSON.parse(updatedConnection.metadataJson || "{}");
+    const metadata = parsedMetadata as {
       health?: { action?: string; code?: string };
       plaid?: { disconnectedAt?: string };
     };

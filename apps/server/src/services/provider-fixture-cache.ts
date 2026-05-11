@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { env } from "../env.js";
+import { parseJsonObject } from "../lib/json.js";
 
 export type CachedSimpleFinFixture = {
   accessKey: string;
@@ -33,8 +34,8 @@ export type ProviderFixtureCache = {
 async function readCacheFile(filePath: string): Promise<ProviderFixtureCacheFile> {
   try {
     const raw = await fs.readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw) as ProviderFixtureCacheFile;
-    return parsed && typeof parsed === "object" ? parsed : {};
+    const parsed = parseJsonObject(raw);
+    return parsed ? (parsed as ProviderFixtureCacheFile) : {};
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return {};

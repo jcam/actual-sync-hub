@@ -10,6 +10,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Changed
 - Tightened static quality gates by adding a `knip`-backed unused-code check to `npm run lint`, reporting unused `oxlint` disable directives, removing dead server dependencies and exports, and documenting the intentional dynamic-loading exceptions for the Actual worker and Prisma client.
 - Enabled `noUncheckedIndexedAccess` across the repo and fixed the resulting unchecked array/env lookups in the imported-transaction ledger, Plaid runtime/live-test setup, and AccountCard UI tests.
+- Added explicit lint restrictions against chained type assertions and inline `JSON.parse(...) as ...` casts, and moved server/test JSON parsing onto explicit unknown/object/array boundary helpers so those rules are enforceable in practice.
 
 ## [0.26.0] - 2026-05-11
 

@@ -2,6 +2,7 @@ import type { ProviderConnectResult, SyncHealthDto } from "@actual-sync/shared";
 import { getActiveStripeEnvironmentSettings } from "@actual-sync/shared";
 import Stripe from "stripe";
 import { prisma } from "../db.js";
+import { parseJsonObject } from "../lib/json.js";
 import { stripUndefined } from "../lib/strip-undefined.js";
 import { parseLinkConfig } from "./link-config.js";
 import { createProviderSettingsService } from "./provider-settings-service.js";
@@ -65,7 +66,8 @@ function parseConnectionMetadata(json: string | null | undefined): StripeConnect
   }
 
   try {
-    return JSON.parse(json) as StripeConnectionMetadata;
+    const parsed = parseJsonObject(json);
+    return parsed ? (parsed as StripeConnectionMetadata) : {};
   } catch {
     return {};
   }
