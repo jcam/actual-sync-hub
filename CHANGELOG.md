@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-05-11
+
 ### Removed
 - Removed the Salt Edge provider integration, including its server adapter, UI flows, tests, live-test scripts, and provider setup docs, after confirming Salt Edge no longer supports the intended self-hosted hobbyist use case.
 
