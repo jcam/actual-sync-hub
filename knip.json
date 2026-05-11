@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "ignoreDependencies": [
+    "@prisma/client"
+  ],
+  "ignoreFiles": [
+    "apps/server/src/services/actual-worker.ts"
+  ],
+  "ignoreExportsUsedInFile": true
+}

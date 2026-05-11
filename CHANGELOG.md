@@ -7,6 +7,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Changed
+- Tightened static quality gates by adding a `knip`-backed unused-code check to `npm run lint`, reporting unused `oxlint` disable directives, removing dead server dependencies and exports, and documenting the intentional dynamic-loading exceptions for the Actual worker and Prisma client.
+
 ## [0.26.0] - 2026-05-11
 
 ### Added

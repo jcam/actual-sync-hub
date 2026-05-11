@@ -61,5 +61,3 @@ export function createAuthService({
     }
   };
 }
-
-export const authService = createAuthService();
