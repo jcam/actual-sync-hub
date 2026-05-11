@@ -20,6 +20,7 @@
     "bcryptjs": "^3.0.2",
     "dotenv": "^17.4.2",
     "fastify": "^5.3.3",
+    "playwright": "^1.59.1",
     "plaid": "^42.2.0",
     "stripe": "22.2.0-beta.3",
     "zod": "^4.4.3"

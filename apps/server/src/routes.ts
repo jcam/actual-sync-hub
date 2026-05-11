@@ -57,9 +57,11 @@ const vehicleValueConnectionBodySchema = z.object({
   condition: z.enum(["EXCELLENT", "GOOD", "FAIR", "POOR"]),
   source: z.enum(["KBB", "EDMUNDS", "CARMAX", "HAGERTY", "AVERAGE"]),
   kbbValue: z.number().min(0).nullable().optional(),
+  kbbUrl: z.string().min(1).nullable().optional(),
   edmundsValue: z.number().min(0).nullable().optional(),
   carmaxValue: z.number().min(0).nullable().optional(),
-  hagertyValue: z.number().min(0).nullable().optional()
+  hagertyValue: z.number().min(0).nullable().optional(),
+  hagertyUrl: z.string().min(1).nullable().optional()
 });
 
 const loginBodySchema = z.object({

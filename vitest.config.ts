@@ -22,6 +22,12 @@ export default defineConfig({
           functions: 81,
           lines: 79
         },
+        "apps/server/src/services/vehicle-values-service.ts": {
+          statements: 75,
+          branches: 75,
+          functions: 85,
+          lines: 75
+        },
         "apps/server/src/services/{account-link-schedule.ts,category-matching.ts,connection-metadata.ts,imported-transaction-ledger.ts,link-config.ts,provider-fixture-cache.ts,provider-settings-service.ts,provider-sync-helpers.ts,scheduler.ts,simplefin-native-metadata.ts,sync-health.ts}": {
           statements: 78,
           branches: 67,

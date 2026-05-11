@@ -12,10 +12,12 @@ const {
   simplefinServiceMock,
   stripeServiceMock,
   tellerServiceMock,
+  vehicleValuesServiceMock,
   createAppServiceMock,
   createAuthServiceMock,
   createHomeValuesServiceMock,
   createProviderSettingsServiceMock,
+  createVehicleValuesServiceMock,
 } = vi.hoisted(() => ({
   actualServiceMock: {
     name: "actual-service"
@@ -47,10 +49,14 @@ const {
   tellerServiceMock: {
     name: "teller-service"
   },
+  vehicleValuesServiceMock: {
+    name: "vehicle-values-service"
+  },
   createAppServiceMock: vi.fn(),
   createAuthServiceMock: vi.fn(),
   createHomeValuesServiceMock: vi.fn(),
   createProviderSettingsServiceMock: vi.fn(),
+  createVehicleValuesServiceMock: vi.fn(),
 }));
 
 vi.mock("./db.js", () => ({
@@ -71,6 +77,10 @@ vi.mock("./services/auth.js", () => ({
 
 vi.mock("./services/home-values-service.js", () => ({
   createHomeValuesService: createHomeValuesServiceMock
+}));
+
+vi.mock("./services/vehicle-values-service.js", () => ({
+  createVehicleValuesService: createVehicleValuesServiceMock
 }));
 
 vi.mock("./services/plaid-service.js", () => ({
@@ -101,6 +111,7 @@ describe("createAppContext", () => {
   it("builds the default context from the shared service factories and singletons", () => {
     createProviderSettingsServiceMock.mockReturnValue(providerSettingsServiceMock);
     createHomeValuesServiceMock.mockReturnValue(homeValuesServiceMock);
+    createVehicleValuesServiceMock.mockReturnValue(vehicleValuesServiceMock);
     createAuthServiceMock.mockReturnValue(authServiceMock);
     createAppServiceMock.mockReturnValue(appServiceMock);
 
@@ -113,6 +124,9 @@ describe("createAppContext", () => {
       prisma: databaseMock,
       providerSettings: providerSettingsServiceMock
     });
+    expect(createVehicleValuesServiceMock).toHaveBeenCalledWith({
+      prisma: databaseMock
+    });
     expect(createAuthServiceMock).toHaveBeenCalledWith({
       prisma: databaseMock
     });
@@ -120,6 +134,7 @@ describe("createAppContext", () => {
       prisma: databaseMock,
       actualService: actualServiceMock,
       homeValuesService: homeValuesServiceMock,
+      vehicleValuesService: vehicleValuesServiceMock,
       plaidService: plaidServiceMock,
       providerSettingsService: providerSettingsServiceMock,
       simplefinService: simplefinServiceMock,
@@ -131,6 +146,7 @@ describe("createAppContext", () => {
       prisma: databaseMock,
       actualService: actualServiceMock,
       homeValuesService: homeValuesServiceMock,
+      vehicleValuesService: vehicleValuesServiceMock,
       plaidService: plaidServiceMock,
       providerSettingsService: providerSettingsServiceMock,
       simplefinService: simplefinServiceMock,
@@ -151,6 +167,9 @@ describe("createAppContext", () => {
       },
       homeValuesService: {
         name: "override-home-values"
+      },
+      vehicleValuesService: {
+        name: "override-vehicle-values"
       },
       providerSettingsService: {
         name: "override-provider-settings"
@@ -183,12 +202,14 @@ describe("createAppContext", () => {
 
     expect(createProviderSettingsServiceMock).not.toHaveBeenCalled();
     expect(createHomeValuesServiceMock).not.toHaveBeenCalled();
+    expect(createVehicleValuesServiceMock).not.toHaveBeenCalled();
     expect(createAuthServiceMock).not.toHaveBeenCalled();
     expect(createAppServiceMock).not.toHaveBeenCalled();
     expect(context).toEqual({
       prisma: overrides.prisma,
       actualService: overrides.actualService,
       homeValuesService: overrides.homeValuesService,
+      vehicleValuesService: overrides.vehicleValuesService,
       plaidService: overrides.plaidService,
       providerSettingsService: overrides.providerSettingsService,
       simplefinService: overrides.simplefinService,
@@ -206,6 +227,7 @@ describe("createAppContext", () => {
     };
     createProviderSettingsServiceMock.mockReturnValue(providerSettingsServiceMock);
     createHomeValuesServiceMock.mockReturnValue(homeValuesServiceMock);
+    createVehicleValuesServiceMock.mockReturnValue(vehicleValuesServiceMock);
     createAuthServiceMock.mockReturnValue(authServiceMock);
     createAppServiceMock.mockReturnValue(appServiceMock);
 

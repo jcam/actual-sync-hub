@@ -1,9 +1,12 @@
 import type { Provider } from "./core.js";
 
 export type HomeValuesFetchMethod = "node_fetch" | "curl" | "wget" | "disabled";
+export type VehicleValuesFetchMethod = "node_fetch" | "curl" | "wget" | "browser" | "disabled";
 
 export type VehicleValuesProviderSettingsDto = {
   automaticSyncConcurrency: number;
+  kbbFetchMethod: VehicleValuesFetchMethod;
+  hagertyFetchMethod: VehicleValuesFetchMethod;
 };
 
 export type PlaidProviderSettingsDto = {

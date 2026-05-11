@@ -899,6 +899,130 @@ describe("server auth and connection routes", () => {
     });
   });
 
+  it("creates a Vehicle Values connection", async () => {
+    const createVehicleValueConnection = vi.fn().mockResolvedValue({
+      connectionId: "connection-vehicle-value-1"
+    });
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-vehicle-values",
+              username: "admin"
+            })
+          },
+          appService: {
+            createVehicleValueConnection
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/connections/vehicle-values",
+      payload: {
+        label: "Daily driver",
+        vin: "1HGCM82633A123456",
+        year: 2021,
+        make: "Toyota",
+        model: "Prius",
+        trim: "XLE",
+        mileage: 32000,
+        zipCode: "10001",
+        condition: "GOOD",
+        source: "AVERAGE",
+        kbbUrl: "www.kbb.com/toyota/prius/2021/",
+        edmundsValue: 15000,
+        hagertyUrl: "https://www.hagerty.com/valuation-tools/sample"
+      },
+      cookies: await loginAsAdmin(app)
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      connectionId: "connection-vehicle-value-1"
+    });
+    expect(createVehicleValueConnection).toHaveBeenCalledWith({
+      label: "Daily driver",
+      vin: "1HGCM82633A123456",
+      year: 2021,
+      make: "Toyota",
+      model: "Prius",
+      trim: "XLE",
+      mileage: 32000,
+      zipCode: "10001",
+      condition: "GOOD",
+      source: "AVERAGE",
+      kbbUrl: "www.kbb.com/toyota/prius/2021/",
+      edmundsValue: 15000,
+      hagertyUrl: "https://www.hagerty.com/valuation-tools/sample"
+    });
+  });
+
+  it("updates a Vehicle Values connection", async () => {
+    const updateVehicleValueConnection = vi.fn().mockResolvedValue({
+      connectionId: "connection-vehicle-value-1"
+    });
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-vehicle-values",
+              username: "admin"
+            })
+          },
+          appService: {
+            updateVehicleValueConnection
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/connections/connection-vehicle-value-1/vehicle-values",
+      payload: {
+        label: "Collector",
+        year: 1995,
+        make: "Nissan",
+        model: "Skyline",
+        mileage: 78000,
+        zipCode: "10001",
+        condition: "GOOD",
+        source: "HAGERTY",
+        hagertyUrl: "https://www.hagerty.com/valuation-tools/sample"
+      },
+      cookies: await loginAsAdmin(app)
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      connectionId: "connection-vehicle-value-1"
+    });
+    expect(updateVehicleValueConnection).toHaveBeenCalledWith("connection-vehicle-value-1", {
+      label: "Collector",
+      year: 1995,
+      make: "Nissan",
+      model: "Skyline",
+      mileage: 78000,
+      zipCode: "10001",
+      condition: "GOOD",
+      source: "HAGERTY",
+      hagertyUrl: "https://www.hagerty.com/valuation-tools/sample"
+    });
+  });
+
   it("returns Teller Connect config and persists a Teller enrollment", async () => {
     const getConnectConfig = vi.fn().mockReturnValue({
       applicationId: "app_test_123",
@@ -1498,5 +1622,48 @@ describe("server auth and connection routes", () => {
       error: "Source must be one of REDFIN, MOVOTO, HOMES_COM, TRULIA, AVERAGE."
     });
     expect(createHomeValueConnection).not.toHaveBeenCalled();
+  });
+
+  it("returns a 400 for an invalid vehicle-values source enum", async () => {
+    const createVehicleValueConnection = vi.fn();
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-vehicle-values",
+              username: "admin"
+            })
+          },
+          appService: {
+            createVehicleValueConnection
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/connections/vehicle-values",
+      cookies: await loginAsAdmin(app),
+      payload: {
+        make: "Toyota",
+        model: "Prius",
+        mileage: 32000,
+        zipCode: "10001",
+        condition: "GOOD",
+        source: "BLACK_BOOK"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Source must be one of KBB, EDMUNDS, CARMAX, HAGERTY, AVERAGE."
+    });
+    expect(createVehicleValueConnection).not.toHaveBeenCalled();
   });
 });

@@ -86,7 +86,9 @@ const homeValuesSettingsSchema = z.object({
 });
 
 const vehicleValuesSettingsSchema = z.object({
-  automaticSyncConcurrency: z.coerce.number().int().min(1).max(20)
+  automaticSyncConcurrency: z.coerce.number().int().min(1).max(20),
+  kbbFetchMethod: z.enum(["node_fetch", "curl", "wget", "browser", "disabled"]).default("curl"),
+  hagertyFetchMethod: z.enum(["node_fetch", "curl", "wget", "browser", "disabled"]).default("browser")
 });
 
 export const providerSchemas = {
@@ -175,7 +177,9 @@ function defaultProviderSettings(): ProviderSettingsDto {
       truliaFetchMethod: "wget"
     },
     VEHICLE_VALUES: {
-      automaticSyncConcurrency: 1
+      automaticSyncConcurrency: 1,
+      kbbFetchMethod: "curl",
+      hagertyFetchMethod: "browser"
     }
   };
 }

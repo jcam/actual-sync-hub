@@ -102,9 +102,11 @@ export type VehicleValueConnectionDetailsDto = {
   condition: VehicleCondition;
   source: VehicleValueSource;
   kbbValue?: number | null;
+  kbbUrl?: string | null;
   edmundsValue?: number | null;
   carmaxValue?: number | null;
   hagertyValue?: number | null;
+  hagertyUrl?: string | null;
   sources?: {
     kbb?: HomeValueEstimateStateDto | null;
     edmunds?: HomeValueEstimateStateDto | null;
@@ -162,7 +164,9 @@ export type UpsertVehicleValueConnectionPayload = {
   condition: VehicleCondition;
   source: VehicleValueSource;
   kbbValue?: number | null;
+  kbbUrl?: string | null;
   edmundsValue?: number | null;
   carmaxValue?: number | null;
   hagertyValue?: number | null;
+  hagertyUrl?: string | null;
 };

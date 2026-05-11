@@ -24,9 +24,11 @@ type VehicleValueFormState = {
   condition: VehicleCondition;
   source: VehicleValueSource;
   kbbValue: string;
+  kbbUrl: string;
   edmundsValue: string;
   carmaxValue: string;
   hagertyValue: string;
+  hagertyUrl: string;
 };
 
 type SourceStateKey = "kbb" | "edmunds" | "carmax" | "hagerty";
@@ -43,9 +45,11 @@ const emptyForm: VehicleValueFormState = {
   condition: "GOOD",
   source: "AVERAGE",
   kbbValue: "",
+  kbbUrl: "",
   edmundsValue: "",
   carmaxValue: "",
-  hagertyValue: ""
+  hagertyValue: "",
+  hagertyUrl: ""
 };
 
 const vehicleValueSourceOptions: Array<{ value: VehicleValueSource; label: string }> = [
@@ -99,26 +103,38 @@ function validateForm(form: VehicleValueFormState) {
     { label: "CarMax", value: parseOptionalNumber(form.carmaxValue) },
     { label: "Hagerty", value: parseOptionalNumber(form.hagertyValue) }
   ];
+  const sourceUrls = [
+    { label: "Kelley Blue Book", value: form.kbbUrl.trim() },
+    { label: "Hagerty", value: form.hagertyUrl.trim() }
+  ];
   const invalidSource = sourceValues.find(source => Number.isNaN(source.value));
   if (invalidSource) {
     return `${invalidSource.label} value must be zero or greater.`;
   }
 
   if (form.source === "AVERAGE") {
-    if (sourceValues.every(source => source.value == null)) {
-      return "At least one source value is required when Average is the selected source.";
+    if (sourceValues.every(source => source.value == null) && sourceUrls.every(source => !source.value)) {
+      return "At least one source value or source URL is required when Average is the selected source.";
     }
     return null;
   }
 
-  const selectedSource = sourceValues.find(source =>
-    (form.source === "KBB" && source.label === "Kelley Blue Book") ||
-    (form.source === "EDMUNDS" && source.label === "Edmunds") ||
-    (form.source === "CARMAX" && source.label === "CarMax") ||
-    (form.source === "HAGERTY" && source.label === "Hagerty")
-  );
+  if (form.source === "KBB") {
+    if (parseOptionalNumber(form.kbbValue) == null && !form.kbbUrl.trim()) {
+      return "Kelley Blue Book value or URL is required when Kelley Blue Book is the selected source.";
+    }
+    return null;
+  }
 
-  if (!selectedSource || selectedSource.value == null) {
+  if (form.source === "HAGERTY") {
+    if (parseOptionalNumber(form.hagertyValue) == null && !form.hagertyUrl.trim()) {
+      return "Hagerty value or URL is required when Hagerty is the selected source.";
+    }
+    return null;
+  }
+
+  const selectedSource = form.source === "EDMUNDS" ? parseOptionalNumber(form.edmundsValue) : parseOptionalNumber(form.carmaxValue);
+  if (selectedSource == null) {
     return `${formatSourceLabel(form.source)} value is required when ${formatSourceLabel(form.source)} is the selected source.`;
   }
 
@@ -144,6 +160,8 @@ function renderEstimateLine(
       {sourceState?.lastSuccessfulAt ? (
         <p className="muted">Last saved: {new Date(sourceState.lastSuccessfulAt).toLocaleString()}</p>
       ) : null}
+      {sourceState?.url ? <p className="muted">{sourceState.url}</p> : null}
+      {sourceState?.lastFailureMessage ? <p className="muted">{sourceState.lastFailureMessage}</p> : null}
     </div>
   );
 }
@@ -161,9 +179,11 @@ function toFormState(connection: ConnectionDto): VehicleValueFormState {
     condition: connection.vehicleValues?.condition ?? "GOOD",
     source: connection.vehicleValues?.source ?? "AVERAGE",
     kbbValue: connection.vehicleValues?.kbbValue != null ? String(connection.vehicleValues.kbbValue) : "",
+    kbbUrl: connection.vehicleValues?.kbbUrl ?? "",
     edmundsValue: connection.vehicleValues?.edmundsValue != null ? String(connection.vehicleValues.edmundsValue) : "",
     carmaxValue: connection.vehicleValues?.carmaxValue != null ? String(connection.vehicleValues.carmaxValue) : "",
-    hagertyValue: connection.vehicleValues?.hagertyValue != null ? String(connection.vehicleValues.hagertyValue) : ""
+    hagertyValue: connection.vehicleValues?.hagertyValue != null ? String(connection.vehicleValues.hagertyValue) : "",
+    hagertyUrl: connection.vehicleValues?.hagertyUrl ?? ""
   };
 }
 
@@ -182,9 +202,11 @@ function toPayload(form: VehicleValueFormState): UpsertVehicleValueConnectionPay
     condition: form.condition,
     source: form.source,
     kbbValue: parseOptionalNumber(form.kbbValue),
+    kbbUrl: form.kbbUrl.trim() || null,
     edmundsValue: parseOptionalNumber(form.edmundsValue),
     carmaxValue: parseOptionalNumber(form.carmaxValue),
-    hagertyValue: parseOptionalNumber(form.hagertyValue)
+    hagertyValue: parseOptionalNumber(form.hagertyValue),
+    hagertyUrl: form.hagertyUrl.trim() || null
   };
 }
 
@@ -274,8 +296,8 @@ export function VehicleValuesConnectionsPage() {
         <p className="eyebrow">Vehicle Values</p>
         <h3>{editingConnection ? "Edit saved vehicle" : "Add a vehicle"}</h3>
         <p className="muted">
-          Save manual valuation snapshots from Kelley Blue Book, Edmunds, CarMax, or Hagerty and sync the result into
-          Actual as an off-budget other-asset account.
+          Save manual valuation snapshots or URL-backed Kelley Blue Book and Hagerty estimates, then sync the result
+          into Actual as an off-budget other-asset account.
         </p>
         <div className="grid provider-settings-grid">
           <label>
@@ -376,6 +398,14 @@ export function VehicleValuesConnectionsPage() {
               placeholder="26500"
             />
           </label>
+          <label>
+            <span>Kelley Blue Book URL</span>
+            <input
+              value={form.kbbUrl}
+              onChange={event => setForm(current => ({ ...current, kbbUrl: event.target.value }))}
+              placeholder="https://www.kbb.com/toyota/prius/2021/"
+            />
+          </label>
           {renderEstimateLine("Kelley Blue Book", formDetails?.sources?.kbb, formDetails?.kbbValue)}
           <label>
             <span>Edmunds value</span>
@@ -401,6 +431,14 @@ export function VehicleValuesConnectionsPage() {
               value={form.hagertyValue}
               onChange={event => setForm(current => ({ ...current, hagertyValue: event.target.value }))}
               placeholder="27800"
+            />
+          </label>
+          <label>
+            <span>Hagerty URL</span>
+            <input
+              value={form.hagertyUrl}
+              onChange={event => setForm(current => ({ ...current, hagertyUrl: event.target.value }))}
+              placeholder="https://www.hagerty.com/valuation-tools"
             />
           </label>
           {renderEstimateLine("Hagerty", formDetails?.sources?.hagerty, formDetails?.hagertyValue)}

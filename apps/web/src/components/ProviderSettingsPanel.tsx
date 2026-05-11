@@ -75,6 +75,8 @@ type HomeValuesSettingsDraft = {
 
 type VehicleValuesSettingsDraft = {
   automaticSyncConcurrency: string;
+  kbbFetchMethod: "node_fetch" | "curl" | "wget" | "browser" | "disabled";
+  hagertyFetchMethod: "node_fetch" | "curl" | "wget" | "browser" | "disabled";
 };
 
 type ProviderSettingsDraft =
@@ -291,7 +293,9 @@ function toDraft<T extends Provider>(
     case "VEHICLE_VALUES": {
       const vehicleValuesSettings = settings as ProviderSettingsByProviderDto<"VEHICLE_VALUES">;
       return {
-        automaticSyncConcurrency: String(vehicleValuesSettings.automaticSyncConcurrency)
+        automaticSyncConcurrency: String(vehicleValuesSettings.automaticSyncConcurrency),
+        kbbFetchMethod: vehicleValuesSettings.kbbFetchMethod,
+        hagertyFetchMethod: vehicleValuesSettings.hagertyFetchMethod
       } satisfies VehicleValuesSettingsDraft;
     }
   }
@@ -408,7 +412,9 @@ function toPayload<T extends Provider>(
     case "VEHICLE_VALUES": {
       const vehicleValuesDraft = draft as VehicleValuesSettingsDraft;
       return {
-        automaticSyncConcurrency: Number(vehicleValuesDraft.automaticSyncConcurrency)
+        automaticSyncConcurrency: Number(vehicleValuesDraft.automaticSyncConcurrency),
+        kbbFetchMethod: vehicleValuesDraft.kbbFetchMethod,
+        hagertyFetchMethod: vehicleValuesDraft.hagertyFetchMethod
       } as ProviderSettingsByProviderDto<T>;
     }
   }
@@ -1146,22 +1152,60 @@ export function ProviderSettingsPanel<T extends Provider>({
         ) : null}
 
         {vehicleValuesDraft ? (
-          <label>
-            <span>Automatic sync concurrency</span>
-            <input
-              type="number"
-              min={1}
-              max={20}
-              value={vehicleValuesDraft.automaticSyncConcurrency}
-              onChange={event => {
-                const next = event.target.value;
-                setDraft(current => ({
-                  ...(current as VehicleValuesSettingsDraft),
-                  automaticSyncConcurrency: next
-                }));
-              }}
-            />
-          </label>
+          <>
+            <label>
+              <span>KBB fetch method</span>
+              <select
+                value={vehicleValuesDraft.kbbFetchMethod}
+                onChange={event =>
+                  setDraft(current => ({
+                    ...(current as VehicleValuesSettingsDraft),
+                    kbbFetchMethod: event.target.value as VehicleValuesSettingsDraft["kbbFetchMethod"]
+                  }))
+                }
+              >
+                <option value="curl">curl</option>
+                <option value="wget">wget</option>
+                <option value="node_fetch">node fetch</option>
+                <option value="browser">browser</option>
+                <option value="disabled">disabled</option>
+              </select>
+            </label>
+            <label>
+              <span>Hagerty fetch method</span>
+              <select
+                value={vehicleValuesDraft.hagertyFetchMethod}
+                onChange={event =>
+                  setDraft(current => ({
+                    ...(current as VehicleValuesSettingsDraft),
+                    hagertyFetchMethod: event.target.value as VehicleValuesSettingsDraft["hagertyFetchMethod"]
+                  }))
+                }
+              >
+                <option value="browser">browser</option>
+                <option value="curl">curl</option>
+                <option value="wget">wget</option>
+                <option value="node_fetch">node fetch</option>
+                <option value="disabled">disabled</option>
+              </select>
+            </label>
+            <label>
+              <span>Automatic sync concurrency</span>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={vehicleValuesDraft.automaticSyncConcurrency}
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as VehicleValuesSettingsDraft),
+                    automaticSyncConcurrency: next
+                  }));
+                }}
+              />
+            </label>
+          </>
         ) : null}
       </div>
 
