@@ -7,17 +7,25 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-05-11
+
 ### Added
-- A first-pass Vehicle Values provider with dedicated connections/settings UI, manual Kelley Blue Book/Edmunds/CarMax/Hagerty valuation entry, and snapshot-delta sync into Actual as off-budget `OTHER_ASSET` accounts.
-- URL-backed Kelley Blue Book and Hagerty vehicle-value adapters, including provider-level fetch-method controls and cached-estimate fallback for scheduled valuation syncs.
 - Mono as a first-class provider, including provider settings, runtime readiness, dedicated managed-connections UI, SDK-backed connect/reauth flows, reusable connection/account storage, webhook handling, and transaction sync into Actual.
 - Optional live Mono sandbox smoke coverage driven by the current Mono Partners API flow, plus Mono-specific `.env` helpers, `dev:live-sandbox` seeding, and provider setup documentation for repeatable local validation.
 
 ### Changed
-- Generalized the valuation-provider account-link behavior so snapshot-only providers can force weekly/manual valuation scheduling and provider-specific default asset types instead of hard-coding that logic only for Home Values.
 - Switched the Mono connect surface to the current `@mono.co/connect.js` SDK and aligned the server adapter with the current Mono Bank Data and webhook flows instead of a custom browser integration.
 - Expanded server/web coverage gates and provider tests to include the Mono adapter, its routes, and its provider UI paths so the new provider is enforced by the same per-file quality thresholds as the other managed adapters.
 - Hardened the Mono adapter follow-up against the repo’s current static gates by removing raw JSON parse assertions from the new Mono paths, dropping unused browser-loader type exports, and making `prisma.config.ts` tolerate an unset `DATABASE_URL` during `knip` and other cold-shell lint runs.
+
+## [0.28.0] - 2026-05-11
+
+### Added
+- A first-pass Vehicle Values provider with dedicated connections/settings UI, manual Kelley Blue Book/Edmunds/CarMax/Hagerty valuation entry, and snapshot-delta sync into Actual as off-budget `OTHER_ASSET` accounts.
+- URL-backed Kelley Blue Book and Hagerty vehicle-value adapters, including provider-level fetch-method controls and cached-estimate fallback for scheduled valuation syncs.
+
+### Changed
+- Generalized the valuation-provider account-link behavior so snapshot-only providers can force weekly/manual valuation scheduling and provider-specific default asset types instead of hard-coding that logic only for Home Values.
 
 ## [0.27.0] - 2026-05-11
 
