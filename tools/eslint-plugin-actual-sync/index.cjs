@@ -6,6 +6,7 @@ module.exports = eslintCompatPlugin({
   },
   rules: {
     "enforce-boundaries": require("./rules/enforce-boundaries.cjs"),
+    "no-direct-request-boundary-access": require("./rules/no-direct-request-boundary-access.cjs"),
     "no-extraneous-dependencies": require("./rules/no-extraneous-dependencies.cjs"),
     "no-test-helper-imports": require("./rules/no-test-helper-imports.cjs"),
     "no-react-default-import": require("./rules/no-react-default-import.cjs"),

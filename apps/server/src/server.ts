@@ -8,6 +8,7 @@ import { ZodError } from "zod";
 import type { ZodIssue } from "zod";
 import { createAppContext } from './app-context.js';
 import type { AppContext } from './app-context.js';
+import { InvalidJsonBodyError } from "./lib/request-parsing.js";
 import { registerRoutes } from "./routes.js";
 
 export async function createServer({
@@ -71,6 +72,12 @@ export async function createServer({
   };
 
   app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof InvalidJsonBodyError) {
+      return reply.status(400).send({
+        error: error.message
+      });
+    }
+
     if (error instanceof ZodError) {
       return reply.status(400).send({
         error: formatValidationError(error),

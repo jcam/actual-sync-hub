@@ -12,6 +12,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Enabled `noUncheckedIndexedAccess` across the repo and fixed the resulting unchecked array/env lookups in the imported-transaction ledger, Plaid runtime/live-test setup, and AccountCard UI tests.
 - Added explicit lint restrictions against chained type assertions and inline `JSON.parse(...) as ...` casts, and moved server/test JSON parsing onto explicit unknown/object/array boundary helpers so those rules are enforceable in practice.
 - Added import-boundary lint rules that block deep internal workspace imports and prevent production `src` code from reaching into test helpers, while still allowing dedicated test, integration, dev, and script entrypoints.
+- Centralized Fastify route parsing behind shared request-boundary helpers and added a lint rule that forbids direct `request.body` / `request.params` / `request.query` access in route files, so HTTP validation stays explicit at the boundary.
 
 ## [0.26.0] - 2026-05-11
 

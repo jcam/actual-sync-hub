@@ -31,6 +31,7 @@
   ],
   "rules": {
     "actual-sync/enforce-boundaries": "error",
+    "actual-sync/no-direct-request-boundary-access": "error",
     "actual-sync/no-extraneous-dependencies": "error",
     "actual-sync/no-double-type-assertion": "error",
     "actual-sync/no-raw-json-parse-assertion": "error",
