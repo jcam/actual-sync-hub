@@ -138,11 +138,25 @@ Run the full suite:
 npm test
 ```
 
+This now runs both:
+
+- `npm run test:unit` for the Vitest server/web suite
+- `npm run test:ui` for the Playwright browser suite
+
 Useful scripts:
 
 ```bash
+npm run test:unit
 npm run test:watch
 npm run test:coverage
+npm run test:ui
+npm run test:ui:headed
+```
+
+Playwright requires a browser install the first time:
+
+```bash
+npx playwright install chromium
 ```
 
 Coverage includes:
@@ -151,6 +165,9 @@ Coverage includes:
 - Backend service tests with isolated temporary SQLite databases
 - Scheduler unit tests for sync cadence logic
 - Frontend component/page tests with React Testing Library
+- Browser UI tests with Playwright against mocked API responses for fast regression coverage
+- A real browser-to-Fastify-to-SQLite Playwright flow that verifies login, sessions, and provider-settings persistence through the actual server
+- A coarse Accounts-page timing smoke check to catch obvious client-side performance regressions
 
 Provider live validation is split into two layers:
 
