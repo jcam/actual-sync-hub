@@ -34,6 +34,8 @@
     "actual-sync/no-extraneous-dependencies": "error",
     "actual-sync/no-double-type-assertion": "error",
     "actual-sync/no-raw-json-parse-assertion": "error",
+    "actual-sync/no-test-helper-imports": "error",
+    "actual-sync/no-workspace-internal-imports": "error",
     "actual-sync/no-react-default-import": "error",
 
     "jsx-a11y/alt-text": "error",
