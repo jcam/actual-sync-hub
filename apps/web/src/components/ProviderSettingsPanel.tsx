@@ -82,8 +82,10 @@ type BelvoSettingsDraft = {
   environment: "sandbox" | "production";
   sandboxSecretId: string;
   sandboxSecretPassword: string;
+  sandboxWebhookAuthorization: string;
   productionSecretId: string;
   productionSecretPassword: string;
+  productionWebhookAuthorization: string;
   transactionsInitialDays: string;
   transactionsOverlapDays: string;
   automaticSyncConcurrency: string;
@@ -380,8 +382,10 @@ function toDraft<T extends Provider>(
         environment: belvoSettings.environment ?? "sandbox",
         sandboxSecretId: belvoSettings.sandbox?.secretId ?? "",
         sandboxSecretPassword: belvoSettings.sandbox?.secretPassword ?? "",
+        sandboxWebhookAuthorization: belvoSettings.sandbox?.webhookAuthorization ?? "",
         productionSecretId: belvoSettings.production?.secretId ?? "",
         productionSecretPassword: belvoSettings.production?.secretPassword ?? "",
+        productionWebhookAuthorization: belvoSettings.production?.webhookAuthorization ?? "",
         transactionsInitialDays: String(belvoSettings.transactionsInitialDays),
         transactionsOverlapDays: String(belvoSettings.transactionsOverlapDays),
         automaticSyncConcurrency: String(belvoSettings.automaticSyncConcurrency)
@@ -513,11 +517,13 @@ function toPayload<T extends Provider>(
         environment: belvoDraft.environment,
         sandbox: {
           secretId: belvoDraft.sandboxSecretId.trim(),
-          secretPassword: belvoDraft.sandboxSecretPassword
+          secretPassword: belvoDraft.sandboxSecretPassword,
+          webhookAuthorization: belvoDraft.sandboxWebhookAuthorization.trim()
         },
         production: {
           secretId: belvoDraft.productionSecretId.trim(),
-          secretPassword: belvoDraft.productionSecretPassword
+          secretPassword: belvoDraft.productionSecretPassword,
+          webhookAuthorization: belvoDraft.productionWebhookAuthorization.trim()
         },
         transactionsInitialDays: Number(belvoDraft.transactionsInitialDays),
         transactionsOverlapDays: Number(belvoDraft.transactionsOverlapDays),
@@ -1359,6 +1365,27 @@ export function ProviderSettingsPanel<T extends Provider>({
                   }));
                 }}
                 placeholder="Belvo secret password"
+              />
+            </label>
+            <label>
+              <span>{belvoDraft.environment === "sandbox" ? "Sandbox webhook Authorization" : "Production webhook Authorization"}</span>
+              <input
+                type="text"
+                value={
+                  belvoDraft.environment === "sandbox"
+                    ? belvoDraft.sandboxWebhookAuthorization
+                    : belvoDraft.productionWebhookAuthorization
+                }
+                onChange={event => {
+                  const next = event.target.value;
+                  setDraft(current => ({
+                    ...(current as BelvoSettingsDraft),
+                    ...(belvoDraft.environment === "sandbox"
+                      ? { sandboxWebhookAuthorization: next }
+                      : { productionWebhookAuthorization: next })
+                  }));
+                }}
+                placeholder="Bearer your-belvo-webhook-token"
               />
             </label>
             <label>

@@ -12,11 +12,13 @@ const defaultBelvoSettings: ProviderSettingsByProviderDto<"BELVO"> = {
   environment: "sandbox",
   sandbox: {
     secretId: "",
-    secretPassword: ""
+    secretPassword: "",
+    webhookAuthorization: ""
   },
   production: {
     secretId: "",
-    secretPassword: ""
+    secretPassword: "",
+    webhookAuthorization: ""
   },
   transactionsInitialDays: 90,
   transactionsOverlapDays: 7,

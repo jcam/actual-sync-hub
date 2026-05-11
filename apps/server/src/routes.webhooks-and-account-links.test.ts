@@ -169,6 +169,132 @@ describe("server webhook and account-link routes", () => {
     expect(handleMonoWebhook).toHaveBeenCalledWith(payload);
   });
 
+  it("rejects Belvo webhooks when webhook handling is not configured", async () => {
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          belvoService: {
+            webhooksConfigured: vi.fn().mockReturnValue(false)
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/belvo",
+      payload: {
+        webhook_id: "belvo-wh-1",
+        webhook_type: "TRANSACTIONS",
+        process_type: "recurrent_update",
+        webhook_code: "transactions_updated",
+        link_id: "belvo-link-1"
+      }
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({
+      error: "Belvo webhooks are not configured"
+    });
+  });
+
+  it("rejects Belvo webhooks with invalid authorization", async () => {
+    const handleBelvoWebhook = vi.fn().mockResolvedValue(undefined);
+    const verifyWebhookAuthorization = vi.fn().mockReturnValue(false);
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          appService: {
+            handleBelvoWebhook
+          },
+          belvoService: {
+            webhooksConfigured: vi.fn().mockReturnValue(true),
+            verifyWebhookAuthorization
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/belvo",
+      headers: {
+        authorization: "Bearer bad-token"
+      },
+      payload: {
+        webhook_id: "belvo-wh-2",
+        webhook_type: "LINK",
+        process_type: "recurrent_update",
+        webhook_code: "token_required",
+        link_id: "belvo-link-2"
+      }
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({
+      error: "Invalid Belvo webhook authorization"
+    });
+    expect(handleBelvoWebhook).not.toHaveBeenCalled();
+  });
+
+  it("accepts an authorized Belvo webhook and delegates it to the app service", async () => {
+    const handleBelvoWebhook = vi.fn().mockResolvedValue(undefined);
+    const verifyWebhookAuthorization = vi.fn().mockReturnValue(true);
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          appService: {
+            handleBelvoWebhook
+          },
+          belvoService: {
+            webhooksConfigured: vi.fn().mockReturnValue(true),
+            verifyWebhookAuthorization
+          }
+        })
+      })
+    );
+
+    const payload = {
+      webhook_id: "belvo-wh-3",
+      webhook_type: "TRANSACTIONS",
+      process_type: "recurrent_update",
+      webhook_code: "transactions_updated",
+      link_id: "belvo-link-3",
+      request_id: "req-123",
+      data: {
+        count: 2,
+        updated_transactions: ["txn-1", "txn-2"]
+      }
+    };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/webhooks/belvo",
+      headers: {
+        authorization: "Bearer belvo-secret"
+      },
+      payload
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      ok: true
+    });
+    expect(verifyWebhookAuthorization).toHaveBeenCalledWith("Bearer belvo-secret");
+    expect(handleBelvoWebhook).toHaveBeenCalledWith(payload);
+  });
+
   it("accepts a verified Teller webhook and delegates it to the app service", async () => {
     const handleTellerWebhook = vi.fn().mockResolvedValue(undefined);
     const verifyWebhookSignature = vi.fn().mockReturnValue(true);

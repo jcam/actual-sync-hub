@@ -125,11 +125,13 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
             environment: "sandbox",
             sandbox: {
               secretId: "",
-              secretPassword: ""
+              secretPassword: "",
+              webhookAuthorization: ""
             },
             production: {
               secretId: "",
-              secretPassword: ""
+              secretPassword: "",
+              webhookAuthorization: ""
             },
             transactionsInitialDays: 90,
             transactionsOverlapDays: 7,
@@ -203,6 +205,7 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       runAccountSync: vi.fn(),
       runScheduledLinkSyncs: vi.fn(),
       handlePlaidWebhook: vi.fn(),
+      handleBelvoWebhook: vi.fn(),
       handleTellerWebhook: vi.fn(),
       handleMonoWebhook: vi.fn(),
       handleStripeWebhook: vi.fn(),
@@ -300,11 +303,13 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           environment: "sandbox",
           sandbox: {
             secretId: "",
-            secretPassword: ""
+            secretPassword: "",
+            webhookAuthorization: ""
           },
           production: {
             secretId: "",
-            secretPassword: ""
+            secretPassword: "",
+            webhookAuthorization: ""
           },
           transactionsInitialDays: 90,
           transactionsOverlapDays: 7,
@@ -397,6 +402,8 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
     belvoService: {
       provider: "BELVO" as const,
       isConfigured: vi.fn().mockReturnValue(false),
+      webhooksConfigured: vi.fn().mockReturnValue(false),
+      verifyWebhookAuthorization: vi.fn().mockReturnValue(false),
       createConnectSession: vi.fn(),
       connectLink: vi.fn(),
       createReauthSession: vi.fn(),

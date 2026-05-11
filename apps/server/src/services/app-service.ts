@@ -37,7 +37,7 @@ import type {
   ActualExternalSyncMetadataInput,
   ReconcileTransactionInput
 } from "./actual-service.js";
-import { getStripeMetadata, getTellerMetadata, parseConnectionMetadata } from "./connection-metadata.js";
+import { getBelvoMetadata, getStripeMetadata, getTellerMetadata, parseConnectionMetadata } from "./connection-metadata.js";
 import { learnCategoryMappingsFromHistory, pruneImportedTransactionLedger } from "./imported-transaction-ledger.js";
 import { getNextAccountLinkDueAt } from "./account-link-schedule.js";
 import { CURRENT_LINK_STATUSES, linkIdentityChanged, parseLinkConfig, selectCurrentLink, serializeLinkConfig, toLinkDto } from "./link-config.js";
@@ -45,7 +45,7 @@ import type { LinkConfigData } from "./link-config.js";
 import { plaidService } from "./plaid-service.js";
 import type { PlaidService, PlaidWebhookEvent } from "./plaid-service.js";
 import { belvoService } from "./belvo-service.js";
-import type { BelvoService } from "./belvo-service.js";
+import type { BelvoService, BelvoWebhookEvent } from "./belvo-service.js";
 import {
   applyWriteModeToProviderSyncResult,
   buildSnapshotDeltaTransaction,
@@ -130,11 +130,13 @@ const defaultBelvoSettings: BelvoProviderSettingsDto = {
   environment: "sandbox",
   sandbox: {
     secretId: "",
-    secretPassword: ""
+    secretPassword: "",
+    webhookAuthorization: ""
   },
   production: {
     secretId: "",
-    secretPassword: ""
+    secretPassword: "",
+    webhookAuthorization: ""
   },
   transactionsInitialDays: 90,
   transactionsOverlapDays: 7,
@@ -182,6 +184,21 @@ function createConcurrencyGate(limit: number) {
 
 function getPlaidMetadata(metadata: Record<string, unknown>) {
   return typeof metadata.plaid === "object" && metadata.plaid ? (metadata.plaid as Record<string, unknown>) : {};
+}
+
+function getBelvoWebhookSummary(event: BelvoWebhookEvent) {
+  const data = typeof event.data === "object" && event.data ? (event.data as Record<string, unknown>) : null;
+
+  return stripUndefined({
+    count: typeof data?.count === "number" ? data.count : undefined,
+    newAccounts: typeof data?.new_accounts === "number" ? data.new_accounts : undefined,
+    newOwners: typeof data?.new_owners === "number" ? data.new_owners : undefined,
+    errorCode: typeof data?.error_code === "string" ? data.error_code : undefined,
+    errorMessage: typeof data?.error_message === "string" ? data.error_message : undefined,
+    status: typeof data?.status === "number" ? data.status : undefined,
+    updatedTransactionCount: Array.isArray(data?.updated_transactions) ? data.updated_transactions.length : undefined,
+    deletedTransactionCount: Array.isArray(data?.deleted_transactions) ? data.deleted_transactions.length : undefined
+  });
 }
 
 function getMonoSettingsWithFallback(
@@ -289,6 +306,7 @@ export type AppService = {
   runRequestedExternalSyncs(): Promise<string[]>;
   runAccountSync(actualAccountId: string): Promise<AppliedSyncOutcome | void>;
   runScheduledLinkSyncs(linkIds: string[]): Promise<void>;
+  handleBelvoWebhook(event: BelvoWebhookEvent): Promise<void>;
   handlePlaidWebhook(event: PlaidWebhookEvent): Promise<void>;
   handleTellerWebhook(event: TellerWebhookEvent): Promise<void>;
   handleMonoWebhook(event: MonoWebhookEvent): Promise<void>;
@@ -726,6 +744,54 @@ export function createAppService({
             historicalUpdateComplete: event.historical_update_complete ?? plaidMetadata.historicalUpdateComplete ?? null,
             ...extra
           }
+        })
+      }
+    });
+  };
+
+  const updateBelvoWebhookMetadata = async ({
+    connectionId,
+    event,
+    nowIso,
+    extra = {},
+    health
+  }: {
+    connectionId: string;
+    event: BelvoWebhookEvent;
+    nowIso: string;
+    extra?: Record<string, unknown>;
+    health?: Record<string, unknown> | null;
+  }) => {
+    const currentConnection = await database.connection.findUniqueOrThrow({
+      where: {
+        id: connectionId
+      },
+      select: {
+        metadataJson: true
+      }
+    });
+    const metadata = parseConnectionMetadata(currentConnection.metadataJson);
+    const belvoMetadata = getBelvoMetadata(metadata);
+
+    await database.connection.update({
+      where: {
+        id: connectionId
+      },
+      data: {
+        metadataJson: JSON.stringify({
+          ...metadata,
+          belvo: {
+            ...belvoMetadata,
+            lastWebhookAt: nowIso,
+            lastWebhookType: event.webhook_type,
+            lastWebhookCode: event.webhook_code,
+            lastWebhookProcessType: event.process_type,
+            lastWebhookRequestId: event.request_id ?? null,
+            lastWebhookExternalId: event.external_id ?? null,
+            lastWebhookData: getBelvoWebhookSummary(event),
+            ...extra
+          },
+          ...(health !== undefined ? { health } : {})
         })
       }
     });
@@ -2779,6 +2845,230 @@ export function createAppService({
       });
 
       await runLoadedLinkSyncBatch(links);
+    },
+
+    async handleBelvoWebhook(event: BelvoWebhookEvent) {
+      if (!event.link_id) {
+        return;
+      }
+
+      const connection = await database.connection.findUnique({
+        where: {
+          provider_providerItemId: {
+            provider: "BELVO",
+            providerItemId: event.link_id
+          }
+        },
+        select: {
+          id: true,
+          status: true,
+          metadataJson: true
+        }
+      });
+
+      if (!connection) {
+        return;
+      }
+
+      const nowIso = now().toISOString();
+      const data = typeof event.data === "object" && event.data ? (event.data as Record<string, unknown>) : null;
+      const errorMessage =
+        typeof data?.error_message === "string" && data.error_message.trim()
+          ? data.error_message.trim()
+          : event.webhook_code === "token_required"
+            ? "Belvo requires a fresh MFA token for this link."
+            : event.webhook_code === "invalid_credentials"
+              ? "Belvo reported invalid institution credentials for this link."
+              : event.webhook_code === "link_deleted"
+                ? "Belvo link was deleted and must be reconnected."
+                : `Belvo webhook ${event.webhook_code} requires attention.`;
+
+      if (event.webhook_type === "LINK" && event.webhook_code === "invalid_credentials") {
+        await updateBelvoWebhookMetadata({
+          connectionId: connection.id,
+          event,
+          nowIso,
+          health: {
+            state: "REAUTH_REQUIRED",
+            scope: "BANK_AUTH",
+            action: "REAUTH_BANK",
+            code: "INVALID_CREDENTIALS",
+            message: errorMessage,
+            updatedAt: nowIso
+          }
+        });
+        await database.connection.update({
+          where: {
+            id: connection.id
+          },
+          data: {
+            status: "ERROR"
+          }
+        });
+        return;
+      }
+
+      if (event.webhook_type === "LINK" && event.webhook_code === "token_required") {
+        await updateBelvoWebhookMetadata({
+          connectionId: connection.id,
+          event,
+          nowIso,
+          health: {
+            state: "REAUTH_REQUIRED",
+            scope: "BANK_AUTH",
+            action: "REAUTH_BANK",
+            code: "TOKEN_REQUIRED",
+            message: errorMessage,
+            updatedAt: nowIso
+          }
+        });
+        await database.connection.update({
+          where: {
+            id: connection.id
+          },
+          data: {
+            status: "ERROR"
+          }
+        });
+        return;
+      }
+
+      if (event.webhook_type === "LINK" && event.webhook_code === "link_deleted") {
+        const deletionFailed = Boolean(data && typeof data.error_code === "string" && data.error_code.length > 0);
+
+        await updateBelvoWebhookMetadata({
+          connectionId: connection.id,
+          event,
+          nowIso,
+          extra: deletionFailed
+            ? {
+                lastDeletionFailedAt: nowIso
+              }
+            : {
+                lastDeletedAt: nowIso
+              },
+          health: deletionFailed
+            ? {
+                state: "ATTENTION_REQUIRED",
+                scope: "CONNECTION_AUTH",
+                action: "CHECK_PROVIDER",
+                code: "LINK_DELETION_FAILED",
+                message: errorMessage,
+                updatedAt: nowIso
+              }
+            : {
+                state: "REAUTH_REQUIRED",
+                scope: "CONNECTION_AUTH",
+                action: "REAUTH_BANK",
+                code: "LINK_DELETED",
+                message: errorMessage,
+                updatedAt: nowIso
+              }
+        });
+
+        await database.connection.update({
+          where: {
+            id: connection.id
+          },
+          data: {
+            status: deletionFailed ? "ERROR" : "DISCONNECTED"
+          }
+        });
+
+        if (!deletionFailed) {
+          await database.accountLink.updateMany({
+            where: {
+              connectionId: connection.id,
+              status: {
+                in: ["ACTIVE", "MIGRATING"]
+              }
+            },
+            data: {
+              isEnabled: false,
+              nextSyncAt: null
+            }
+          });
+        }
+        return;
+      }
+
+      if (event.webhook_type === "TRANSACTIONS" && event.webhook_code === "transactions_deleted") {
+        await updateBelvoWebhookMetadata({
+          connectionId: connection.id,
+          event,
+          nowIso,
+          extra: {
+            lastTransactionDeletionWebhookAt: nowIso
+          }
+        });
+        return;
+      }
+
+      if (event.webhook_type === "TRANSACTIONS") {
+        await updateBelvoWebhookMetadata({
+          connectionId: connection.id,
+          event,
+          nowIso
+        });
+
+        const eligibleLinks = await database.accountLink.findMany({
+          where: {
+            connectionId: connection.id,
+            provider: "BELVO",
+            status: "ACTIVE",
+            isEnabled: true,
+            syncFrequency: {
+              not: "MANUAL"
+            }
+          },
+          select: {
+            id: true
+          }
+        });
+
+        if (eligibleLinks.length === 0) {
+          await updateBelvoWebhookMetadata({
+            connectionId: connection.id,
+            event,
+            nowIso,
+            extra: {
+              lastWebhookSyncSkippedAt: nowIso,
+              lastWebhookSkipReason: "no_eligible_links"
+            }
+          });
+          return;
+        }
+
+        await updateBelvoWebhookMetadata({
+          connectionId: connection.id,
+          event,
+          nowIso,
+          extra: {
+            lastWebhookSyncStartedAt: nowIso,
+            lastWebhookSkipReason: null
+          }
+        });
+        await this.runScheduledLinkSyncs(eligibleLinks.map(link => link.id));
+        await updateBelvoWebhookMetadata({
+          connectionId: connection.id,
+          event,
+          nowIso: now().toISOString(),
+          extra: {
+            lastWebhookSyncedAt: now().toISOString()
+          },
+          health: clearSyncHealth()
+        });
+        return;
+      }
+
+      if (event.webhook_type === "ACCOUNTS" || event.webhook_type === "OWNERS") {
+        await updateBelvoWebhookMetadata({
+          connectionId: connection.id,
+          event,
+          nowIso
+        });
+        await runWithProviderBackgroundGate("BELVO", () => belvo.refreshConnection(connection.id));
+      }
     },
 
     async handlePlaidWebhook(event: PlaidWebhookEvent) {

@@ -1449,6 +1449,280 @@ describe.sequential("app service", () => {
     expect(metadata.teller.lastWebhookSkipReason).toBe("debounced");
   });
 
+  it("refreshes Belvo connections when account data webhooks arrive", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "BELVO",
+        label: "Primary Belvo",
+        providerItemId: "belvo-link-refresh",
+        accessTokenCiphertext: "cipher",
+        metadataJson: JSON.stringify({
+          belvo: {
+            environment: "sandbox"
+          }
+        })
+      }
+    });
+
+    const refreshConnection = vi.fn().mockImplementation(async () => {
+      const current = await prisma.connection.findUniqueOrThrow({
+        where: {
+          id: connection.id
+        }
+      });
+      const metadata = JSON.parse(current.metadataJson || "{}");
+      await prisma.connection.update({
+        where: {
+          id: connection.id
+        },
+        data: {
+          status: "ACTIVE",
+          metadataJson: JSON.stringify({
+            ...metadata,
+            belvo: {
+              ...metadata.belvo,
+              status: "valid"
+            },
+            health: null
+          })
+        }
+      });
+    });
+
+    const service = createAppService({
+      prisma,
+      belvoService: {
+        provider: "BELVO",
+        isConfigured: vi.fn().mockReturnValue(true),
+        webhooksConfigured: vi.fn().mockResolvedValue(true),
+        verifyWebhookAuthorization: vi.fn().mockResolvedValue(true),
+        createConnectSession: vi.fn(),
+        connectLink: vi.fn(),
+        createReauthSession: vi.fn(),
+        disconnectConnection: vi.fn(),
+        refreshConnection,
+        syncAccountLink: vi.fn()
+      } as never,
+      now: () => new Date("2026-05-05T05:00:00.000Z")
+    });
+
+    await service.handleBelvoWebhook({
+      webhook_id: "wh-belvo-accounts",
+      webhook_type: "ACCOUNTS",
+      process_type: "historical_update",
+      webhook_code: "new_accounts_available",
+      link_id: "belvo-link-refresh",
+      request_id: "req-belvo-accounts",
+      data: {
+        new_accounts: 2
+      }
+    });
+
+    expect(refreshConnection).toHaveBeenCalledWith(connection.id);
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+    expect(metadata.belvo.lastWebhookCode).toBe("new_accounts_available");
+    expect(metadata.belvo.lastWebhookData).toMatchObject({
+      newAccounts: 2
+    });
+    expect(metadata.belvo.status).toBe("valid");
+  });
+
+  it("runs scheduled Belvo links when transaction webhooks arrive", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "BELVO",
+        label: "Primary Belvo",
+        providerItemId: "belvo-link-sync",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    await prisma.accountLink.createMany({
+      data: [
+        {
+          actualAccountId: "actual-belvo-1",
+          actualAccountName: "Scheduled Belvo",
+          assetType: "BANK",
+          provider: "BELVO",
+          connectionId: connection.id,
+          syncFrequency: "DAILY",
+          isEnabled: true
+        },
+        {
+          actualAccountId: "actual-belvo-2",
+          actualAccountName: "Manual Belvo",
+          assetType: "BANK",
+          provider: "BELVO",
+          connectionId: connection.id,
+          syncFrequency: "MANUAL",
+          isEnabled: true
+        }
+      ]
+    });
+
+    const service = createAppService({
+      prisma,
+      now: () => new Date("2026-05-05T05:05:00.000Z")
+    });
+    const runScheduledLinkSyncs = vi.spyOn(service, "runScheduledLinkSyncs").mockResolvedValue(undefined);
+
+    await service.handleBelvoWebhook({
+      webhook_id: "wh-belvo-transactions",
+      webhook_type: "TRANSACTIONS",
+      process_type: "recurrent_update",
+      webhook_code: "transactions_updated",
+      link_id: "belvo-link-sync",
+      request_id: "req-belvo-transactions",
+      data: {
+        count: 3,
+        updated_transactions: ["txn-1", "txn-2", "txn-3"]
+      }
+    });
+
+    expect(runScheduledLinkSyncs).toHaveBeenCalledTimes(1);
+    expect(runScheduledLinkSyncs).toHaveBeenCalledWith([expect.any(String)]);
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+    expect(metadata.belvo.lastWebhookCode).toBe("transactions_updated");
+    expect(metadata.belvo.lastWebhookData).toMatchObject({
+      count: 3,
+      updatedTransactionCount: 3
+    });
+    expect(metadata.belvo.lastWebhookSyncedAt).toBe("2026-05-05T05:05:00.000Z");
+  });
+
+  it("marks Belvo connections reauth-required when Belvo reports a token challenge", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "BELVO",
+        label: "Primary Belvo",
+        providerItemId: "belvo-link-token",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      now: () => new Date("2026-05-05T05:10:00.000Z")
+    });
+
+    await service.handleBelvoWebhook({
+      webhook_id: "wh-belvo-token",
+      webhook_type: "LINK",
+      process_type: "recurrent_update",
+      webhook_code: "token_required",
+      link_id: "belvo-link-token",
+      request_id: "req-belvo-token",
+      data: {
+        error_code: "token_required",
+        error_message: "MFA token was required by the institution",
+        status: 428
+      }
+    });
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+
+    expect(updatedConnection.status).toBe("ERROR");
+    expect(metadata.health).toMatchObject({
+      state: "REAUTH_REQUIRED",
+      scope: "BANK_AUTH",
+      action: "REAUTH_BANK",
+      code: "TOKEN_REQUIRED"
+    });
+    expect(metadata.belvo.lastWebhookData).toMatchObject({
+      errorCode: "token_required",
+      status: 428
+    });
+  });
+
+  it("disables Belvo links when Belvo confirms the upstream link was deleted", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "BELVO",
+        label: "Primary Belvo",
+        providerItemId: "belvo-link-deleted",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const link = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-belvo-deleted",
+        actualAccountName: "Belvo Checking",
+        assetType: "BANK",
+        provider: "BELVO",
+        connectionId: connection.id,
+        syncFrequency: "DAILY",
+        isEnabled: true
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      now: () => new Date("2026-05-05T05:15:00.000Z")
+    });
+
+    await service.handleBelvoWebhook({
+      webhook_id: "wh-belvo-deleted",
+      webhook_type: "LINK",
+      process_type: "async_delete",
+      webhook_code: "link_deleted",
+      link_id: "belvo-link-deleted",
+      request_id: "req-belvo-deleted",
+      data: null
+    });
+
+    const updatedConnection = await prisma.connection.findUniqueOrThrow({
+      where: {
+        id: connection.id
+      }
+    });
+    const updatedLink = await prisma.accountLink.findUniqueOrThrow({
+      where: {
+        id: link.id
+      }
+    });
+    const metadata = JSON.parse(updatedConnection.metadataJson || "{}");
+
+    expect(updatedConnection.status).toBe("DISCONNECTED");
+    expect(updatedLink.isEnabled).toBe(false);
+    expect(metadata.health).toMatchObject({
+      state: "REAUTH_REQUIRED",
+      scope: "CONNECTION_AUTH",
+      action: "REAUTH_BANK",
+      code: "LINK_DELETED"
+    });
+    expect(metadata.belvo.lastDeletedAt).toBe("2026-05-05T05:15:00.000Z");
+  });
+
   it("runs scheduled Plaid links when a transactions sync webhook arrives", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);

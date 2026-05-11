@@ -48,10 +48,12 @@ function createProviderSettingsMock(
     sandbox: {
       secretId: string;
       secretPassword: string;
+      webhookAuthorization?: string;
     };
     production: {
       secretId: string;
       secretPassword: string;
+      webhookAuthorization?: string;
     };
     transactionsInitialDays: number;
     transactionsOverlapDays: number;
@@ -63,11 +65,13 @@ function createProviderSettingsMock(
       environment: overrides.environment ?? "sandbox",
       sandbox: {
         secretId: overrides.sandbox?.secretId ?? "secret-id",
-        secretPassword: overrides.sandbox?.secretPassword ?? "secret-password"
+        secretPassword: overrides.sandbox?.secretPassword ?? "secret-password",
+        webhookAuthorization: overrides.sandbox?.webhookAuthorization ?? ""
       },
       production: {
         secretId: overrides.production?.secretId ?? "",
-        secretPassword: overrides.production?.secretPassword ?? ""
+        secretPassword: overrides.production?.secretPassword ?? "",
+        webhookAuthorization: overrides.production?.webhookAuthorization ?? ""
       },
       transactionsInitialDays: overrides.transactionsInitialDays ?? 30,
       transactionsOverlapDays: overrides.transactionsOverlapDays ?? 5,
@@ -79,6 +83,7 @@ function createProviderSettingsMock(
 function createPrismaMock() {
   return {
     connection: {
+      findUnique: vi.fn(),
       upsert: vi.fn(),
       findUniqueOrThrow: vi.fn(),
       update: vi.fn()
@@ -165,6 +170,33 @@ describe("createBelvoService", () => {
       link_id: "belvo-link-existing",
       scopes: "read_institutions,write_links,read_links"
     });
+  });
+
+  it("treats Belvo webhooks as configured with active credentials and optionally verifies Authorization headers", async () => {
+    const service = createBelvoService({
+      prisma: createPrismaMock() as never,
+      providerSettings: createProviderSettingsMock({
+        sandbox: {
+          secretId: "secret-id",
+          secretPassword: "secret-password",
+          webhookAuthorization: "Bearer belvo-webhook-token"
+        }
+      }) as never
+    });
+
+    await expect(service.webhooksConfigured()).resolves.toBe(true);
+    await expect(service.verifyWebhookAuthorization("Bearer belvo-webhook-token")).resolves.toBe(true);
+    await expect(service.verifyWebhookAuthorization(["Basic nope", "Bearer belvo-webhook-token"])).resolves.toBe(true);
+    await expect(service.verifyWebhookAuthorization("Bearer wrong-token")).resolves.toBe(false);
+  });
+
+  it("accepts Belvo webhooks without Authorization when no webhook auth is configured", async () => {
+    const service = createBelvoService({
+      prisma: createPrismaMock() as never,
+      providerSettings: createProviderSettingsMock() as never
+    });
+
+    await expect(service.verifyWebhookAuthorization(undefined)).resolves.toBe(true);
   });
 
   it("finalizes a Belvo widget link and stores its accounts", async () => {
@@ -745,5 +777,85 @@ describe("createBelvoService", () => {
     );
 
     expect(belvoMocks.linksDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves existing Belvo webhook metadata across refresh and sync success paths", async () => {
+    const refreshPrisma = createPrismaMock();
+    refreshPrisma.connection.findUnique.mockResolvedValue({
+      metadataJson: JSON.stringify({
+        belvo: {
+          lastWebhookCode: "transactions_updated",
+          lastWebhookAt: "2026-05-11T10:00:00.000Z"
+        }
+      })
+    });
+    refreshPrisma.connection.findUniqueOrThrow.mockResolvedValue({
+      id: "conn_belvo_refresh_keep_meta",
+      provider: "BELVO",
+      providerItemId: "link-meta-1",
+      label: "Belvo Meta Link",
+      metadataJson: JSON.stringify({
+        belvo: {
+          lastWebhookCode: "transactions_updated",
+          lastWebhookAt: "2026-05-11T10:00:00.000Z"
+        }
+      })
+    });
+    refreshPrisma.connection.upsert.mockResolvedValue({
+      id: "conn_belvo_refresh_keep_meta"
+    });
+    belvoMocks.linksDetail.mockResolvedValue({
+      id: "link-meta-1",
+      institution: "erebor-bank",
+      external_id: "Belvo Meta Link",
+      status: "valid",
+      access_mode: "recurrent"
+    });
+    belvoMocks.accountsRetrieve.mockResolvedValue([]);
+
+    const syncPrisma = createPrismaMock();
+    syncPrisma.accountLink.findUniqueOrThrow.mockResolvedValue({
+      id: "link-meta-local",
+      configJson: null,
+      connection: {
+        id: "conn_belvo_sync_keep_meta",
+        provider: "BELVO",
+        providerItemId: "link-meta-1",
+        metadataJson: JSON.stringify({
+          belvo: {
+            lastWebhookCode: "transactions_updated",
+            lastWebhookAt: "2026-05-11T10:00:00.000Z"
+          }
+        })
+      },
+      connectionAccount: {
+        externalAccountId: "acct-meta-1"
+      }
+    });
+    syncPrisma.connection.update.mockResolvedValue({});
+    belvoMocks.transactionsRetrieve.mockResolvedValue([]);
+
+    const refreshService = createBelvoService({
+      prisma: refreshPrisma as never,
+      providerSettings: createProviderSettingsMock() as never
+    });
+    const syncService = createBelvoService({
+      prisma: syncPrisma as never,
+      providerSettings: createProviderSettingsMock() as never
+    });
+
+    await refreshService.refreshConnection("conn_belvo_refresh_keep_meta");
+    await syncService.syncAccountLink("link-meta-local");
+
+    expect(refreshPrisma.connection.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        metadataJson: expect.stringContaining("\"lastWebhookCode\":\"transactions_updated\"")
+      })
+    }));
+    expect(syncPrisma.connection.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        metadataJson: expect.stringContaining("\"lastWebhookCode\":\"transactions_updated\"")
+      })
+    }));
   });
 });

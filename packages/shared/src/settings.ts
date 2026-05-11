@@ -113,10 +113,12 @@ export type BelvoProviderSettingsDto = {
   sandbox: {
     secretId: string;
     secretPassword: string;
+    webhookAuthorization?: string;
   };
   production: {
     secretId: string;
     secretPassword: string;
+    webhookAuthorization?: string;
   };
   transactionsInitialDays: number;
   transactionsOverlapDays: number;

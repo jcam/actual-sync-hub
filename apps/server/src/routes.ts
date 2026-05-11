@@ -11,6 +11,7 @@ import {
 } from "./lib/request-parsing.js";
 import { stripUndefined } from "./lib/strip-undefined.js";
 import { providerSchemas } from "./services/provider-settings-service.js";
+import type { BelvoWebhookEvent } from "./services/belvo-service.js";
 import type { MonoWebhookEvent } from "./services/mono-service.js";
 import type { PlaidWebhookEvent } from "./services/plaid-service.js";
 import type { TellerWebhookEvent } from "./services/teller-service.js";
@@ -187,6 +188,17 @@ const monoWebhookBodySchema = z.object({
     .optional()
 }).passthrough();
 
+const belvoWebhookBodySchema = z.object({
+  webhook_id: z.string().min(1),
+  webhook_type: z.string().min(1),
+  process_type: z.string().min(1),
+  webhook_code: z.string().min(1),
+  link_id: z.string().min(1),
+  request_id: z.string().min(1).optional(),
+  external_id: z.string().min(1).nullable().optional(),
+  data: z.unknown().optional()
+}).passthrough();
+
 function assertAuthenticated(request: FastifyRequest, reply: FastifyReply) {
   if (!request.session.user) {
     reply.status(401).send({
@@ -270,6 +282,27 @@ export async function registerRoutes(
     }
 
     await context.appService.handleMonoWebhook(body as MonoWebhookEvent);
+    return {
+      ok: true
+    };
+  });
+
+  app.post("/api/webhooks/belvo", async (request, reply) => {
+    const body = parseRequestBody(belvoWebhookBodySchema, request, { fallbackToEmptyObject: true });
+
+    if (!(await context.belvoService.webhooksConfigured())) {
+      return reply.status(503).send({
+        error: "Belvo webhooks are not configured"
+      });
+    }
+
+    if (!(await context.belvoService.verifyWebhookAuthorization(request.headers.authorization))) {
+      return reply.status(401).send({
+        error: "Invalid Belvo webhook authorization"
+      });
+    }
+
+    await context.appService.handleBelvoWebhook(body as BelvoWebhookEvent);
     return {
       ok: true
     };

@@ -53,10 +53,12 @@ Important caveats:
 ## Important gotchas
 
 - Belvo's cleanest data flow is asynchronous and webhook-driven. Their docs recommend waiting for webhook notifications before retrieving newly available historical data.
-- This repo currently does not implement Belvo webhook ingestion, so a newly connected link can require manual refreshes before accounts or transactions are visible here.
+- This repo now implements Belvo webhook ingestion for account/owner refresh events, transaction-driven sync triggers, and link error/deletion lifecycle updates. Configure your Belvo dashboard webhook to point at `/api/webhooks/belvo`.
+- If you protect the webhook in the Belvo dashboard, save the exact `Authorization` header value for the active Belvo environment in Provider Settings. Belvo supports both `Basic ...` and `Bearer ...` authorization formats there, and this repo compares the incoming header exactly.
 - Belvo recurrent links are not just a one-time connect. Their docs describe periodic provider-side refreshes and recommend informing users that their credentials will be used to keep data up to date.
 - Production access is not just a key flip. Belvo's docs describe a production access request and certification process before full live use.
 - This repo uses the hosted widget for both connect and reauth/update flows. That is the right path here, but it also means the Belvo integration is less self-contained than providers where all link lifecycle steps are already fully automated server-side.
+- Belvo can send `transactions_deleted` webhooks when it deduplicates upstream data. This repo records those events, but it does not yet apply provider-side deletions back into Actual automatically.
 
 ## Where to get credentials
 
@@ -81,8 +83,9 @@ For production:
 For webhooks:
 
 1. open the data webhooks section in the Belvo dashboard
-2. create the webhook endpoint there
+2. create the webhook endpoint there and point it at `/api/webhooks/belvo`
 3. optionally configure additional authentication for webhook delivery
+4. if you enable authentication, copy the exact `Authorization` header value into the matching Belvo provider settings environment
 
 ## Best hobbyist advice
 
@@ -141,5 +144,6 @@ Then:
 
 1. open the Belvo page in the UI
 2. save your Belvo credentials in Provider Settings
-3. launch the Belvo widget from Sync Hub
-4. refresh the resulting link if Belvo is still asynchronously loading data
+3. if you are testing asynchronous Belvo updates, also configure the Belvo dashboard webhook and the optional webhook `Authorization` setting if you use it
+4. launch the Belvo widget from Sync Hub
+5. refresh the resulting link if Belvo is still asynchronously loading data

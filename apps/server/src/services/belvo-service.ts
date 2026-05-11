@@ -9,6 +9,7 @@ import { prisma } from "../db.js";
 import { encryptString } from "../lib/crypto.js";
 import { stripUndefined } from "../lib/strip-undefined.js";
 import { buildProviderCategoryNames } from "./category-matching.js";
+import { getBelvoMetadata, parseConnectionMetadata } from "./connection-metadata.js";
 import { parseLinkConfig } from "./link-config.js";
 import { createProviderSettingsService } from "./provider-settings-service.js";
 import type { ProviderSettingsService } from "./provider-settings-service.js";
@@ -23,10 +24,12 @@ export type BelvoConfig = {
   sandbox: {
     secretId: string;
     secretPassword: string;
+    webhookAuthorization?: string;
   };
   production: {
     secretId: string;
     secretPassword: string;
+    webhookAuthorization?: string;
   };
   transactionsInitialDays: number;
   transactionsOverlapDays: number;
@@ -38,6 +41,17 @@ export type BelvoConnectPayload = {
   label?: string | null;
 };
 
+export type BelvoWebhookEvent = {
+  webhook_id: string;
+  webhook_type: string;
+  process_type: string;
+  webhook_code: string;
+  link_id: string;
+  request_id?: string | null;
+  external_id?: string | null;
+  data?: unknown;
+};
+
 type BelvoRequestError = {
   statusCode?: number;
   detail?: unknown;
@@ -47,6 +61,8 @@ type BelvoRequestError = {
 export type BelvoService = {
   createConnectSession(): Promise<BelvoWidgetSessionDto>;
   connectLink(payload: BelvoConnectPayload): Promise<ProviderConnectResult>;
+  webhooksConfigured(): Promise<boolean>;
+  verifyWebhookAuthorization(header: string | string[] | undefined): Promise<boolean>;
 } & ProviderAdapter;
 
 type BelvoWidgetAccessTokenResponse = {
@@ -117,6 +133,10 @@ function getBelvoCredentials(config: BelvoConfig) {
     secretId: activeConfig.secretId.trim(),
     secretPassword: activeConfig.secretPassword
   };
+}
+
+function getBelvoWebhookAuthorization(config: BelvoConfig) {
+  return getActiveBelvoEnvironmentSettings(config).webhookAuthorization?.trim() ?? "";
 }
 
 function getErrorStatus(error: unknown) {
@@ -318,6 +338,40 @@ function normalizeBelvoTransaction(transaction: BelvoTransaction) {
   });
 }
 
+function buildBelvoConnectionMetadata({
+  existingMetadataJson,
+  config,
+  linkId,
+  link,
+  health
+}: {
+  existingMetadataJson: string | null | undefined;
+  config: BelvoConfig;
+  linkId: string;
+  link?: BelvoLink | null;
+  health: ReturnType<typeof clearSyncHealth> | ReturnType<typeof toSyncHealth>;
+}) {
+  const metadata = parseConnectionMetadata(existingMetadataJson);
+  const belvoMetadata = getBelvoMetadata(metadata);
+
+  return {
+    ...metadata,
+    belvo: {
+      ...belvoMetadata,
+      environment: config.environment,
+      linkId,
+      ...(link
+        ? {
+            status: link.status ?? null,
+            accessMode: link.access_mode ?? null,
+            externalId: link.external_id ?? null
+          }
+        : {})
+    },
+    health
+  };
+}
+
 async function upsertBelvoConnection({
   database,
   client,
@@ -359,6 +413,26 @@ async function upsertBelvoConnection({
     link,
     institutionName
   });
+  const existingConnection = await database.connection.findUnique({
+    where: {
+      provider_providerItemId: {
+        provider: "BELVO",
+        providerItemId: payload.linkId
+      }
+    },
+    select: {
+      metadataJson: true
+    }
+  });
+  const metadataJson = JSON.stringify(
+    buildBelvoConnectionMetadata({
+      existingMetadataJson: existingConnection?.metadataJson,
+      config,
+      linkId: payload.linkId,
+      link,
+      health: clearSyncHealth()
+    })
+  );
   const refreshedAt = new Date();
   const connection = await database.connection.upsert({
     where: {
@@ -373,16 +447,7 @@ async function upsertBelvoConnection({
       institutionName,
       institutionId: link.institution ?? null,
       accessTokenCiphertext: encryptString(payload.linkId),
-      metadataJson: JSON.stringify({
-        belvo: {
-          environment: config.environment,
-          linkId: payload.linkId,
-          status: link.status ?? null,
-          accessMode: link.access_mode ?? null,
-          externalId: link.external_id ?? null
-        },
-        health: clearSyncHealth()
-      }),
+      metadataJson,
       lastRefreshedAt: refreshedAt
     },
     create: {
@@ -393,16 +458,7 @@ async function upsertBelvoConnection({
       institutionName,
       institutionId: link.institution ?? null,
       accessTokenCiphertext: encryptString(payload.linkId),
-      metadataJson: JSON.stringify({
-        belvo: {
-          environment: config.environment,
-          linkId: payload.linkId,
-          status: link.status ?? null,
-          accessMode: link.access_mode ?? null,
-          externalId: link.external_id ?? null
-        },
-        health: clearSyncHealth()
-      }),
+      metadataJson,
       lastRefreshedAt: refreshedAt
     }
   });
@@ -521,6 +577,24 @@ export function createBelvoService({
     isConfigured() {
       return false;
     },
+    async webhooksConfigured() {
+      const effectiveConfig = await getEffectiveConfig();
+      const activeConfig = getActiveBelvoEnvironmentSettings(effectiveConfig);
+      return Boolean(activeConfig.secretId.trim() && activeConfig.secretPassword);
+    },
+    async verifyWebhookAuthorization(header: string | string[] | undefined) {
+      const effectiveConfig = await getEffectiveConfig();
+      const expectedAuthorization = getBelvoWebhookAuthorization(effectiveConfig);
+      if (!expectedAuthorization) {
+        return true;
+      }
+
+      if (Array.isArray(header)) {
+        return header.some(value => value.trim() === expectedAuthorization);
+      }
+
+      return typeof header === "string" && header.trim() === expectedAuthorization;
+    },
     async createConnectSession() {
       const effectiveConfig = await getEffectiveConfig();
       return createBelvoWidgetSession(effectiveConfig);
@@ -619,13 +693,14 @@ export function createBelvoService({
           },
           data: {
             status: "ERROR",
-            metadataJson: JSON.stringify({
-              belvo: {
-                environment: effectiveConfig.environment,
-                linkId: connection.providerItemId
-              },
-              health
-            })
+            metadataJson: JSON.stringify(
+              buildBelvoConnectionMetadata({
+                existingMetadataJson: connection.metadataJson,
+                config: effectiveConfig,
+                linkId: connection.providerItemId,
+                health
+              })
+            )
           }
         });
         throw classifyBelvoError(error);
@@ -673,13 +748,14 @@ export function createBelvoService({
           data: {
             status: "ACTIVE",
             lastRefreshedAt: new Date(),
-            metadataJson: JSON.stringify({
-              belvo: {
-                environment: effectiveConfig.environment,
-                linkId: link.connection.providerItemId
-              },
-              health: clearSyncHealth()
-            })
+            metadataJson: JSON.stringify(
+              buildBelvoConnectionMetadata({
+                existingMetadataJson: link.connection.metadataJson,
+                config: effectiveConfig,
+                linkId: link.connection.providerItemId,
+                health: clearSyncHealth()
+              })
+            )
           }
         });
 
@@ -703,13 +779,14 @@ export function createBelvoService({
           },
           data: {
             status: "ERROR",
-            metadataJson: JSON.stringify({
-              belvo: {
-                environment: effectiveConfig.environment,
-                linkId: link.connection.providerItemId
-              },
-              health
-            })
+            metadataJson: JSON.stringify(
+              buildBelvoConnectionMetadata({
+                existingMetadataJson: link.connection.metadataJson,
+                config: effectiveConfig,
+                linkId: link.connection.providerItemId,
+                health
+              })
+            )
           }
         });
         throw classifyBelvoError(error);

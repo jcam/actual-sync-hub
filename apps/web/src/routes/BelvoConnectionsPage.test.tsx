@@ -177,11 +177,13 @@ describe("BelvoConnectionsPage", () => {
           environment: "sandbox",
           sandbox: {
             secretId: "secret-id",
-            secretPassword: "secret-password"
+            secretPassword: "secret-password",
+            webhookAuthorization: ""
           },
           production: {
             secretId: "",
-            secretPassword: ""
+            secretPassword: "",
+            webhookAuthorization: ""
           },
           transactionsInitialDays: 90,
           transactionsOverlapDays: 7,
@@ -242,11 +244,13 @@ describe("BelvoConnectionsPage", () => {
       environment: "sandbox",
       sandbox: {
         secretId: "secret-id",
-        secretPassword: "secret-password"
+        secretPassword: "secret-password",
+        webhookAuthorization: ""
       },
       production: {
         secretId: "",
-        secretPassword: ""
+        secretPassword: "",
+        webhookAuthorization: ""
       },
       transactionsInitialDays: 120,
       transactionsOverlapDays: 10,
@@ -289,11 +293,13 @@ describe("BelvoConnectionsPage", () => {
         environment: "sandbox",
         sandbox: {
           secretId: "secret-id",
-          secretPassword: "secret-password"
+          secretPassword: "secret-password",
+          webhookAuthorization: ""
         },
         production: {
           secretId: "",
-          secretPassword: ""
+          secretPassword: "",
+          webhookAuthorization: ""
         },
         transactionsInitialDays: 120,
         transactionsOverlapDays: 10,

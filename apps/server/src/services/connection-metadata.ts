@@ -18,6 +18,10 @@ export function getTellerMetadata(metadata: Record<string, unknown>) {
   return typeof metadata.teller === "object" && metadata.teller ? (metadata.teller as Record<string, unknown>) : {};
 }
 
+export function getBelvoMetadata(metadata: Record<string, unknown>) {
+  return typeof metadata.belvo === "object" && metadata.belvo ? (metadata.belvo as Record<string, unknown>) : {};
+}
+
 export function getStripeMetadata(metadata: Record<string, unknown>) {
   return typeof metadata.stripe === "object" && metadata.stripe ? (metadata.stripe as Record<string, unknown>) : {};
 }

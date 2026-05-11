@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+- Belvo webhook ingestion at `/api/webhooks/belvo`, including optional dashboard-configured `Authorization` verification, webhook-driven account refreshes, transaction sync triggers, and persisted Belvo link lifecycle metadata for async account and transaction events.
+
+### Changed
+- Preserved Belvo webhook metadata across Belvo refresh and sync operations, and exposed per-environment Belvo webhook authorization settings in Sync Hub so the current Belvo async flow no longer depends on manual post-connect refreshes for normal webhook-backed updates.
+
 ## [0.30.0] - 2026-05-11
 
 ### Added

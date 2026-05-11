@@ -94,7 +94,8 @@ const simpleFinSettingsSchema = z.object({
 
 const belvoEnvironmentSettingsSchema = z.object({
   secretId: z.string(),
-  secretPassword: z.string()
+  secretPassword: z.string(),
+  webhookAuthorization: z.string().default("")
 });
 
 const belvoSettingsSchema = z.object({
@@ -220,11 +221,13 @@ function defaultProviderSettings(): ProviderSettingsDto {
       environment: "sandbox",
       sandbox: {
         secretId: "",
-        secretPassword: ""
+        secretPassword: "",
+        webhookAuthorization: ""
       },
       production: {
         secretId: "",
-        secretPassword: ""
+        secretPassword: "",
+        webhookAuthorization: ""
       },
       transactionsInitialDays: 90,
       transactionsOverlapDays: 7,
