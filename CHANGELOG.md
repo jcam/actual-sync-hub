@@ -7,8 +7,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-05-11
+
 ### Added
 - Direct `actual-service` worker-path coverage for preview imports, reconcile-side payee/date mutation handling, and child-process recovery after an `out-of-sync` Actual session failure.
+- Snapshot-aware account link configuration, including asset type, write mode, and snapshot-history controls in the accounts UI.
+- Combined `TRANSACTIONS_AND_SNAPSHOT_DELTA` sync support so investment-style accounts can import transaction history and then apply post-transaction valuation adjustments in the same sync and sync-review flow.
+
+### Changed
+- Reworked snapshot-capable providers to return absolute balance snapshots that Sync Hub converts into synthetic ledger adjustments for Actual net worth tracking.
+- Taught Sync Hub to honor Actual's account-level `importTransactions` preference as an effective write-mode override, including disabling incompatible write-mode choices in the UI.
 
 ## [0.25.0] - 2026-05-11
 
