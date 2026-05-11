@@ -189,6 +189,70 @@ describe.sequential("plaid service request options", () => {
     });
   });
 
+  it("rejects malformed Plaid webhook headers before verification", async () => {
+    const service = createPlaidService({
+      config: testConfig,
+      providerSettings: createProviderSettingsMock()
+    });
+
+    await expect(service.verifyWebhookSignature("{}", undefined)).resolves.toBe(false);
+    await expect(service.verifyWebhookSignature("{}", "not-a-jwt")).resolves.toBe(false);
+    await expect(service.verifyWebhookSignature("{}", [
+      Buffer.from(JSON.stringify({
+        alg: "HS256",
+        kid: "plaid-key-123",
+        typ: "JWT"
+      }), "utf8").toString("base64url"),
+      "payload",
+      "signature"
+    ].join("."))).resolves.toBe(false);
+  });
+
+  it("creates a Plaid update-token reauth session for an existing connection", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-123",
+        accessTokenCiphertext: encryptString("access-token-123")
+      }
+    });
+
+    mockPlaidClient.linkTokenCreate.mockResolvedValue({
+      data: {
+        link_token: "update-link-token-123"
+      }
+    });
+
+    const service = createPlaidService({
+      prisma,
+      config: testConfig,
+      providerSettings: createProviderSettingsMock()
+    });
+
+    await expect(service.createReauthSession!({
+      connectionId: connection.id,
+      userId: "user-123"
+    })).resolves.toEqual({
+      provider: "PLAID",
+      connectionId: connection.id,
+      mode: "plaid_update",
+      linkToken: "update-link-token-123"
+    });
+    expect(mockPlaidClient.linkTokenCreate).toHaveBeenCalledWith({
+      access_token: "access-token-123",
+      client_name: "Actual Sync Hub",
+      country_codes: ["US"],
+      language: "en",
+      user: {
+        client_user_id: "user-123"
+      }
+    });
+  });
+
   it("requests PFCv2 categories during transaction sync", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
@@ -583,5 +647,141 @@ describe.sequential("plaid service request options", () => {
     });
 
     await expect(service.disconnectConnection?.(connection.id)).resolves.toBeUndefined();
+  });
+
+  it("rethrows unexpected Plaid disconnect failures as retryable provider errors", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-123",
+        accessTokenCiphertext: encryptString("access-token-123")
+      }
+    });
+
+    mockPlaidClient.itemRemove.mockRejectedValue(new Error("Plaid backend unavailable"));
+
+    const service = createPlaidService({
+      prisma,
+      config: testConfig,
+      providerSettings: createProviderSettingsMock()
+    });
+
+    await expect(service.disconnectConnection?.(connection.id)).rejects.toMatchObject({
+      name: "ProviderOperationError",
+      healthScope: "CONNECTION_AUTH",
+      healthAction: "RETRY"
+    });
+  });
+
+  it("retries Plaid transaction sync when pagination mutates mid-stream", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary Plaid",
+        providerItemId: "item-123",
+        accessTokenCiphertext: encryptString("access-token-123")
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "account-ext-1",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    const link = await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Sandbox Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "MANUAL",
+        isEnabled: true,
+        configJson: JSON.stringify({
+          providerSyncState: {
+            cursor: "cursor-123"
+          }
+        })
+      }
+    });
+
+    mockPlaidClient.transactionsSync
+      .mockRejectedValueOnce(new Error("TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION"))
+      .mockResolvedValueOnce({
+        data: {
+          added: [
+            {
+              account_id: "account-ext-1",
+              transaction_id: "txn-1",
+              date: "2026-05-04",
+              amount: 8.75,
+              name: "Bakery",
+              original_description: "Bakery Downtown",
+              merchant_name: "Bakery",
+              pending: false,
+              personal_finance_category: {
+                primary: "FOOD_AND_DRINK",
+                detailed: "FOOD_AND_DRINK_BAKERY"
+              },
+              counterparties: []
+            }
+          ],
+          modified: [],
+          removed: [],
+          next_cursor: "cursor-456",
+          has_more: false
+        }
+      });
+
+    const service = createPlaidService({
+      prisma,
+      config: testConfig,
+      providerSettings: createProviderSettingsMock()
+    });
+
+    await expect(service.syncAccountLink(link.id)).resolves.toMatchObject({
+      imported: 1,
+      transactions: [
+        expect.objectContaining({
+          amount: -8.75,
+          cleared: true,
+          date: "2026-05-04",
+          importedId: "txn-1",
+          importedPayee: "Bakery",
+          notes: "Downtown",
+          payeeName: "Bakery",
+          searchText: ["Bakery", "Bakery Downtown"]
+        })
+      ],
+      removedImportedIds: [],
+      configPatch: {
+        providerSyncState: {
+          cursor: "cursor-456",
+          windowStartDate: null,
+          windowEndDate: null
+        }
+      }
+    });
+    expect(mockPlaidClient.transactionsSync).toHaveBeenCalledTimes(2);
+    expect(mockPlaidClient.transactionsSync.mock.calls[0]?.[0]).toMatchObject({
+      access_token: "access-token-123",
+      cursor: "cursor-123"
+    });
+    expect(mockPlaidClient.transactionsSync.mock.calls[1]?.[0]).toMatchObject({
+      access_token: "access-token-123",
+      cursor: "cursor-123"
+    });
   });
 });
