@@ -13,7 +13,21 @@ export default defineConfig({
         "apps/**/dist/**",
         "coverage/**",
         "scripts/**"
-      ]
+      ],
+      thresholds: {
+        "apps/server/src/services/{actual-service.ts,app-service.ts,home-values-service.ts,sync-review-service.ts}": {
+          statements: 80,
+          branches: 55,
+          functions: 82,
+          lines: 80
+        },
+        "apps/server/src/services/{account-link-schedule.ts,category-matching.ts,connection-metadata.ts,imported-transaction-ledger.ts,link-config.ts,provider-settings-service.ts,provider-sync-helpers.ts,scheduler.ts,simplefin-native-metadata.ts,sync-health.ts}": {
+          statements: 78,
+          branches: 65,
+          functions: 80,
+          lines: 78
+        }
+      }
     },
     projects: [
       {

@@ -13,6 +13,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Added explicit lint restrictions against chained type assertions and inline `JSON.parse(...) as ...` casts, and moved server/test JSON parsing onto explicit unknown/object/array boundary helpers so those rules are enforceable in practice.
 - Added import-boundary lint rules that block deep internal workspace imports and prevent production `src` code from reaching into test helpers, while still allowing dedicated test, integration, dev, and script entrypoints.
 - Centralized Fastify route parsing behind shared request-boundary helpers and added a lint rule that forbids direct `request.body` / `request.params` / `request.query` access in route files, so HTTP validation stays explicit at the boundary.
+- Added targeted Vitest coverage thresholds for the best-covered server/core service groups, so future changes have to preserve baseline test depth in the sync and service logic without immediately forcing blanket coverage across every provider adapter and UI file.
 
 ## [0.26.0] - 2026-05-11
 
