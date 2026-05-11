@@ -146,6 +146,24 @@ describe.sequential("app service automatic sync", () => {
             transactionsInitialDays: 45,
             automaticSyncConcurrency: 1
           },
+          STRIPE: {
+            environment: "test",
+            test: {
+              publishableKey: "",
+              secretKey: "",
+              webhookSigningSecrets: []
+            },
+            live: {
+              publishableKey: "",
+              secretKey: "",
+              webhookSigningSecrets: []
+            },
+            countryCodes: ["US"],
+            permissions: ["balances", "transactions"],
+            prefetch: ["balances", "transactions"],
+            transactionsInitialDays: 90,
+            automaticSyncConcurrency: 1
+          },
           SALT_EDGE: {
             environment: "test",
             appId: "",
@@ -153,6 +171,9 @@ describe.sequential("app service automatic sync", () => {
             consentDays: 90,
             transactionsFetchDays: 90,
             automaticSyncConcurrency: 2
+          },
+          HOME_VALUES: {
+            automaticSyncConcurrency: 1
           }
         })
       } as never,
@@ -616,6 +637,24 @@ describe.sequential("app service automatic sync", () => {
             transactionsInitialDays: 45,
             automaticSyncConcurrency: 1
           },
+          STRIPE: {
+            environment: "test",
+            test: {
+              publishableKey: "",
+              secretKey: "",
+              webhookSigningSecrets: []
+            },
+            live: {
+              publishableKey: "",
+              secretKey: "",
+              webhookSigningSecrets: []
+            },
+            countryCodes: ["US"],
+            permissions: ["balances", "transactions"],
+            prefetch: ["balances", "transactions"],
+            transactionsInitialDays: 90,
+            automaticSyncConcurrency: 1
+          },
           SALT_EDGE: {
             environment: "test",
             appId: "",
@@ -623,6 +662,9 @@ describe.sequential("app service automatic sync", () => {
             consentDays: 90,
             transactionsFetchDays: 90,
             automaticSyncConcurrency: 2
+          },
+          HOME_VALUES: {
+            automaticSyncConcurrency: 1
           }
         })
       } as never,

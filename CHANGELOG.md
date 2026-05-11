@@ -7,8 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+- A Playwright UI regression harness with mocked API responses for login, navigation, accounts-dashboard rendering, and Home Values create/edit flows, so browser-level regressions can be caught without live provider dependencies.
+
 ### Changed
 - Cleaned up the remaining type-aware lint warnings and errors across Stripe reconnect UI, Stripe live-test coverage, Plaid webhook typing, and live-sandbox command parsing so `npm run lint` now passes cleanly again.
+- Updated server test coverage to include Stripe and Home Values provider settings in automatic-sync fixtures and gave the Actual sync-account event assertion more headroom to reduce timing flake.
 
 ## [0.22.0] - 2026-05-11
 

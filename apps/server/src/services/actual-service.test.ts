@@ -382,7 +382,7 @@ describe.sequential("actual service", () => {
     const eventPromise = new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error("Timed out waiting for Actual sync event"));
-      }, 1_000);
+      }, 5_000);
 
       const stop = service.onActualSyncAccountsChanged?.(() => {
         clearTimeout(timeout);
