@@ -5,7 +5,8 @@ import type {
   AssetType,
   ConnectionStatus,
   Provider,
-  SyncFrequency
+  SyncFrequency,
+  WriteMode
 } from "./core.js";
 import type { SyncHealthDto } from "./health.js";
 
@@ -26,6 +27,8 @@ export type LinkConfigDto = {
   actualAccountId: string;
   actualAccountName: string;
   assetType: AssetType;
+  writeMode: WriteMode;
+  snapshotHistory: boolean;
   provider?: Provider | null;
   connectionId?: string | null;
   connectionAccountId?: string | null;
@@ -44,6 +47,14 @@ export type LinkConfigDto = {
   automaticSyncFailureCount?: number | null;
   categoryMappings: CategoryMappingDto[];
   seenCategoryNames: string[];
+}
+
+export type ActualExternalSyncPrefsDto = {
+  importPending: boolean;
+  importNotes: boolean;
+  reimportDeleted: boolean;
+  importTransactions: boolean;
+  updateDates: boolean;
 }
 
 export type ActualCategoryDto = {
@@ -75,6 +86,7 @@ export type ActualAccountDto = {
   balance: number;
   offbudget?: boolean;
   closed?: boolean;
+  actualExternalSyncPrefs?: ActualExternalSyncPrefsDto | null;
   link: LinkConfigDto;
 }
 
@@ -142,6 +154,8 @@ export type ExternalSyncBridgeSyncResponseDto = {
 export type UpdateAccountLinkPayload = {
   actualAccountName: string;
   assetType: AssetType;
+  writeMode?: WriteMode;
+  snapshotHistory?: boolean;
   provider?: Provider | null;
   connectionId?: string | null;
   connectionAccountId?: string | null;

@@ -1053,25 +1053,23 @@ export function createHomeValuesService({
       });
 
       return sanitizeProviderSyncResult({
-        imported: 1,
-        transactions: [
-          {
-            date: now().toISOString().slice(0, 10),
-            amount: details.calculatedValue ?? 0,
-            payeeName: link.connection.label,
-            importedPayee: details.address,
-            notes: buildHomeValuesNotes(details),
-            importedId: `home-value:${link.connectionAccount.externalAccountId}`,
-            cleared: true,
-            searchText: [
-              details.address,
-              details.redfinUrl || undefined,
-              details.movotoUrl || undefined,
-              details.homesUrl || undefined,
-              details.truliaUrl || undefined
-            ].filter((value): value is string => Boolean(value))
-          }
-        ],
+        imported: 0,
+        transactions: [],
+        balanceSnapshot: {
+          asOfDate: now().toISOString().slice(0, 10),
+          currentValue: details.calculatedValue ?? 0,
+          stableId: `home-value:${link.connectionAccount.externalAccountId}`,
+          payeeName: "Home Value Adjustment",
+          importedPayee: details.address,
+          notes: buildHomeValuesNotes(details),
+          searchText: [
+            details.address,
+            details.redfinUrl || undefined,
+            details.movotoUrl || undefined,
+            details.homesUrl || undefined,
+            details.truliaUrl || undefined
+          ].filter((value): value is string => Boolean(value))
+        },
         removedImportedIds: []
       });
     }

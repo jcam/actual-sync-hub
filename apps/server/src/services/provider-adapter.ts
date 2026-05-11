@@ -13,10 +13,22 @@ export type ProviderSyncTransaction = {
   searchText?: string[];
 }
 
+export type ProviderBalanceSnapshot = {
+  asOfDate: string;
+  currentValue: number;
+  availableValue?: number | null;
+  stableId: string;
+  payeeName: string;
+  importedPayee?: string;
+  notes?: string;
+  searchText?: string[];
+}
+
 export type ProviderSyncResult = {
   imported: number;
   transactions: ProviderSyncTransaction[];
   removedImportedIds: string[];
+  balanceSnapshot?: ProviderBalanceSnapshot | null;
   configPatch?: Partial<LinkConfigData>;
 }
 

@@ -21,11 +21,20 @@ const account: ActualAccountDto = {
   id: "actual-1",
   name: "Checking",
   balance: 1250.5,
+  actualExternalSyncPrefs: {
+    importPending: true,
+    importNotes: true,
+    reimportDeleted: true,
+    importTransactions: true,
+    updateDates: false
+  },
   link: {
     status: "ACTIVE",
     actualAccountId: "actual-1",
     actualAccountName: "Checking",
     assetType: "BANK",
+    writeMode: "TRANSACTIONS",
+    snapshotHistory: true,
     provider: null,
     connectionId: null,
     connectionAccountId: null,
@@ -79,6 +88,9 @@ describe("AccountCard", () => {
     renderWithRouter(<AccountCard account={account} options={options} onRefresh={onRefresh} />);
 
     await user.selectOptions(screen.getByLabelText("Connection"), "conn-2");
+    await user.selectOptions(screen.getByLabelText("Asset type"), "LOAN");
+    await user.selectOptions(screen.getByLabelText("Write mode"), "TRANSACTIONS_AND_SNAPSHOT_DELTA");
+    await user.selectOptions(screen.getByLabelText("Keep snapshot history"), "no");
 
     expect(screen.getByRole("option", { name: /Checking B/ })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /Checking A/ })).not.toBeInTheDocument();
@@ -88,9 +100,12 @@ describe("AccountCard", () => {
     await user.click(screen.getByRole("button", { name: "Save link" }));
 
     await waitFor(() => {
-      expect(updateAccountLink).toHaveBeenCalledWith(
+        expect(updateAccountLink).toHaveBeenCalledWith(
         "actual-1",
         expect.objectContaining({
+          assetType: "LOAN",
+          writeMode: "TRANSACTIONS_AND_SNAPSHOT_DELTA",
+          snapshotHistory: false,
           connectionId: "conn-2",
           connectionAccountId: "conn-account-2",
           isEnabled: true
@@ -98,6 +113,30 @@ describe("AccountCard", () => {
       );
     });
     expect(onRefresh).toHaveBeenCalledOnce();
+  });
+
+  it("disables write mode when Actual sync prefs force balance-only import", () => {
+    renderWithRouter(
+      <AccountCard
+        account={{
+          ...account,
+          actualExternalSyncPrefs: {
+            ...account.actualExternalSyncPrefs!,
+            importTransactions: false
+          },
+          link: {
+            ...account.link,
+            writeMode: "TRANSACTIONS"
+          }
+        }}
+        options={options}
+        onRefresh={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.getByLabelText("Write mode")).toBeDisabled();
+    expect(screen.getByLabelText("Write mode")).toHaveValue("SNAPSHOT_DELTA");
+    expect(screen.getByText(/Actual has transaction import disabled for this account/i)).toBeInTheDocument();
   });
 
   it("shows a helpful error instead of submitting an incomplete link", async () => {

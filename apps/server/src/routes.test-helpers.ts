@@ -12,6 +12,7 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
         externalSyncWritebackEnabled: false
       }),
       listAccounts: vi.fn(),
+      getAccountBalance: vi.fn(),
       listCategories: vi.fn(),
       listBankSyncLinks: vi.fn(),
       getExternalSyncAccount: vi.fn(),

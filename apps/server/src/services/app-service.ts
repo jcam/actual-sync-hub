@@ -13,7 +13,8 @@ import type {
   RuntimeInfoDto,
   SyncRunDto,
   UpsertHomeValueConnectionPayload,
-  UpdateAccountLinkPayload
+  UpdateAccountLinkPayload,
+  WriteMode
 } from "@actual-sync/shared";
 import {
   getActivePlaidEnvironmentSettings,
@@ -40,12 +41,15 @@ import type { LinkConfigData } from "./link-config.js";
 import { plaidService } from "./plaid-service.js";
 import type { PlaidService, PlaidWebhookEvent } from "./plaid-service.js";
 import {
-  applyActualExternalSyncPrefsToProviderSyncResult,
+  applyWriteModeToProviderSyncResult,
+  buildSnapshotDeltaTransaction,
   DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS,
   getPrimarySourceCategory,
   normalizeActualExternalSyncPrefs,
+  resolveEffectiveWriteMode,
   resolveTransactionCategoryId,
   resolveTransferActualAccountId,
+  writeModeUsesSnapshotDelta,
   toImportTransactionInput
 } from "./provider-sync-helpers.js";
 import { createProviderSettingsService } from "./provider-settings-service.js";
@@ -676,6 +680,9 @@ export function createAppService({
     currentLink?: {
       id: string;
       provider: Provider | null;
+      assetType: UpdateAccountLinkPayload["assetType"];
+      writeMode: WriteMode;
+      snapshotHistory: boolean;
       syncFrequency: "MANUAL" | "HOURLY" | "DAILY" | "WEEKLY";
       syncHour: number | null;
       syncDayOfWeek: number | null;
@@ -714,6 +721,33 @@ export function createAppService({
       syncFrequency: "WEEKLY",
       syncHour: slot.syncHour,
       syncDayOfWeek: slot.syncDayOfWeek
+    };
+  };
+
+  const normalizeAccountLinkPayload = async (
+    payload: UpdateAccountLinkPayload,
+    currentLink?: {
+      id: string;
+      provider: Provider | null;
+      assetType: UpdateAccountLinkPayload["assetType"];
+      writeMode: WriteMode;
+      snapshotHistory: boolean;
+      syncFrequency: "MANUAL" | "HOURLY" | "DAILY" | "WEEKLY";
+      syncHour: number | null;
+      syncDayOfWeek: number | null;
+    } | null
+  ): Promise<UpdateAccountLinkPayload & { writeMode: WriteMode; snapshotHistory: boolean }> => {
+    const scheduledPayload = await normalizeHomeValueLinkSchedule(payload, currentLink);
+    const homeValuesSelected = scheduledPayload.provider === "HOME_VALUES";
+
+    return {
+      ...scheduledPayload,
+      assetType: homeValuesSelected ? "PROPERTY" : scheduledPayload.assetType,
+      writeMode:
+        homeValuesSelected
+          ? "SNAPSHOT_DELTA"
+          : scheduledPayload.writeMode ?? currentLink?.writeMode ?? "TRANSACTIONS",
+      snapshotHistory: scheduledPayload.snapshotHistory ?? currentLink?.snapshotHistory ?? true
     };
   };
 
@@ -1157,59 +1191,35 @@ export function createAppService({
     await markActualExternalSyncFailure(link.actualAccountId);
   };
 
-  const applySyncResultToLink = async ({
+  const applyReconcilePhase = async ({
     link,
-    syncRunId,
-    syncResult
+    providerTransactions,
+    reconcileTransactions,
+    removedImportedIds,
+    actualExternalSyncPrefs
   }: {
     link: SyncableLink;
-    syncRunId: string;
-    syncResult: ProviderSyncResult;
-  }): Promise<AppliedSyncOutcome> => {
-    const actualCategories = (await actual.listCategories()).map(category => ({
-      id: category.id,
-      name: category.name
-    }));
-    const actualExternalSyncPrefs = normalizeActualExternalSyncPrefs(
-      await getActualExternalSyncPrefs(link.actualAccountId)
-    );
-    syncResult = applyActualExternalSyncPrefsToProviderSyncResult(syncResult, actualExternalSyncPrefs);
-    let linkConfig = parseLinkConfig(link.configJson);
-    linkConfig = await learnCategoryMappingsFromHistory({
-      database,
-      actual,
-      link: {
-        id: link.id,
-        actualAccountId: link.actualAccountId
-      },
-      linkConfig,
-      actualCategories,
-      now: now()
-    });
-
-    const siblingLinks = await buildSiblingLinks(link);
-    const reconcileTransactions: ReconcileTransactionInput[] = buildReconcileTransactions({
-      actualAccountId: link.actualAccountId,
-      actualCategories,
-      linkConfig,
-      siblingLinks,
-      transactions: syncResult.transactions
-    });
-    const reconcileImportedIds = new Set(reconcileTransactions.map(transaction => transaction.imported_id));
-    const removedImportedIds = syncResult.removedImportedIds.filter(
-      importedId => !reconcileImportedIds.has(importedId)
-    );
+    providerTransactions: ProviderSyncTransaction[];
+    reconcileTransactions: ReconcileTransactionInput[];
+    removedImportedIds: string[];
+    actualExternalSyncPrefs: ReturnType<typeof normalizeActualExternalSyncPrefs>;
+  }) => {
     const migrating = link.status === "MIGRATING";
-    const migrationImportPayload = reconcileTransactions.map(toImportTransactionInput);
-    const migrationResult = migrating
-      ? await actual.importTransactions(link.actualAccountId, migrationImportPayload, {
-          reimportDeleted: actualExternalSyncPrefs.reimportDeleted,
-          updateDates: actualExternalSyncPrefs.updateDates
-        })
-      : null;
+    const importPayload = reconcileTransactions.map(toImportTransactionInput);
+    const importOptions = {
+      reimportDeleted: actualExternalSyncPrefs.reimportDeleted,
+      updateDates: actualExternalSyncPrefs.updateDates
+    };
+
+    const migrationResult = migrating && importPayload.length > 0
+      ? await actual.importTransactions(link.actualAccountId, importPayload, importOptions)
+      : migrating
+        ? { added: [], updated: [], errors: [] }
+        : null;
     if (migrationResult?.errors.length) {
       throw new Error(migrationResult.errors[0]?.message || "Actual migration import failed");
     }
+
     const removedActualTransactionIds = !migrating && removedImportedIds.length > 0
       ? (
           await database.importedTransaction.findMany({
@@ -1230,20 +1240,19 @@ export function createAppService({
           .map(transaction => transaction.actualTransactionId)
           .filter((transactionId): transactionId is string => Boolean(transactionId))
       : [];
-    const reconcileResult = !migrating && (reconcileTransactions.length || removedImportedIds.length)
+
+    const reconcileResult = !migrating && (reconcileTransactions.length > 0 || removedImportedIds.length > 0)
       ? await actual.reconcileTransactions(
           link.actualAccountId,
           reconcileTransactions,
           removedImportedIds,
           removedActualTransactionIds,
-          {
-            reimportDeleted: actualExternalSyncPrefs.reimportDeleted,
-            updateDates: actualExternalSyncPrefs.updateDates
-          }
+          importOptions
         )
       : !migrating
         ? { added: 0, updated: 0, removed: 0, renamedPayees: 0, addedIds: [], updatedIds: [] }
         : null;
+
     const importedTransactionByImportedId = reconcileTransactions.length > 0
       ? await listActualTransactionsForImportedIdsByDateRange({
           actualAccountId: link.actualAccountId,
@@ -1260,7 +1269,7 @@ export function createAppService({
         reconcileTransactions.map((transaction, index) =>
           runImportedTransactionLedgerWrite(() => {
             const actualTransactionId = importedTransactionByImportedId.get(transaction.imported_id)?.id ?? null;
-            const primarySourceCategory = getPrimarySourceCategory(syncResult.transactions[index]!);
+            const primarySourceCategory = getPrimarySourceCategory(providerTransactions[index]!);
 
             return database.importedTransaction.upsert({
               where: {
@@ -1303,12 +1312,104 @@ export function createAppService({
       });
     }
 
+    return {
+      addedCount: migrating ? migrationResult?.added.length ?? 0 : reconcileResult?.added ?? 0,
+      updatedCount: migrating ? migrationResult?.updated.length ?? 0 : reconcileResult?.updated ?? 0,
+      removedCount: migrating ? 0 : reconcileResult?.removed ?? 0,
+      newTransactions: migrating ? migrationResult?.added ?? [] : reconcileResult?.addedIds ?? [],
+      matchedTransactions: migrating ? migrationResult?.updated ?? [] : reconcileResult?.updatedIds ?? []
+    };
+  };
+
+  const applySyncResultToLink = async ({
+    link,
+    syncRunId,
+    syncResult
+  }: {
+    link: SyncableLink;
+    syncRunId: string;
+    syncResult: ProviderSyncResult;
+  }): Promise<AppliedSyncOutcome> => {
+    const actualExternalSyncPrefs = normalizeActualExternalSyncPrefs(
+      await getActualExternalSyncPrefs(link.actualAccountId)
+    );
+    const effectiveWriteMode = resolveEffectiveWriteMode(link.writeMode, actualExternalSyncPrefs);
+    const transactionSyncResult = applyWriteModeToProviderSyncResult({
+      result: syncResult,
+      writeMode: link.writeMode,
+      prefs: actualExternalSyncPrefs
+    });
+    const actualCategories = (await actual.listCategories()).map(category => ({
+      id: category.id,
+      name: category.name
+    }));
+    let linkConfig = parseLinkConfig(link.configJson);
+    linkConfig = await learnCategoryMappingsFromHistory({
+      database,
+      actual,
+      link: {
+        id: link.id,
+        actualAccountId: link.actualAccountId
+      },
+      linkConfig,
+      actualCategories,
+      now: now()
+    });
+
+    const siblingLinks = await buildSiblingLinks(link);
+    const transactionReconcileTransactions: ReconcileTransactionInput[] = buildReconcileTransactions({
+      actualAccountId: link.actualAccountId,
+      actualCategories,
+      linkConfig,
+      siblingLinks,
+      transactions: transactionSyncResult.transactions
+    });
+    const reconcileImportedIds = new Set(transactionReconcileTransactions.map(transaction => transaction.imported_id));
+    const transactionRemovedImportedIds = transactionSyncResult.removedImportedIds.filter(
+      importedId => !reconcileImportedIds.has(importedId)
+    );
+    const transactionPhase = await applyReconcilePhase({
+      link,
+      providerTransactions: transactionSyncResult.transactions,
+      reconcileTransactions: transactionReconcileTransactions,
+      removedImportedIds: transactionRemovedImportedIds,
+      actualExternalSyncPrefs
+    });
+
+    const snapshotTransaction =
+      writeModeUsesSnapshotDelta(effectiveWriteMode) && syncResult.balanceSnapshot
+        ? buildSnapshotDeltaTransaction({
+            result: syncResult,
+            snapshotHistory: link.snapshotHistory,
+            prefs: actualExternalSyncPrefs,
+            currentLedgerBalance: await actual.getAccountBalance(link.actualAccountId)
+          })
+        : null;
+    const snapshotTransactions = snapshotTransaction ? [snapshotTransaction] : [];
+    const snapshotReconcileTransactions = snapshotTransaction
+      ? buildReconcileTransactions({
+          actualAccountId: link.actualAccountId,
+          actualCategories,
+          linkConfig,
+          siblingLinks,
+          transactions: snapshotTransactions
+        })
+      : [];
+    const snapshotPhase = await applyReconcilePhase({
+      link,
+      providerTransactions: snapshotTransactions,
+      reconcileTransactions: snapshotReconcileTransactions,
+      removedImportedIds: [],
+      actualExternalSyncPrefs
+    });
+
     await pruneImportedTransactionLedger({
       database,
       accountLinkId: link.id,
       now: now()
     });
 
+    const migrating = link.status === "MIGRATING";
     const syncCompletedAt = now();
     await database.accountLink.update({
       where: {
@@ -1334,7 +1435,7 @@ export function createAppService({
           categoryMappings: linkConfig.categoryMappings || [],
           seenCategoryNames: [
             ...(linkConfig.seenCategoryNames || []),
-            ...syncResult.transactions.flatMap(transaction => transaction.categoryNames || [])
+            ...transactionSyncResult.transactions.flatMap(transaction => transaction.categoryNames || [])
           ]
         })
       }
@@ -1346,17 +1447,16 @@ export function createAppService({
     });
     await markActualExternalSyncSuccess(link.actualAccountId, syncCompletedAt);
 
+    const addedCount = transactionPhase.addedCount + snapshotPhase.addedCount;
+    const updatedCount = transactionPhase.updatedCount + snapshotPhase.updatedCount;
+    const removedCount = transactionPhase.removedCount + snapshotPhase.removedCount;
+    const newTransactions = [...transactionPhase.newTransactions, ...snapshotPhase.newTransactions];
+    const matchedTransactions = [...transactionPhase.matchedTransactions, ...snapshotPhase.matchedTransactions];
     const summary = migrating
-      ? `Migration sync imported ${migrationResult?.added.length ?? 0} transactions, updated ${migrationResult?.updated.length ?? 0}, removed 0.`
-      : `Imported ${reconcileResult?.added ?? 0} transactions, updated ${reconcileResult?.updated ?? 0}, removed ${reconcileResult?.removed ?? 0}.`;
-    const newTransactions = migrating
-      ? migrationResult?.added ?? []
-      : reconcileResult?.addedIds ?? [];
-    const matchedTransactions = migrating
-      ? migrationResult?.updated ?? []
-      : reconcileResult?.updatedIds ?? [];
+      ? `Migration sync imported ${addedCount} transactions, updated ${updatedCount}, removed 0.`
+      : `Imported ${addedCount} transactions, updated ${updatedCount}, removed ${removedCount}.`;
     const updatedAccounts =
-      newTransactions.length > 0 || matchedTransactions.length > 0 || removedImportedIds.length > 0
+      newTransactions.length > 0 || matchedTransactions.length > 0 || removedCount > 0
         ? [link.actualAccountId]
         : [];
 
@@ -1867,6 +1967,14 @@ export function createAppService({
           }
         })
       ]);
+      const actualExternalSyncPrefsByAccountId = new Map(
+        await Promise.all(
+          actualAccounts.map(async account => [
+            account.id,
+            normalizeActualExternalSyncPrefs(await getActualExternalSyncPrefs(account.id))
+          ] as const)
+        )
+      );
 
       const linksByActualId = groupLinksByActualAccountId(links);
       const options: ConnectionAccountOptionDto[] = connections.flatMap(connection =>
@@ -1907,6 +2015,7 @@ export function createAppService({
           balance: account.balance,
           offbudget: account.offbudget ?? false,
           closed: account.closed ?? false,
+          actualExternalSyncPrefs: actualExternalSyncPrefsByAccountId.get(account.id) ?? DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS,
           link: toLinkDto(link, {
             actualAccountId: account.id,
             actualAccountName: account.name
@@ -2264,7 +2373,7 @@ export function createAppService({
 
       const mappingChanged = linkIdentityChanged(currentLink, payload);
       const existingConfig = parseLinkConfig(currentLink?.configJson);
-      const normalizedSchedulePayload = await normalizeHomeValueLinkSchedule(payload, currentLink);
+      const normalizedSchedulePayload = await normalizeAccountLinkPayload(payload, currentLink);
       const nextConfig = stripUndefined({
         providerSyncState: mappingChanged ? undefined : existingConfig.providerSyncState,
         health: mappingChanged ? null : existingConfig.health ?? null,
@@ -2293,6 +2402,8 @@ export function createAppService({
             actualAccountId,
             actualAccountName: normalizedSchedulePayload.actualAccountName,
             assetType: normalizedSchedulePayload.assetType,
+            writeMode: normalizedSchedulePayload.writeMode,
+            snapshotHistory: normalizedSchedulePayload.snapshotHistory,
             provider: toPrismaProvider(normalizedSchedulePayload.provider ?? null),
             connectionId: normalizedSchedulePayload.connectionId ?? null,
             connectionAccountId: normalizedSchedulePayload.connectionAccountId ?? null,
@@ -2322,6 +2433,8 @@ export function createAppService({
           data: {
             actualAccountName: normalizedSchedulePayload.actualAccountName,
             assetType: normalizedSchedulePayload.assetType,
+            writeMode: normalizedSchedulePayload.writeMode,
+            snapshotHistory: normalizedSchedulePayload.snapshotHistory,
             provider: toPrismaProvider(normalizedSchedulePayload.provider ?? null),
             connectionId: normalizedSchedulePayload.connectionId ?? null,
             connectionAccountId: normalizedSchedulePayload.connectionAccountId ?? null,
@@ -2351,6 +2464,8 @@ export function createAppService({
             actualAccountId,
             actualAccountName: normalizedSchedulePayload.actualAccountName,
             assetType: normalizedSchedulePayload.assetType,
+            writeMode: normalizedSchedulePayload.writeMode,
+            snapshotHistory: normalizedSchedulePayload.snapshotHistory,
             provider: toPrismaProvider(normalizedSchedulePayload.provider ?? null),
             connectionId: normalizedSchedulePayload.connectionId ?? null,
             connectionAccountId: normalizedSchedulePayload.connectionAccountId ?? null,

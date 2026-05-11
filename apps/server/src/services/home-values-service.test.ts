@@ -51,7 +51,7 @@ describe.sequential("home values service", () => {
     await Promise.all(cleanups.splice(0).map(cleanup => cleanup()));
   });
 
-  it("creates a home value connection and emits a cached synthetic valuation transaction on manual sync", async () => {
+  it("creates a home value connection and emits a cached valuation snapshot on manual sync", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
 
@@ -106,17 +106,16 @@ describe.sequential("home values service", () => {
     const result = await service.syncAccountLink(link.id);
 
     expect(result.removedImportedIds).toEqual([]);
-    expect(result.transactions).toHaveLength(1);
-    expect(result.transactions[0]).toMatchObject({
-      amount: 640000,
-      payeeName: "Primary residence",
+    expect(result.transactions).toHaveLength(0);
+    expect(result.balanceSnapshot).toMatchObject({
+      currentValue: 640000,
+      payeeName: "Home Value Adjustment",
       importedPayee: "123 Main St, Springfield, IL",
-      importedId: `home-value:${connection.accounts[0]!.externalAccountId}`,
-      cleared: true
+      stableId: `home-value:${connection.accounts[0]!.externalAccountId}`
     });
-    expect(result.transactions[0]?.notes).toContain("Selected source: Average");
-    expect(result.transactions[0]?.notes).toContain("Redfin estimate: $650000.00");
-    expect(result.transactions[0]?.notes).toContain("Movoto estimate: $630000.00");
+    expect(result.balanceSnapshot?.notes).toContain("Selected source: Average");
+    expect(result.balanceSnapshot?.notes).toContain("Redfin estimate: $650000.00");
+    expect(result.balanceSnapshot?.notes).toContain("Movoto estimate: $630000.00");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
@@ -558,8 +557,8 @@ describe.sequential("home values service", () => {
 
     const result = await service.syncAccountLink(link.id);
 
-    expect(result.transactions[0]?.amount).toBe(720000);
-    expect(result.transactions[0]?.notes).toContain("Redfin fetch warning:");
+    expect(result.balanceSnapshot?.currentValue).toBe(720000);
+    expect(result.balanceSnapshot?.notes).toContain("Redfin fetch warning:");
 
     const updated = await prisma.connection.findUniqueOrThrow({
       where: { id: connectionId },
@@ -653,8 +652,8 @@ describe.sequential("home values service", () => {
     const firstResult = await service.syncAccountLink(firstLink.id);
     const secondResult = await service.syncAccountLink(secondLink.id);
 
-    expect(firstResult.transactions[0]?.amount).toBe(830000);
-    expect(secondResult.transactions[0]?.amount).toBe(820000);
+    expect(firstResult.balanceSnapshot?.currentValue).toBe(830000);
+    expect(secondResult.balanceSnapshot?.currentValue).toBe(820000);
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 

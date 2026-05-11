@@ -163,6 +163,12 @@ type WorkerCommand =
     }
   | {
       id: string;
+      operation: "getAccountBalance";
+      accountId: string;
+      cutoff?: string;
+    }
+  | {
+      id: string;
       operation: "getExternalSyncAccount";
       accountId: string;
     }
@@ -859,6 +865,17 @@ async function main() {
             id: command.id,
             ok: true,
             result: getActualCapabilities(actual)
+          };
+        }
+
+        case "getAccountBalance": {
+          await syncIfNeeded();
+          const cutoff = command.cutoff ? new Date(command.cutoff) : undefined;
+          const balance = await actual.getAccountBalance(command.accountId, cutoff);
+          return {
+            id: command.id,
+            ok: true,
+            result: integerToAmount(balance) ?? 0
           };
         }
 

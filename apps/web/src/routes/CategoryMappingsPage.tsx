@@ -92,6 +92,8 @@ export function CategoryMappingsPage() {
           await api.updateAccountLink(account.id, {
             actualAccountName: account.link.actualAccountName,
             assetType: account.link.assetType,
+            writeMode: account.link.writeMode,
+            snapshotHistory: account.link.snapshotHistory,
             provider: account.link.provider ?? null,
             connectionId: account.link.connectionId ?? null,
             connectionAccountId: account.link.connectionAccountId ?? null,

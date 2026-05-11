@@ -37,6 +37,17 @@ enum SyncRunStatus {
 
 enum AssetType {
   BANK
+  LOAN
+  INVESTMENT
+  PROPERTY
+  OTHER_ASSET
+  OTHER_LIABILITY
+}
+
+enum WriteMode {
+  TRANSACTIONS
+  SNAPSHOT_DELTA
+  TRANSACTIONS_AND_SNAPSHOT_DELTA
 }
 
 enum AccountLinkStatus {
@@ -115,6 +126,8 @@ model AccountLink {
   actualAccountId   String
   actualAccountName String
   assetType         AssetType         @default(BANK)
+  writeMode         WriteMode         @default(TRANSACTIONS)
+  snapshotHistory   Boolean           @default(true)
   provider          Provider?
   connectionId      String?
   connectionAccountId String?

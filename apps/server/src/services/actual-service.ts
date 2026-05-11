@@ -186,6 +186,11 @@ type WorkerCommandPayload =
       operation: "getCapabilities";
     }
   | {
+      operation: "getAccountBalance";
+      accountId: string;
+      cutoff?: string;
+    }
+  | {
       operation: "linkExternalSyncAccount";
       accountId: string;
       metadata: ActualExternalSyncMetadataInput;
@@ -302,6 +307,7 @@ export type ActualService = {
   getCapabilities?(): Promise<ActualCapabilities>;
   onActualSyncAccountsChanged?(listener: (accountIds: string[]) => void): () => void;
   listAccounts(): Promise<ActualAccountRecord[]>;
+  getAccountBalance(accountId: string, cutoff?: string): Promise<number>;
   listCategories(): Promise<ActualCategoryRecord[]>;
   listBankSyncLinks(): Promise<ActualBankSyncLinkRecord[]>;
   getExternalSyncAccount?(accountId: string): Promise<ActualExternalSyncAccountRecord>;
@@ -608,6 +614,21 @@ export function createActualService({
         expiresAt: Date.now() + READ_CACHE_TTL_MS
       };
       return result;
+    },
+
+    async getAccountBalance(accountId: string, cutoff?: string): Promise<number> {
+      const payload: WorkerCommandPayload = cutoff
+        ? {
+            operation: "getAccountBalance",
+            accountId,
+            cutoff
+          }
+        : {
+            operation: "getAccountBalance",
+            accountId
+          };
+
+      return runWorker<number>(payload);
     },
 
     async listCategories(): Promise<ActualCategoryRecord[]> {

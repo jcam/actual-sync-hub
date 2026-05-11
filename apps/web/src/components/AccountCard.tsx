@@ -1,12 +1,44 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import type { ActualAccountDto, ConnectionAccountOptionDto, SyncFrequency, UpdateAccountLinkPayload } from "@actual-sync/shared";
+import type {
+  ActualAccountDto,
+  AssetType,
+  ConnectionAccountOptionDto,
+  SyncFrequency,
+  UpdateAccountLinkPayload,
+  WriteMode
+} from "@actual-sync/shared";
 import { api } from "../api";
 import { getDisplayErrorMessage } from "../lib/errors";
 import { getAutomaticSyncPauseSummary } from "../lib/provider-ui";
 import { SyncHealthPanel } from "./SyncHealthPanel";
 
 const scheduleOptions: SyncFrequency[] = ["MANUAL", "HOURLY", "DAILY", "WEEKLY"];
+const assetTypeOptions: Array<{ value: AssetType; label: string }> = [
+  { value: "BANK", label: "Bank" },
+  { value: "LOAN", label: "Loan" },
+  { value: "INVESTMENT", label: "Investment" },
+  { value: "PROPERTY", label: "Property" },
+  { value: "OTHER_ASSET", label: "Other asset" },
+  { value: "OTHER_LIABILITY", label: "Other liability" }
+];
+const writeModeOptions: Array<{ value: WriteMode; label: string }> = [
+  { value: "TRANSACTIONS", label: "Transactions" },
+  { value: "SNAPSHOT_DELTA", label: "Snapshot delta" },
+  { value: "TRANSACTIONS_AND_SNAPSHOT_DELTA", label: "Transactions + snapshot delta" }
+];
+type AccountCardFormState = {
+  assetType: AssetType;
+  writeMode: WriteMode;
+  snapshotHistory: boolean;
+  provider: UpdateAccountLinkPayload["provider"];
+  connectionId: UpdateAccountLinkPayload["connectionId"];
+  connectionAccountId: UpdateAccountLinkPayload["connectionAccountId"];
+  syncFrequency: UpdateAccountLinkPayload["syncFrequency"];
+  syncHour: UpdateAccountLinkPayload["syncHour"];
+  syncDayOfWeek: UpdateAccountLinkPayload["syncDayOfWeek"];
+  isEnabled: UpdateAccountLinkPayload["isEnabled"];
+};
 
 export function AccountCard({
   account,
@@ -18,10 +50,10 @@ export function AccountCard({
   onRefresh: () => Promise<void>;
 }) {
   const displayBalance = typeof account.balance === "number" && Number.isFinite(account.balance) ? account.balance : 0;
-  const [form, setForm] = useState<Pick<
-    UpdateAccountLinkPayload,
-    "provider" | "connectionId" | "connectionAccountId" | "syncFrequency" | "syncHour" | "syncDayOfWeek" | "isEnabled"
-  >>({
+  const [form, setForm] = useState<AccountCardFormState>({
+    assetType: account.link.assetType,
+    writeMode: account.link.writeMode,
+    snapshotHistory: account.link.snapshotHistory,
     provider: account.link.provider ?? null,
     connectionId: account.link.connectionId ?? null,
     connectionAccountId: account.link.connectionAccountId ?? null,
@@ -39,6 +71,13 @@ export function AccountCard({
   const activeConnectionOption = options.find(option => option.connectionId === account.link.connectionId);
   const selectedProvider = form.connectionId ? selectedConnection?.provider ?? form.provider ?? null : null;
   const homeValuesScheduled = selectedProvider === "HOME_VALUES";
+  const importTransactionsEnabled = account.actualExternalSyncPrefs?.importTransactions ?? true;
+  const writeModeOverriddenByActual = !importTransactionsEnabled;
+  const displayedAssetType = homeValuesScheduled ? "PROPERTY" : form.assetType;
+  const effectiveWriteMode = homeValuesScheduled || writeModeOverriddenByActual ? "SNAPSHOT_DELTA" : form.writeMode;
+  const writeModeSelectorDisabled = homeValuesScheduled || writeModeOverriddenByActual;
+  const assetTypeSelectorDisabled = homeValuesScheduled;
+  const snapshotHistoryDisabled = effectiveWriteMode === "TRANSACTIONS";
   const availableScheduleOptions = homeValuesScheduled ? (["MANUAL", "WEEKLY"] as const) : scheduleOptions;
   const automaticSyncPauseSummary =
     form.isEnabled && form.syncFrequency !== "MANUAL" ? getAutomaticSyncPauseSummary(account.link) : null;
@@ -60,7 +99,9 @@ export function AccountCard({
     !blockingConnectionState;
   const buildPayload = (): UpdateAccountLinkPayload => ({
     actualAccountName: account.link.actualAccountName,
-    assetType: account.link.assetType,
+    assetType: homeValuesScheduled ? "PROPERTY" : form.assetType,
+    writeMode: homeValuesScheduled ? "SNAPSHOT_DELTA" : form.writeMode,
+    snapshotHistory: form.snapshotHistory,
     provider: selectedProvider,
     connectionId: form.connectionId ?? null,
     connectionAccountId: form.connectionAccountId ?? null,
@@ -161,6 +202,48 @@ export function AccountCard({
         </label>
 
         <label>
+          <span>Asset type</span>
+          <select
+            value={displayedAssetType}
+            onChange={event => setForm(current => ({ ...current, assetType: event.target.value as AssetType }))}
+            disabled={assetTypeSelectorDisabled}
+          >
+            {assetTypeOptions.map(option => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          <span>Write mode</span>
+          <select
+            value={effectiveWriteMode}
+            onChange={event => setForm(current => ({ ...current, writeMode: event.target.value as WriteMode }))}
+            disabled={writeModeSelectorDisabled}
+          >
+            {writeModeOptions.map(option => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          <span>Keep snapshot history</span>
+          <select
+            value={form.snapshotHistory ? "yes" : "no"}
+            onChange={event => setForm(current => ({ ...current, snapshotHistory: event.target.value === "yes" }))}
+            disabled={snapshotHistoryDisabled}
+          >
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+        </label>
+
+        <label>
           <span>Schedule</span>
           <select
             value={form.syncFrequency}
@@ -220,6 +303,15 @@ export function AccountCard({
           <div>
             <span>Schedule slot</span>
             <p className="muted">Weekly updates are assigned automatically to spread property fetches out.</p>
+          </div>
+        ) : null}
+
+        {writeModeOverriddenByActual ? (
+          <div>
+            <span>Actual sync prefs</span>
+            <p className="muted">
+              Actual has transaction import disabled for this account, so Sync Hub will use snapshot deltas when the provider supports them.
+            </p>
           </div>
         ) : null}
       </div>

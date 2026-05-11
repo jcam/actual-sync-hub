@@ -36,6 +36,8 @@ describe("CategoryMappingsPage", () => {
             actualAccountId: "actual-1",
             actualAccountName: "Checking",
             assetType: "BANK",
+            writeMode: "TRANSACTIONS",
+            snapshotHistory: true,
             provider: "PLAID",
             connectionId: "conn-1",
             connectionAccountId: "conn-account-1",

@@ -67,6 +67,8 @@ async function initializeSchema(prisma: PrismaClient) {
       "actualAccountId" TEXT NOT NULL,
       "actualAccountName" TEXT NOT NULL,
       "assetType" TEXT NOT NULL DEFAULT 'BANK',
+      "writeMode" TEXT NOT NULL DEFAULT 'TRANSACTIONS',
+      "snapshotHistory" BOOLEAN NOT NULL DEFAULT true,
       "provider" TEXT,
       "connectionId" TEXT,
       "connectionAccountId" TEXT,

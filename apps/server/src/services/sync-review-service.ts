@@ -4,7 +4,8 @@ import type {
   ActualCategoryDto,
   CommitMigrationPayload,
   MigrationPreviewDto,
-  Provider
+  Provider,
+  WriteMode
 } from "@actual-sync/shared";
 import type { prisma } from "../db.js";
 import { stripUndefined } from "../lib/strip-undefined.js";
@@ -14,11 +15,13 @@ import { pruneImportedTransactionLedger } from "./imported-transaction-ledger.js
 import type { LinkConfigData } from "./link-config.js";
 import { parseLinkConfig, serializeLinkConfig } from "./link-config.js";
 import {
-  applyActualExternalSyncPrefsToProviderSyncResult,
+  applyWriteModeToProviderSyncResult,
+  buildSnapshotDeltaTransaction,
   DEFAULT_ACTUAL_EXTERNAL_SYNC_PREFS,
   getPrimarySourceCategory,
   mapPreviewItemByImportedId,
   normalizeActualExternalSyncPrefs,
+  resolveEffectiveWriteMode,
   toImportTransactionInput
 } from "./provider-sync-helpers.js";
 import type { ProviderAdapter, ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
@@ -29,12 +32,16 @@ const REVIEW_SNAPSHOT_TTL_MS = 15 * 60 * 1000;
 type ReviewDatabase = Pick<DatabaseClient, "accountLink" | "syncRun" | "importedTransaction">;
 type ReviewActualService = Pick<
   ActualService,
-  "listCategories" | "previewImportTransactions" | "importTransactions" | "reconcileTransactions" | "listTransactionsByDateRange"
+  | "listCategories"
+  | "previewImportTransactions"
+  | "importTransactions"
+  | "reconcileTransactions"
+  | "listTransactionsByDateRange"
 > &
   Partial<
     Pick<
       ActualService,
-      "getExternalSyncAccount"
+      "getAccountBalance" | "getExternalSyncAccount"
     >
   >;
 
@@ -43,6 +50,9 @@ type ReviewableLink = {
   status: AccountLinkStatus;
   actualAccountId: string;
   actualAccountName: string;
+  assetType: "BANK" | "LOAN" | "INVESTMENT" | "PROPERTY" | "OTHER_ASSET" | "OTHER_LIABILITY";
+  writeMode: WriteMode;
+  snapshotHistory: boolean;
   provider: Provider | null;
   connectionId: string | null;
   syncFrequency: "MANUAL" | "HOURLY" | "DAILY" | "WEEKLY";
@@ -188,6 +198,30 @@ export function createSyncReviewService<TSiblingLinks>({
     return (await actual.getExternalSyncAccount(actualAccountId)).prefs;
   }
 
+  function projectBalanceAfterPreviewImport({
+    currentLedgerBalance,
+    reconcileTransactions,
+    preview
+  }: {
+    currentLedgerBalance: number;
+    reconcileTransactions: ReconcileTransactionInput[];
+    preview: Awaited<ReturnType<ReviewActualService["previewImportTransactions"]>>;
+  }) {
+    const previewByImportedId = mapPreviewItemByImportedId(preview.updatedPreview);
+    const delta = reconcileTransactions.reduce((total, transaction) => {
+      const previewItem = previewByImportedId.get(transaction.imported_id);
+      if (previewItem?.ignored) {
+        return total;
+      }
+
+      const existingAmount =
+        previewItem?.existing && typeof previewItem.existing.amount === "number" ? previewItem.existing.amount : 0;
+      return total + (previewItem?.existing ? transaction.amount - existingAmount : transaction.amount);
+    }, 0);
+
+    return Number((currentLedgerBalance + delta).toFixed(2));
+  }
+
   function pruneExpiredReviewSnapshots() {
     const currentTime = Date.now();
     for (const [snapshotId, snapshot] of reviewSnapshots) {
@@ -234,39 +268,97 @@ export function createSyncReviewService<TSiblingLinks>({
         const actualExternalSyncPrefs = normalizeActualExternalSyncPrefs(
           await getActualExternalSyncPrefs(actualAccountId)
         );
-        const syncResult = applyActualExternalSyncPrefsToProviderSyncResult(
-          await adapter.syncAccountLink(link.id),
-          actualExternalSyncPrefs
-        );
+        const rawSyncResult = await adapter.syncAccountLink(link.id);
+        const effectiveWriteMode = resolveEffectiveWriteMode(link.writeMode, actualExternalSyncPrefs);
+        const transactionSyncResult = applyWriteModeToProviderSyncResult({
+          result: rawSyncResult,
+          writeMode: link.writeMode,
+          prefs: actualExternalSyncPrefs
+        });
         const siblingLinks = await buildSiblingLinks(link);
-        const reconcileTransactions = buildReconcileTransactions({
+        const transactionReconcileTransactions = buildReconcileTransactions({
           actualAccountId,
           actualCategories,
           linkConfig,
           siblingLinks,
-          transactions: syncResult.transactions
+          transactions: transactionSyncResult.transactions
         });
+        let reconcileTransactions = transactionReconcileTransactions;
+        const previewOptions = {
+          reimportDeleted: actualExternalSyncPrefs.reimportDeleted,
+          updateDates: actualExternalSyncPrefs.updateDates
+        };
+        let previewResult =
+          transactionReconcileTransactions.length > 0 || effectiveWriteMode === "TRANSACTIONS"
+            ? await actual.previewImportTransactions(
+                actualAccountId,
+                transactionReconcileTransactions.map(toImportTransactionInput),
+                previewOptions
+              )
+            : {
+                added: [],
+                updated: [],
+                errors: [],
+                updatedPreview: []
+              };
+        if (previewResult.errors.length > 0) {
+          throw new Error(previewResult.errors[0]?.message || "Actual migration preview failed");
+        }
+
+        const currentLedgerBalance =
+          rawSyncResult.balanceSnapshot && effectiveWriteMode !== "TRANSACTIONS"
+            ? await actual.getAccountBalance?.(actualAccountId)
+            : undefined;
+        const projectedLedgerBalance =
+          typeof currentLedgerBalance === "number"
+            ? transactionReconcileTransactions.length > 0
+              ? projectBalanceAfterPreviewImport({
+                  currentLedgerBalance,
+                  reconcileTransactions: transactionReconcileTransactions,
+                  preview: previewResult
+                })
+              : currentLedgerBalance
+            : undefined;
+        const snapshotTransaction = effectiveWriteMode !== "TRANSACTIONS"
+          ? buildSnapshotDeltaTransaction({
+              result: rawSyncResult,
+              snapshotHistory: link.snapshotHistory,
+              prefs: actualExternalSyncPrefs,
+              ...(projectedLedgerBalance === undefined ? {} : { currentLedgerBalance: projectedLedgerBalance })
+            })
+          : null;
+        const finalTransactions = snapshotTransaction
+          ? [...transactionSyncResult.transactions, snapshotTransaction]
+          : transactionSyncResult.transactions;
+        if (snapshotTransaction) {
+          reconcileTransactions = [
+            ...transactionReconcileTransactions,
+            ...buildReconcileTransactions({
+              actualAccountId,
+              actualCategories,
+              linkConfig,
+              siblingLinks,
+              transactions: [snapshotTransaction]
+            })
+          ];
+          previewResult = await actual.previewImportTransactions(
+            actualAccountId,
+            reconcileTransactions.map(toImportTransactionInput),
+            previewOptions
+          );
+          if (previewResult.errors.length > 0) {
+            throw new Error(previewResult.errors[0]?.message || "Actual migration preview failed");
+          }
+        }
         const snapshotId = storeReviewSnapshot({
           actualAccountId,
           link,
           linkConfig,
           actualExternalSyncPrefs,
-          syncResultConfigPatch: syncResult.configPatch,
-          transactions: syncResult.transactions,
+          syncResultConfigPatch: transactionSyncResult.configPatch,
+          transactions: finalTransactions,
           reconcileTransactions
         });
-
-        const previewResult = await actual.previewImportTransactions(
-          actualAccountId,
-          reconcileTransactions.map(toImportTransactionInput),
-          {
-            reimportDeleted: actualExternalSyncPrefs.reimportDeleted,
-            updateDates: actualExternalSyncPrefs.updateDates
-          }
-        );
-        if (previewResult.errors.length > 0) {
-          throw new Error(previewResult.errors[0]?.message || "Actual migration preview failed");
-        }
 
         const previewByImportedId = mapPreviewItemByImportedId(previewResult.updatedPreview);
 
@@ -276,7 +368,7 @@ export function createSyncReviewService<TSiblingLinks>({
           actualAccountName: link.actualAccountName,
           linkId: link.id,
           status: link.status,
-          items: syncResult.transactions.map(transaction => {
+          items: finalTransactions.map(transaction => {
             const preview = previewByImportedId.get(transaction.importedId);
             const action = preview?.ignored ? "ignore" : preview?.existing ? "update" : "add";
 

@@ -36,6 +36,8 @@ describe("AccountsPage", () => {
             actualAccountId: "actual-1",
             actualAccountName: "Checking",
             assetType: "BANK",
+            writeMode: "TRANSACTIONS",
+            snapshotHistory: true,
             provider: null,
             connectionId: null,
             connectionAccountId: null,

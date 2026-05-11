@@ -1,4 +1,4 @@
-import type { ActualCategoryDto, CategoryMappingDto } from "@actual-sync/shared";
+import type { ActualCategoryDto, CategoryMappingDto, WriteMode } from "@actual-sync/shared";
 import { stripUndefined } from "../lib/strip-undefined.js";
 import type { ImportTransactionInput, PreviewImportMatchRecord, ReconcileTransactionInput } from "./actual-service.js";
 import type { ProviderSyncResult, ProviderSyncTransaction } from "./provider-adapter.js";
@@ -162,6 +162,93 @@ export function applyActualExternalSyncPrefsToProviderSyncResult(
     ...result,
     transactions: filteredTransactions
   });
+}
+
+export function resolveEffectiveWriteMode(
+  writeMode: WriteMode,
+  prefs: Partial<ActualExternalSyncPrefs> | null | undefined
+): WriteMode {
+  const normalizedPrefs = normalizeActualExternalSyncPrefs(prefs);
+  return normalizedPrefs.importTransactions ? writeMode : "SNAPSHOT_DELTA";
+}
+
+export function writeModeUsesTransactions(writeMode: WriteMode) {
+  return writeMode === "TRANSACTIONS" || writeMode === "TRANSACTIONS_AND_SNAPSHOT_DELTA";
+}
+
+export function writeModeUsesSnapshotDelta(writeMode: WriteMode) {
+  return writeMode === "SNAPSHOT_DELTA" || writeMode === "TRANSACTIONS_AND_SNAPSHOT_DELTA";
+}
+
+export function applyWriteModeToProviderSyncResult({
+  result,
+  writeMode,
+  prefs,
+}: {
+  result: ProviderSyncResult;
+  writeMode: WriteMode;
+  prefs: Partial<ActualExternalSyncPrefs> | null | undefined;
+}): ProviderSyncResult {
+  const normalizedPrefs = normalizeActualExternalSyncPrefs(prefs);
+  const effectiveWriteMode = resolveEffectiveWriteMode(writeMode, normalizedPrefs);
+
+  if (writeModeUsesTransactions(effectiveWriteMode)) {
+    return applyActualExternalSyncPrefsToProviderSyncResult(result, normalizedPrefs);
+  }
+
+  return sanitizeProviderSyncResult({
+    ...result,
+    imported: 0,
+    transactions: [],
+    removedImportedIds: []
+  });
+}
+
+export function buildSnapshotDeltaTransaction({
+  result,
+  snapshotHistory,
+  prefs,
+  currentLedgerBalance
+}: {
+  result: ProviderSyncResult;
+  snapshotHistory: boolean;
+  prefs: Partial<ActualExternalSyncPrefs> | null | undefined;
+  currentLedgerBalance?: number;
+}): ProviderSyncTransaction | null {
+  if (!result.balanceSnapshot) {
+    return null;
+  }
+
+  const normalizedPrefs = normalizeActualExternalSyncPrefs(prefs);
+  if (typeof currentLedgerBalance !== "number" || !Number.isFinite(currentLedgerBalance)) {
+    throw new Error("Current ledger balance is required for snapshot delta sync.");
+  }
+
+  const delta = Number((result.balanceSnapshot.currentValue - currentLedgerBalance).toFixed(2));
+  if (Math.abs(delta) < 0.005) {
+    return null;
+  }
+
+  const deltaNotes = [
+    `Snapshot value: ${result.balanceSnapshot.currentValue.toFixed(2)}`,
+    `Previous ledger balance: ${currentLedgerBalance.toFixed(2)}`,
+    `Applied delta: ${delta.toFixed(2)}`
+  ].join("\n");
+  const baseNotes = normalizedPrefs.importNotes ? result.balanceSnapshot.notes?.trim() : undefined;
+  const notes = normalizedPrefs.importNotes ? (baseNotes ? `${baseNotes}\n${deltaNotes}` : deltaNotes) : undefined;
+
+  return stripUndefined({
+    date: result.balanceSnapshot.asOfDate,
+    amount: delta,
+    payeeName: result.balanceSnapshot.payeeName,
+    importedPayee: result.balanceSnapshot.importedPayee,
+    notes,
+    importedId: snapshotHistory
+      ? `${result.balanceSnapshot.stableId}:${result.balanceSnapshot.asOfDate}`
+      : result.balanceSnapshot.stableId,
+    cleared: true,
+    searchText: result.balanceSnapshot.searchText
+  }) satisfies ProviderSyncTransaction;
 }
 
 export function getPrimarySourceCategory(transaction: ProviderSyncTransaction) {

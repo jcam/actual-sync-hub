@@ -141,7 +141,9 @@ export function toLinkDto(
     status: AccountLinkStatus;
     actualAccountId: string;
     actualAccountName: string;
-    assetType: "BANK";
+    assetType: LinkConfigDto["assetType"];
+    writeMode: LinkConfigDto["writeMode"];
+    snapshotHistory: boolean;
     provider: Provider | null;
     connectionId: string | null;
     connectionAccountId: string | null;
@@ -165,6 +167,8 @@ export function toLinkDto(
     actualAccountId: fallback.actualAccountId,
     actualAccountName: link?.actualAccountName ?? fallback.actualAccountName,
     assetType: link?.assetType ?? "BANK",
+    writeMode: link?.writeMode ?? "TRANSACTIONS",
+    snapshotHistory: link?.snapshotHistory ?? true,
     provider: link?.provider ?? null,
     connectionId: link?.connectionId ?? null,
     connectionAccountId: link?.connectionAccountId ?? null,

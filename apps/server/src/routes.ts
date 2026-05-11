@@ -561,7 +561,9 @@ export async function registerRoutes(
     const body = z
       .object({
         actualAccountName: z.string().min(1),
-        assetType: z.literal("BANK"),
+        assetType: z.enum(["BANK", "LOAN", "INVESTMENT", "PROPERTY", "OTHER_ASSET", "OTHER_LIABILITY"]),
+        writeMode: z.enum(["TRANSACTIONS", "SNAPSHOT_DELTA", "TRANSACTIONS_AND_SNAPSHOT_DELTA"]).optional(),
+        snapshotHistory: z.boolean().optional(),
         provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "HOME_VALUES"]).nullable().optional(),
         connectionId: z.string().nullable().optional(),
         connectionAccountId: z.string().nullable().optional(),

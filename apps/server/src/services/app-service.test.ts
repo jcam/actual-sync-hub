@@ -3159,6 +3159,284 @@ describe.sequential("app service", () => {
     });
   });
 
+  it("forces snapshot delta sync when Actual external sync importTransactions is false and a balance snapshot is available", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary",
+        providerItemId: "item-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "ext-1",
+        name: "Checking",
+        type: "depository"
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Household Checking",
+        assetType: "BANK",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true,
+        writeMode: "TRANSACTIONS"
+      }
+    });
+
+    const reconcileTransactions = vi.fn().mockResolvedValue({
+      added: 1,
+      updated: 0,
+      removed: 0,
+      renamedPayees: 0,
+      addedIds: ["txn-snapshot"],
+      updatedIds: []
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        getAccountBalance: vi.fn().mockResolvedValue(500),
+        getExternalSyncAccount: vi.fn().mockResolvedValue({
+          id: "actual-1",
+          linked: true,
+          syncSource: "external",
+          providerAccountId: "ext-1",
+          institutionName: "First Platypus Bank",
+          institutionExternalId: "platypus-bank",
+          mask: "1234",
+          officialName: "Checking",
+          balanceCurrent: 45000,
+          balanceAvailable: 45000,
+          balanceLimit: null,
+          lastSync: null,
+          prefs: {
+            importPending: true,
+            importNotes: true,
+            reimportDeleted: false,
+            importTransactions: false,
+            updateDates: false
+          }
+        }),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions
+      } as never,
+      plaidService: {
+        syncAccountLink: vi.fn().mockResolvedValue({
+          imported: 1,
+          transactions: [
+            {
+              date: "2026-05-03",
+              amount: -12.34,
+              payeeName: "Coffee Shop",
+              importedPayee: "COFFEE SHOP",
+              importedId: "posted-1",
+              cleared: true,
+              categoryNames: [],
+              searchText: ["Coffee Shop"]
+            }
+          ],
+          removedImportedIds: ["deleted-1"],
+          configPatch: {},
+          balanceSnapshot: {
+            asOfDate: "2026-05-03",
+            currentValue: 450,
+            stableId: "snapshot:ext-1",
+            payeeName: "Balance Adjustment",
+            notes: "Snapshot from provider"
+          }
+        })
+      } as never
+    });
+
+    await service.runAccountSync("actual-1");
+
+    expect(reconcileTransactions).toHaveBeenCalledWith(
+      "actual-1",
+      [
+        expect.objectContaining({
+          imported_id: "snapshot:ext-1:2026-05-03",
+          amount: -50,
+          payee_name: "Balance Adjustment",
+          notes: expect.stringContaining("Applied delta: -50.00")
+        })
+      ],
+      [],
+      [],
+      {
+        reimportDeleted: false,
+        updateDates: false
+      }
+    );
+  });
+
+  it("supports transactions plus snapshot delta in a single sync when writeMode is combined", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "PLAID",
+        label: "Primary",
+        providerItemId: "item-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const connectionAccount = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "ext-1",
+        name: "Brokerage",
+        type: "investment"
+      }
+    });
+
+    await prisma.accountLink.create({
+      data: {
+        actualAccountId: "actual-1",
+        actualAccountName: "Brokerage",
+        assetType: "INVESTMENT",
+        provider: "PLAID",
+        connectionId: connection.id,
+        connectionAccountId: connectionAccount.id,
+        syncFrequency: "DAILY",
+        isEnabled: true,
+        writeMode: "TRANSACTIONS_AND_SNAPSHOT_DELTA"
+      }
+    });
+
+    const reconcileTransactions = vi
+      .fn()
+      .mockResolvedValueOnce({
+        added: 1,
+        updated: 0,
+        removed: 0,
+        renamedPayees: 0,
+        addedIds: ["txn-buy"],
+        updatedIds: []
+      })
+      .mockResolvedValueOnce({
+        added: 1,
+        updated: 0,
+        removed: 0,
+        renamedPayees: 0,
+        addedIds: ["txn-valuation"],
+        updatedIds: []
+      });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        getAccountBalance: vi.fn().mockResolvedValue(430),
+        getExternalSyncAccount: vi.fn().mockResolvedValue({
+          id: "actual-1",
+          linked: true,
+          syncSource: "external",
+          providerAccountId: "ext-1",
+          institutionName: "First Platypus Bank",
+          institutionExternalId: "platypus-bank",
+          mask: "1234",
+          officialName: "Brokerage",
+          balanceCurrent: 50000,
+          balanceAvailable: 50000,
+          balanceLimit: null,
+          lastSync: null,
+          prefs: {
+            importPending: true,
+            importNotes: true,
+            reimportDeleted: false,
+            importTransactions: true,
+            updateDates: false
+          }
+        }),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions
+      } as never,
+      plaidService: {
+        syncAccountLink: vi.fn().mockResolvedValue({
+          imported: 1,
+          transactions: [
+            {
+              date: "2026-05-03",
+              amount: -20,
+              payeeName: "Buy VXUS",
+              importedPayee: "BUY VXUS",
+              importedId: "trade-1",
+              cleared: true,
+              categoryNames: [],
+              searchText: ["Buy VXUS"]
+            }
+          ],
+          removedImportedIds: [],
+          configPatch: {},
+          balanceSnapshot: {
+            asOfDate: "2026-05-03",
+            currentValue: 500,
+            stableId: "snapshot:ext-1",
+            payeeName: "Market Value Adjustment",
+            notes: "Snapshot from provider"
+          }
+        })
+      } as never
+    });
+
+    const result = await service.runAccountSync("actual-1");
+
+    expect(reconcileTransactions).toHaveBeenNthCalledWith(
+      1,
+      "actual-1",
+      [
+        expect.objectContaining({
+          imported_id: "trade-1",
+          amount: -20,
+          payee_name: "Buy VXUS"
+        })
+      ],
+      [],
+      [],
+      {
+        reimportDeleted: false,
+        updateDates: false
+      }
+    );
+    expect(reconcileTransactions).toHaveBeenNthCalledWith(
+      2,
+      "actual-1",
+      [
+        expect.objectContaining({
+          imported_id: "snapshot:ext-1:2026-05-03",
+          amount: 70,
+          payee_name: "Market Value Adjustment"
+        })
+      ],
+      [],
+      [],
+      {
+        reimportDeleted: false,
+        updateDates: false
+      }
+    );
+    expect(result?.newTransactions).toEqual(["txn-buy", "txn-valuation"]);
+  });
+
   it("writes lastSync through external writeback metadata updates", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
@@ -3797,7 +4075,6 @@ describe.sequential("app service", () => {
       expect.objectContaining({
         category_names: ["Transfer Out"],
         imported_id: "plaid-transfer-1",
-        resolved_category_id: undefined,
         transfer_actual_account_id: "actual-savings"
       })
     ], [], [], {
