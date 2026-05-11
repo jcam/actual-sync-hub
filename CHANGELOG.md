@@ -18,6 +18,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Added direct tests for provider fixture cache persistence/clearing behavior and app-context service wiring so those remaining low-coverage server helpers are covered before tightening thresholds further.
 - Fixed `createAppContext(...)` so an explicitly provided scheduler override is preserved in the returned context instead of being dropped during service composition.
 - Expanded Plaid, Stripe, and Teller adapter branch coverage across reauth, disconnect, sandbox, cache, and provider-error fallback paths, and raised the Vitest per-file coverage gates to enforce those stronger adapter and boundary baselines going forward.
+- Expanded web-side provider coverage for reconnect flows, provider-settings validation/saves, and the Stripe/Teller browser loaders, so the remaining low-coverage provider UI paths are exercised before tightening the next round of server-side thresholds.
 
 ## [0.26.0] - 2026-05-11
 
