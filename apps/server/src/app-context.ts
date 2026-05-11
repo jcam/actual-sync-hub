@@ -56,6 +56,9 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
     simplefinService: simplefin,
     stripeService: stripe,
     tellerService: teller,
+    ...(overrides.scheduler ? {
+      scheduler: overrides.scheduler
+    } : {}),
     authService: overrides.authService ?? createAuthService({ prisma: database }),
     appService:
       overrides.appService ??

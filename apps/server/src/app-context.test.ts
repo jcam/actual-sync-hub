@@ -194,6 +194,7 @@ describe("createAppContext", () => {
       simplefinService: overrides.simplefinService,
       stripeService: overrides.stripeService,
       tellerService: overrides.tellerService,
+      scheduler: overrides.scheduler,
       authService: overrides.authService,
       appService: overrides.appService
     });
