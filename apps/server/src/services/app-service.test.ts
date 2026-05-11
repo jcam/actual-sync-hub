@@ -383,18 +383,30 @@ describe.sequential("app service", () => {
 
     const accounts = await service.listActualAccounts();
 
-    expect(accounts).toEqual([
+    expect(accounts).toEqual(
       expect.objectContaining({
-        id: "actual-1",
-        link: expect.objectContaining({
-          isEnabled: false,
-          health: expect.objectContaining({
-            state: "ATTENTION_REQUIRED",
-            code: "ACTUAL_UNLINKED"
+        accounts: [
+          expect.objectContaining({
+            id: "actual-1",
+            link: expect.objectContaining({
+              isEnabled: false,
+              health: expect.objectContaining({
+                state: "ATTENTION_REQUIRED",
+                code: "ACTUAL_UNLINKED"
+              })
+            })
           })
-        })
+        ],
+        options: expect.arrayContaining([
+          expect.objectContaining({
+            connectionId: expect.any(String),
+            connectionAccountId: expect.any(String),
+            provider: "SIMPLEFIN"
+          })
+        ]),
+        actualCategories: []
       })
-    ]);
+    );
 
     const persisted = await prisma.accountLink.findFirstOrThrow({
       where: {

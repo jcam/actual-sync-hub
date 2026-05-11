@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import type { ActualAccountDto } from "@actual-sync/shared";
+import type { ActualAccountDto, ActualCategoryDto } from "@actual-sync/shared";
 import { api } from "../api";
 import { CategoryMappingEditor } from "../components/CategoryMappingEditor";
 import { getDisplayErrorMessage } from "../lib/errors";
@@ -9,6 +9,7 @@ export function CategoryMappingsPage() {
   const { actualAccountId } = useParams<{ actualAccountId: string }>();
   const navigate = useNavigate();
   const [account, setAccount] = useState<ActualAccountDto | null>(null);
+  const [actualCategories, setActualCategories] = useState<ActualCategoryDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,11 +18,12 @@ export function CategoryMappingsPage() {
 
     void api
       .listAccounts()
-      .then(accounts => {
+      .then(({ accounts, actualCategories: sharedCategories }) => {
         if (cancelled) {
           return;
         }
-        setAccount(accounts.find(candidate => candidate.id === actualAccountId) || null);
+        setActualCategories(sharedCategories);
+        setAccount(accounts.find((candidate: ActualAccountDto) => candidate.id === actualAccountId) || null);
         setError(null);
       })
       .catch(loadError => {
@@ -29,6 +31,7 @@ export function CategoryMappingsPage() {
           return;
         }
         setAccount(null);
+        setActualCategories([]);
         setError(
           getDisplayErrorMessage(loadError, "Failed to load category mappings.", {
             serverUnavailableMessage: "Could not reach the API server while loading category mappings."
@@ -84,6 +87,7 @@ export function CategoryMappingsPage() {
 
       <CategoryMappingEditor
         account={account}
+        actualCategories={actualCategories}
         onSave={async categoryMappings => {
           await api.updateAccountLink(account.id, {
             actualAccountName: account.link.actualAccountName,

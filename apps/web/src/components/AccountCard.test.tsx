@@ -1,7 +1,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ActualAccountDto } from "@actual-sync/shared";
+import type { ActualAccountDto, ConnectionAccountOptionDto } from "@actual-sync/shared";
 import { AccountCard } from "./AccountCard";
 import { renderWithRouter } from "../test-utils";
 
@@ -36,40 +36,37 @@ const account: ActualAccountDto = {
     lastSyncedAt: null,
     categoryMappings: [],
     seenCategoryNames: []
-  },
-  options: [
-    {
-      connectionId: "conn-1",
-      connectionLabel: "Plaid A",
-      connectionStatus: "ACTIVE",
-      connectionAccountId: "conn-account-1",
-      externalAccountId: "ext-1",
-      provider: "PLAID",
-      institutionName: "Bank A",
-      accountName: "Checking A",
-      mask: "11",
-      type: "depository",
-      subtype: "checking"
-    },
-    {
-      connectionId: "conn-2",
-      connectionLabel: "Plaid B",
-      connectionStatus: "ACTIVE",
-      connectionAccountId: "conn-account-2",
-      externalAccountId: "ext-2",
-      provider: "PLAID",
-      institutionName: "Bank B",
-      accountName: "Checking B",
-      mask: "22",
-      type: "depository",
-      subtype: "checking"
-    }
-  ],
-  actualCategories: [
-    { id: "cat-groceries", name: "Groceries" },
-    { id: "cat-eating-out", name: "Eating Out" }
-  ]
+  }
 };
+
+const options: ConnectionAccountOptionDto[] = [
+  {
+    connectionId: "conn-1",
+    connectionLabel: "Plaid A",
+    connectionStatus: "ACTIVE",
+    connectionAccountId: "conn-account-1",
+    externalAccountId: "ext-1",
+    provider: "PLAID",
+    institutionName: "Bank A",
+    accountName: "Checking A",
+    mask: "11",
+    type: "depository",
+    subtype: "checking"
+  },
+  {
+    connectionId: "conn-2",
+    connectionLabel: "Plaid B",
+    connectionStatus: "ACTIVE",
+    connectionAccountId: "conn-account-2",
+    externalAccountId: "ext-2",
+    provider: "PLAID",
+    institutionName: "Bank B",
+    accountName: "Checking B",
+    mask: "22",
+    type: "depository",
+    subtype: "checking"
+  }
+];
 
 describe("AccountCard", () => {
   afterEach(() => {
@@ -79,7 +76,7 @@ describe("AccountCard", () => {
   it("filters provider account choices by the selected connection and saves the link", async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn().mockResolvedValue(undefined);
-    renderWithRouter(<AccountCard account={account} onRefresh={onRefresh} />);
+    renderWithRouter(<AccountCard account={account} options={options} onRefresh={onRefresh} />);
 
     await user.selectOptions(screen.getByLabelText("Connection"), "conn-2");
 
@@ -105,7 +102,7 @@ describe("AccountCard", () => {
 
   it("shows a helpful error instead of submitting an incomplete link", async () => {
     const user = userEvent.setup();
-    renderWithRouter(<AccountCard account={account} onRefresh={vi.fn().mockResolvedValue(undefined)} />);
+    renderWithRouter(<AccountCard account={account} options={options} onRefresh={vi.fn().mockResolvedValue(undefined)} />);
 
     await user.selectOptions(screen.getByLabelText("Connection"), "conn-2");
     await user.click(screen.getByRole("button", { name: "Save link" }));
@@ -129,6 +126,7 @@ describe("AccountCard", () => {
             seenCategoryNames: ["Groceries", "Restaurants"]
           }
         }}
+        options={options}
         onRefresh={vi.fn().mockResolvedValue(undefined)}
       />
     );
@@ -146,6 +144,7 @@ describe("AccountCard", () => {
           ...account,
           balance: null as never
         }}
+        options={options}
         onRefresh={vi.fn().mockResolvedValue(undefined)}
       />
     );
@@ -167,6 +166,7 @@ describe("AccountCard", () => {
             isEnabled: true
           }
         }}
+        options={options}
         onRefresh={vi.fn().mockResolvedValue(undefined)}
       />
     );
@@ -192,6 +192,7 @@ describe("AccountCard", () => {
             isEnabled: true
           }
         }}
+        options={options}
         onRefresh={vi.fn().mockResolvedValue(undefined)}
       />
     );
@@ -220,19 +221,19 @@ describe("AccountCard", () => {
               message: "Actual import failed."
             },
             isEnabled: true
-          },
-          options: [
-            {
-              ...account.options[0],
-              connectionHealth: {
-                state: "REAUTH_REQUIRED",
-                scope: "CONNECTION_AUTH",
-                action: "REAUTH_CONNECTION",
-                message: "Stored provider token is invalid."
-              }
-            }
-          ]
+          }
         }}
+        options={[
+          {
+            ...options[0],
+            connectionHealth: {
+              state: "REAUTH_REQUIRED",
+              scope: "CONNECTION_AUTH",
+              action: "REAUTH_CONNECTION",
+              message: "Stored provider token is invalid."
+            }
+          }
+        ]}
         onRefresh={vi.fn().mockResolvedValue(undefined)}
       />
     );
@@ -264,6 +265,7 @@ describe("AccountCard", () => {
             }
           }
         }}
+        options={options}
         onRefresh={vi.fn().mockResolvedValue(undefined)}
       />
     );
@@ -295,6 +297,7 @@ describe("AccountCard", () => {
             }
           }
         }}
+        options={options}
         onRefresh={vi.fn().mockResolvedValue(undefined)}
       />
     );

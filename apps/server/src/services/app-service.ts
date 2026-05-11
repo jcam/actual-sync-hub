@@ -1,5 +1,6 @@
 import type {
   ActualAccountDto,
+  ActualAccountsResponseDto,
   ActualBankSyncStatus,
   ActualBankSyncLinkDto,
   ActualCategoryDto,
@@ -202,7 +203,7 @@ function groupLinksByActualAccountId<T extends { actualAccountId: string }>(link
 export type AppService = {
   getRuntimeInfo(): Promise<RuntimeInfoDto>;
   listConnections(): Promise<ConnectionDto[]>;
-  listActualAccounts(): Promise<ActualAccountDto[]>;
+  listActualAccounts(): Promise<ActualAccountsResponseDto>;
   listActualBankSyncLinks(): Promise<ActualBankSyncLinkDto[]>;
   importExistingSimpleFinLinks(connectionId: string): Promise<{
     imported: number;
@@ -798,7 +799,8 @@ export function createAppService({
   };
 
   const reconcileActualExternalUnlinks = async (actualAccountIds?: string[]) => {
-    if (!(await getActualCapabilities()).externalSyncWritebackEnabled) {
+    const capabilities = await getActualCapabilities();
+    if (!capabilities.externalSyncWritebackEnabled) {
       return;
     }
 
@@ -829,12 +831,24 @@ export function createAppService({
       return;
     }
 
-    const actualBankSyncLinks = await actual.listBankSyncLinks();
-    const actualExternalLinkedAccountIds = new Set(
-      actualBankSyncLinks
-        .filter(link => link.accountSyncSource === "external")
-        .map(link => link.actualAccountId)
-    );
+    const trackedActualAccountIds = trackedCurrentLinks.map(link => link.actualAccountId);
+    const actualExternalLinkedAccountIds = new Set<string>();
+
+    if (actualAccountIds && trackedActualAccountIds.length > 0 && typeof actual.getExternalSyncAccount === "function") {
+      for (const actualAccountId of trackedActualAccountIds) {
+        const externalSync = await actual.getExternalSyncAccount(actualAccountId);
+        if (externalSync.linked && externalSync.syncSource === "external") {
+          actualExternalLinkedAccountIds.add(actualAccountId);
+        }
+      }
+    } else {
+      const actualBankSyncLinks = await actual.listBankSyncLinks();
+      for (const link of actualBankSyncLinks) {
+        if (link.accountSyncSource === "external") {
+          actualExternalLinkedAccountIds.add(link.actualAccountId);
+        }
+      }
+    }
 
     await Promise.all(
       trackedCurrentLinks
@@ -1810,7 +1824,7 @@ export function createAppService({
       return homeValues.updateConnection(connectionId, payload);
     },
 
-    async listActualAccounts(): Promise<ActualAccountDto[]> {
+    async listActualAccounts(): Promise<ActualAccountsResponseDto> {
       await reconcileActualExternalUnlinks();
       const [actualAccounts, actualCategories, links, connections] = await Promise.all([
         actual.listAccounts(),
@@ -1852,11 +1866,11 @@ export function createAppService({
         name: category.name
       }));
 
-      const results: ActualAccountDto[] = [];
+      const accounts: ActualAccountDto[] = [];
       for (const account of actualAccounts) {
         const link = selectCurrentLink(linksByActualId.get(account.id) || []) ?? null;
 
-        results.push({
+        accounts.push({
           id: account.id,
           name: account.name,
           balance: account.balance,
@@ -1865,13 +1879,15 @@ export function createAppService({
           link: toLinkDto(link, {
             actualAccountId: account.id,
             actualAccountName: account.name
-          }),
-          options,
-          actualCategories: categoryOptions
+          })
         });
       }
 
-      return results;
+      return {
+        accounts,
+        options,
+        actualCategories: categoryOptions
+      };
     },
 
     async listActualBankSyncLinks(): Promise<ActualBankSyncLinkDto[]> {

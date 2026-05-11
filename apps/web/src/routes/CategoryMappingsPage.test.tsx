@@ -23,36 +23,38 @@ describe("CategoryMappingsPage", () => {
 
   it("loads one account and saves edited category mappings", async () => {
     const user = userEvent.setup();
-    listAccounts.mockResolvedValue([
-      {
-        id: "actual-1",
-        name: "Checking",
-        balance: 100,
-        offbudget: false,
-        closed: false,
-        link: {
-          status: "ACTIVE",
-          actualAccountId: "actual-1",
-          actualAccountName: "Checking",
-          assetType: "BANK",
-          provider: "PLAID",
-          connectionId: "conn-1",
-          connectionAccountId: "conn-account-1",
-          syncFrequency: "MANUAL",
-          syncHour: null,
-          syncDayOfWeek: null,
-          isEnabled: true,
-          lastSyncedAt: null,
-          categoryMappings: [{ sourceCategory: "Groceries", actualCategoryId: "cat-groceries" }],
-          seenCategoryNames: ["Groceries", "Restaurants"]
-        },
-        options: [],
-        actualCategories: [
-          { id: "cat-groceries", name: "Groceries" },
-          { id: "cat-eating-out", name: "Eating Out" }
-        ]
-      }
-    ]);
+    listAccounts.mockResolvedValue({
+      accounts: [
+        {
+          id: "actual-1",
+          name: "Checking",
+          balance: 100,
+          offbudget: false,
+          closed: false,
+          link: {
+            status: "ACTIVE",
+            actualAccountId: "actual-1",
+            actualAccountName: "Checking",
+            assetType: "BANK",
+            provider: "PLAID",
+            connectionId: "conn-1",
+            connectionAccountId: "conn-account-1",
+            syncFrequency: "MANUAL",
+            syncHour: null,
+            syncDayOfWeek: null,
+            isEnabled: true,
+            lastSyncedAt: null,
+            categoryMappings: [{ sourceCategory: "Groceries", actualCategoryId: "cat-groceries" }],
+            seenCategoryNames: ["Groceries", "Restaurants"]
+          }
+        }
+      ],
+      options: [],
+      actualCategories: [
+        { id: "cat-groceries", name: "Groceries" },
+        { id: "cat-eating-out", name: "Eating Out" }
+      ]
+    });
     updateAccountLink.mockResolvedValue({ ok: true });
 
     render(

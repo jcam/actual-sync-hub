@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import type { ActualAccountDto, SyncFrequency, UpdateAccountLinkPayload } from "@actual-sync/shared";
+import type { ActualAccountDto, ConnectionAccountOptionDto, SyncFrequency, UpdateAccountLinkPayload } from "@actual-sync/shared";
 import { api } from "../api";
 import { getDisplayErrorMessage } from "../lib/errors";
 import { getAutomaticSyncPauseSummary } from "../lib/provider-ui";
@@ -10,9 +10,11 @@ const scheduleOptions: SyncFrequency[] = ["MANUAL", "HOURLY", "DAILY", "WEEKLY"]
 
 export function AccountCard({
   account,
+  options,
   onRefresh
 }: {
   account: ActualAccountDto;
+  options: ConnectionAccountOptionDto[];
   onRefresh: () => Promise<void>;
 }) {
   const displayBalance = typeof account.balance === "number" && Number.isFinite(account.balance) ? account.balance : 0;
@@ -32,9 +34,9 @@ export function AccountCard({
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const filteredOptions = account.options.filter(option => option.connectionId === form.connectionId);
-  const selectedConnection = account.options.find(option => option.connectionId === form.connectionId);
-  const activeConnectionOption = account.options.find(option => option.connectionId === account.link.connectionId);
+  const filteredOptions = options.filter(option => option.connectionId === form.connectionId);
+  const selectedConnection = options.find(option => option.connectionId === form.connectionId);
+  const activeConnectionOption = options.find(option => option.connectionId === account.link.connectionId);
   const selectedProvider = form.connectionId ? selectedConnection?.provider ?? form.provider ?? null : null;
   const homeValuesScheduled = selectedProvider === "HOME_VALUES";
   const availableScheduleOptions = homeValuesScheduled ? (["MANUAL", "WEEKLY"] as const) : scheduleOptions;
@@ -124,7 +126,7 @@ export function AccountCard({
             onChange={event => {
               const connectionId = event.target.value || null;
               const provider =
-                account.options.find(option => option.connectionId === connectionId)?.provider ?? null;
+                options.find(option => option.connectionId === connectionId)?.provider ?? null;
               setForm(current => ({
                 ...current,
                 provider,
@@ -134,7 +136,7 @@ export function AccountCard({
             }}
           >
             <option value="">Not linked</option>
-            {Array.from(new Map(account.options.map(option => [option.connectionId, option])).values()).map(option => (
+            {Array.from(new Map(options.map(option => [option.connectionId, option])).values()).map(option => (
               <option key={option.connectionId} value={option.connectionId}>
                 {option.connectionLabel}
               </option>

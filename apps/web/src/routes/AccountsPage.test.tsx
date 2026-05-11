@@ -23,33 +23,35 @@ describe("AccountsPage", () => {
   });
 
   it("loads accounts and recent sync runs on mount", async () => {
-    listAccounts.mockResolvedValue([
-      {
-        id: "actual-1",
-        name: "Checking",
-        balance: 99.99,
-        offbudget: false,
-        closed: false,
-        link: {
-          status: "ACTIVE",
-          actualAccountId: "actual-1",
-          actualAccountName: "Checking",
-          assetType: "BANK",
-          provider: null,
-          connectionId: null,
-          connectionAccountId: null,
-          syncFrequency: "MANUAL",
-          syncHour: null,
-          syncDayOfWeek: null,
-          isEnabled: false,
-          lastSyncedAt: null,
-          categoryMappings: [],
-          seenCategoryNames: []
-        },
-        options: [],
-        actualCategories: []
-      }
-    ]);
+    listAccounts.mockResolvedValue({
+      accounts: [
+        {
+          id: "actual-1",
+          name: "Checking",
+          balance: 99.99,
+          offbudget: false,
+          closed: false,
+          link: {
+            status: "ACTIVE",
+            actualAccountId: "actual-1",
+            actualAccountName: "Checking",
+            assetType: "BANK",
+            provider: null,
+            connectionId: null,
+            connectionAccountId: null,
+            syncFrequency: "MANUAL",
+            syncHour: null,
+            syncDayOfWeek: null,
+            isEnabled: false,
+            lastSyncedAt: null,
+            categoryMappings: [],
+            seenCategoryNames: []
+          }
+        }
+      ],
+      options: [],
+      actualCategories: []
+    });
     listSyncRuns.mockResolvedValue([
       {
         id: "run-1",

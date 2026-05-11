@@ -1,5 +1,5 @@
 import type {
-  ActualAccountDto,
+  ActualAccountsResponseDto,
   ActualBankSyncLinkDto,
   CommitMigrationPayload,
   ConnectionReauthSessionDto,
@@ -82,7 +82,7 @@ export const api = {
     });
   },
   listAccounts() {
-    return request<ActualAccountDto[]>("/api/actual/accounts");
+    return request<ActualAccountsResponseDto>("/api/actual/accounts");
   },
   listActualBankSyncLinks() {
     return request<ActualBankSyncLinkDto[]>("/api/actual/bank-sync-links");

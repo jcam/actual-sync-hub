@@ -76,6 +76,10 @@ export type ActualAccountDto = {
   offbudget?: boolean;
   closed?: boolean;
   link: LinkConfigDto;
+}
+
+export type ActualAccountsResponseDto = {
+  accounts: ActualAccountDto[];
   options: ConnectionAccountOptionDto[];
   actualCategories: ActualCategoryDto[];
 }

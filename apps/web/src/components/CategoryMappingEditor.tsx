@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { ActualAccountDto, CategoryMappingDto } from "@actual-sync/shared";
+import type { ActualAccountDto, ActualCategoryDto, CategoryMappingDto } from "@actual-sync/shared";
 import { getDisplayErrorMessage } from "../lib/errors";
 
 function normalizeSourceCategory(value: string) {
@@ -23,9 +23,11 @@ function upsertCategoryMapping(mappings: CategoryMappingDto[], nextMapping: Cate
 
 export function CategoryMappingEditor({
   account,
+  actualCategories,
   onSave
 }: {
   account: ActualAccountDto;
+  actualCategories: ActualCategoryDto[];
   onSave: (categoryMappings: CategoryMappingDto[]) => Promise<void>;
 }) {
   const [categoryMappings, setCategoryMappings] = useState(account.link.categoryMappings);
@@ -110,10 +112,10 @@ export function CategoryMappingEditor({
               aria-label="Map new provider category to Actual category"
               value={customActualCategoryId}
               onChange={event => setCustomActualCategoryId(event.target.value)}
-              disabled={account.actualCategories.length === 0}
+              disabled={actualCategories.length === 0}
             >
               <option value="">Choose category</option>
-              {account.actualCategories.map(category => (
+              {actualCategories.map(category => (
                 <option key={category.id} value={category.id}>
                   {category.name}
                 </option>
@@ -185,7 +187,7 @@ export function CategoryMappingEditor({
                     }
                   >
                     <option value="">No explicit mapping</option>
-                    {account.actualCategories.map(category => (
+                    {actualCategories.map(category => (
                       <option key={category.id} value={category.id}>
                         {category.name}
                       </option>
@@ -236,7 +238,7 @@ export function CategoryMappingEditor({
                     }}
                   >
                     <option value="">Use automatic matching</option>
-                    {account.actualCategories.map(category => (
+                    {actualCategories.map(category => (
                       <option key={category.id} value={category.id}>
                         {category.name}
                       </option>

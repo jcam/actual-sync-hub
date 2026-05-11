@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import type { ActualAccountDto, RuntimeInfoDto, SyncRunDto } from "@actual-sync/shared";
+import type { ActualAccountDto, ConnectionAccountOptionDto, RuntimeInfoDto, SyncRunDto } from "@actual-sync/shared";
 import { api } from "../api";
 import { AccountCard } from "../components/AccountCard";
 import { getDisplayErrorMessage } from "../lib/errors";
 
 export function AccountsPage() {
   const [accounts, setAccounts] = useState<ActualAccountDto[]>([]);
+  const [options, setOptions] = useState<ConnectionAccountOptionDto[]>([]);
   const [runs, setRuns] = useState<SyncRunDto[]>([]);
   const [runtime, setRuntime] = useState<RuntimeInfoDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -18,12 +19,14 @@ export function AccountsPage() {
         api.listSyncRuns(),
         api.getRuntimeInfo()
       ]);
-      setAccounts(nextAccounts);
+      setAccounts(nextAccounts.accounts);
+      setOptions(nextAccounts.options);
       setRuns(nextRuns);
       setRuntime(nextRuntime);
       setError(null);
     } catch (loadError) {
       setAccounts([]);
+      setOptions([]);
       setRuns([]);
       setRuntime(null);
       setError(
@@ -71,7 +74,7 @@ export function AccountsPage() {
 
       <section className="account-grid">
         {accounts.map(account => (
-          <AccountCard key={account.id} account={account} onRefresh={load} />
+          <AccountCard key={account.id} account={account} options={options} onRefresh={load} />
         ))}
       </section>
 

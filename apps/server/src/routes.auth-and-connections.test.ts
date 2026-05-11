@@ -61,6 +61,85 @@ describe("server auth and connection routes", () => {
     expect(listConnections).toHaveBeenCalledOnce();
   });
 
+  it("returns shared account options and categories once for the accounts route", async () => {
+    const payload = {
+      accounts: [
+        {
+          id: "actual-1",
+          name: "Checking",
+          balance: 123.45,
+          link: {
+            status: "ACTIVE",
+            actualAccountId: "actual-1",
+            actualAccountName: "Checking",
+            assetType: "BANK",
+            provider: null,
+            connectionId: null,
+            connectionAccountId: null,
+            syncFrequency: "MANUAL",
+            syncHour: null,
+            syncDayOfWeek: null,
+            isEnabled: false,
+            lastSyncedAt: null,
+            categoryMappings: [],
+            seenCategoryNames: []
+          }
+        }
+      ],
+      options: [
+        {
+          connectionId: "conn-1",
+          connectionLabel: "Plaid",
+          connectionStatus: "ACTIVE",
+          connectionAccountId: "conn-account-1",
+          externalAccountId: "ext-1",
+          provider: "PLAID",
+          institutionName: "Bank",
+          accountName: "Checking",
+          mask: "11",
+          type: "depository",
+          subtype: "checking"
+        }
+      ],
+      actualCategories: [
+        {
+          id: "cat-1",
+          name: "Groceries"
+        }
+      ]
+    };
+    const listActualAccounts = vi.fn().mockResolvedValue(payload);
+
+    const app = trackedApps.track(
+      await createServer({
+        sessionSecret: "0123456789abcdef0123456789abcdef",
+        nodeEnv: "test",
+        enableStatic: false,
+        context: makeContext({
+          authService: {
+            authenticateUser: vi.fn().mockResolvedValue({
+              id: "user-1",
+              username: "admin"
+            })
+          },
+          appService: {
+            listActualAccounts
+          }
+        })
+      })
+    );
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/actual/accounts",
+      cookies: await loginAsAdmin(app)
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(payload);
+    expect(listActualAccounts).toHaveBeenCalledOnce();
+  });
+
   it("creates a Plaid link token for the authenticated user", async () => {
     const createLinkToken = vi.fn().mockResolvedValue("link-sandbox-token");
 
