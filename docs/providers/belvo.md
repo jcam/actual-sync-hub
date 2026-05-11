@@ -1,55 +1,105 @@
 # Belvo
 
-## Current repo stance
+## Official docs
 
-This repo's Belvo integration currently uses:
+- [Belvo plans and pricing](https://belvo.com/plans-and-pricing/)
+- [Belvo API reference](https://developers.belvo.com/apis/belvoopenapispec)
+- [Belvo widget access token](https://developers.belvo.com/apis/belvoopenapispec/widget-access-token)
+- [Belvo Connect widget for web](https://developers.belvo.com/developer_resources/web-widget-for-web)
+- [Belvo widget update mode](https://developers.belvo.com/developer_resources/web-connect-widget-update-mode)
+- [Belvo asynchronous workflows](https://developers.belvo.com/developer_resources/resources-asynchronous-workflows)
+- [Belvo aggregation webhooks](https://developers.belvo.com/developer_resources/resources-webhooks-aggregation)
+- [Belvo links overview](https://developers.belvo.com/developer_resources/resources-links-overview)
 
-- the official Belvo Node SDK on the server for link detail, account refresh, transaction retrieval, and link deletion
-- Belvo's current web widget flow in the app for new-link creation
-- Belvo's widget update mode for reconnecting links that require new credentials or MFA
+## Best hobbyist mode for real bank data
 
-## Current Belvo versions checked for this repo
+For a hobbyist or self-hosted deployment, the cheapest real-data Belvo path is its free `Test` plan if it is available for your use case.
 
-Verified on May 11, 2026:
+Why:
 
-- Belvo API docs version: `1.223.0`
-- current npm package: `belvo@0.28.0`
-- npm `latest` publish date for `belvo@0.28.0`: June 21, 2023
+- Belvo's public pricing page says the `Test` plan is free
+- it includes sandbox access
+- it also allows testing live data for up to `25` real data links
+
+Important caveat:
+
+- Belvo is still a business-oriented provider, not a hobbyist-first personal sync product
+- after the free `Test` tier, Belvo's public entry plan jumps to `Launch` at `$1,000/month`
+
+## Approximate cost for a hobbyist deployment
+
+As of May 11, 2026:
+
+- `Test`: free, including sandbox access and up to `25` real data links
+- `Launch`: `$1,000/month`
+- `Growth`: custom pricing
+
+Practical hobbyist estimate on the cheapest public real-data path:
+
+- `5` linked institutions / links: about `$0/month`
+- `10` linked institutions / links: about `$0/month`
+
+If you need to go past the free public tier:
+
+- `5` linked institutions / links on `Launch`: about `$1,000/month`
+- `10` linked institutions / links on `Launch`: about `$1,000/month`
+
+Important caveats:
+
+- Belvo's public pricing is much more flat-plan oriented than pay-as-you-go oriented for aggregation use
+- there is no public low-cost incremental pay-as-you-go aggregation plan on the main pricing page comparable to Plaid or Stripe
+- the free public `Test` tier can look attractive for hobbyist use, but the next public step up is a large jump
+
+## Important gotchas
+
+- Belvo's cleanest data flow is asynchronous and webhook-driven. Their docs recommend waiting for webhook notifications before retrieving newly available historical data.
+- This repo currently does not implement Belvo webhook ingestion, so a newly connected link can require manual refreshes before accounts or transactions are visible here.
+- Belvo recurrent links are not just a one-time connect. Their docs describe periodic provider-side refreshes and recommend informing users that their credentials will be used to keep data up to date.
+- Production access is not just a key flip. Belvo's docs describe a production access request and certification process before full live use.
+- This repo uses the hosted widget for both connect and reauth/update flows. That is the right path here, but it also means the Belvo integration is less self-contained than providers where all link lifecycle steps are already fully automated server-side.
+
+## Where to get credentials
+
+In the Belvo dashboard:
+
+1. generate your API keys for the environment you want to use
+2. copy:
+   - `secretId`
+   - `secretPassword`
 
 Important note:
 
-- the official SDK exists, but it is older than the current API docs
-- for this repo, we intentionally use the SDK only for the current core link, account, and transaction endpoints that still align with the live docs
+- Belvo's docs indicate the `secretPassword` is only shown once when generated, so store it securely
+- if you lose the `secretPassword`, you should expect to rotate or reset the API keys
 
-Official docs:
+For production:
 
-- [Belvo API reference](https://developers.belvo.com/apis/belvoopenapispec)
-- [Links](https://developers.belvo.com/reference/detaillink)
-- [Retrieve accounts for a link](https://developers.belvo.com/apis/belvoopenapispec/accounts/retrieveaccounts)
-- [Retrieve transactions for a link](https://developers.belvo.com/apis/belvoopenapispec/transactions/retrievetransactions)
-- [Widget access token](https://developers.belvo.com/apis/belvoopenapispec/widget-access-token)
-- [Connect widget for web](https://developers.belvo.com/developer_resources/web-widget-for-web)
-- [Connect widget update mode](https://developers.belvo.com/developer_resources/web-connect-widget-update-mode)
-- [belvo-js GitHub repo](https://github.com/belvo-finance/belvo-js)
-- [belvo npm package](https://www.npmjs.com/package/belvo)
+1. request production access
+2. complete Belvo's certification process
+3. switch your base URL and use your production keys
 
-## Environments
+For webhooks:
 
-As of the current Belvo docs, the supported public API environments are:
+1. open the data webhooks section in the Belvo dashboard
+2. create the webhook endpoint there
+3. optionally configure additional authentication for webhook delivery
 
-- `sandbox`
-- `production`
+## Best hobbyist advice
 
-For this repo's provider settings page, use those exact values.
+- Treat Belvo as region-coverage-driven, not price-driven.
+- Use it if you specifically need Belvo's LATAM coverage or product surface.
+- If you can stay inside the free `Test` tier, Belvo can be reasonable for a small self-hosted experiment.
+- If you expect to need the paid tier, budget for Belvo as a business product rather than a casual hobbyist sync option.
 
-## Credentials you need
+## Development and test mode
 
-In Belvo, collect:
+For this repo's repeatable development and live smoke testing, the easiest mode is `sandbox`.
 
-- your Belvo `secret ID`
-- your Belvo `secret password`
+Why:
 
-Then store them in the app's Belvo provider settings page.
+- sandbox keys are straightforward to generate
+- this repo already has a Belvo live test path against sandbox credentials
+- you can exercise the hosted widget flow and provider sync logic without immediately depending on paid production rollout
 
 ## Generate development/test `.env`
 
@@ -59,14 +109,14 @@ Interactive:
 npm run dev:env:init:belvo
 ```
 
-That script will ask for:
+That script asks for:
 
 - Belvo environment: `sandbox` or `production`
 - `BELVO_TEST_SECRET_ID`
 - `BELVO_TEST_SECRET_PASSWORD`
 - optional `BELVO_TEST_LINK_ID`
 
-It writes:
+Typical sandbox output:
 
 ```dotenv
 BELVO_TEST_RUN_LIVE=1
@@ -76,60 +126,20 @@ BELVO_TEST_SECRET_PASSWORD=...
 BELVO_TEST_LINK_ID=
 ```
 
-## Manual `.env` example
+Important test note:
 
-```dotenv
-BELVO_TEST_RUN_LIVE=1
-BELVO_TEST_ENV=sandbox
-BELVO_TEST_SECRET_ID=your-belvo-secret-id
-BELVO_TEST_SECRET_PASSWORD=your-belvo-secret-password
-BELVO_TEST_LINK_ID=
-BELVO_TEST_ACCOUNT_ID=
-```
+- the Belvo live test in this repo is built around reusing an existing sandbox `link.id`
+- Belvo sandbox data can go stale, so an older saved `BELVO_TEST_LINK_ID` may need to be recreated
 
-## Live sandbox test
-
-This repo now has a gated Belvo live test:
+## Start it for development
 
 ```bash
-npm run test:belvo-live
+npm run dev:live-sandbox
 ```
 
-It only runs when all of these are set:
+Then:
 
-- `BELVO_TEST_RUN_LIVE=1`
-- `BELVO_TEST_SECRET_ID`
-- `BELVO_TEST_SECRET_PASSWORD`
-- `BELVO_TEST_LINK_ID`
-
-Optional:
-
-- `BELVO_TEST_ACCOUNT_ID`
-
-What it does:
-
-1. hydrates an existing sandbox `link.id` through the Belvo adapter
-2. refreshes the imported connection
-3. creates an Actual account link against one Belvo account
-4. runs `syncAccountLink`
-
-Notes:
-
-- Belvo's sandbox data resets on the first day of each month, so an old `BELVO_TEST_LINK_ID` can go stale.
-- If you do not already have a sandbox `link.id`, create one in Belvo first, then reuse it here.
-
-## Current app flow
-
-1. Save Belvo credentials in the app settings.
-2. Open the Belvo Connections page in this app.
-3. Launch Belvo Connect from inside Sync Hub.
-4. After the widget succeeds, let the server save the returned `link.id`.
-5. Refresh the connection if Belvo is still asynchronously loading account data.
-6. Map Belvo accounts to Actual accounts from the Accounts page.
-
-## What is not implemented yet
-
-- Belvo webhooks for automatically hydrating newly available asynchronous resources after widget success
-- direct OTP resume for Belvo's POST retrieve-session flow outside widget update mode
-
-Belvo's current docs note that widget-created links can load account and transaction resources asynchronously, so a freshly connected link may need a later refresh before accounts appear in Sync Hub.
+1. open the Belvo page in the UI
+2. save your Belvo credentials in Provider Settings
+3. launch the Belvo widget from Sync Hub
+4. refresh the resulting link if Belvo is still asynchronously loading data

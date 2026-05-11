@@ -31,6 +31,11 @@ npm run dev:env:init:belvo
 npm run dev:env:init:home-values
 ```
 
+Notes:
+
+- there is no `npm run dev:env:init:vehicle-values` shortcut because Vehicle Values does not require third-party credentials
+- Home Values also has no provider secrets; its helper only initializes the base `.env`
+
 What the script does:
 
 - creates `.env` from `.env.example` if `.env` does not exist yet
@@ -61,3 +66,4 @@ For a real self-hosted deployment, expect this split:
 - [SimpleFIN](./simplefin.md)
 - [Belvo](./belvo.md)
 - [Home Values](./home-values.md)
+- [Vehicle Values](./vehicle-values.md)

@@ -1,77 +1,84 @@
 # Plaid
 
-## Best hobbyist mode for real bank data
-
-For actual bank polling, do not treat Sandbox as the answer.
-
-Use one of:
-
-- Plaid **Limited Production / Trial** if your account qualifies and that meets your needs
-- full **Production** if you need broader real-bank coverage
-
-This repo still represents real-data Plaid credentials as `PLAID_TEST_ENV=production`.
-
-Official docs:
+## Official docs
 
 - [Plaid Quickstart](https://plaid.com/docs/quickstart/)
-- [Plaid Sandbox overview](https://plaid.com/docs/sandbox/)
-- [Plaid Sandbox test credentials](https://plaid.com/docs/sandbox/test-credentials/)
-- [Plaid help: Sandbox vs Production vs Trial/Limited Production](https://support.plaid.com/hc/en-us/articles/16110110883479-How-are-Sandbox-Production-and-Limited-Production-different)
 - [Plaid pricing and billing](https://plaid.com/docs/account/billing/)
+- [Plaid Trial plan](https://support.plaid.com/hc/en-us/articles/39994173227159-What-is-the-Plaid-Trial-plan)
+- [Plaid OAuth guide](https://plaid.com/docs/link/oauth/)
+- [Plaid Sandbox overview](https://plaid.com/docs/sandbox/)
 
-## Cost
+## Best hobbyist mode for real bank data
 
-As of May 8, 2026:
+For a hobbyist or self-hosted Actual deployment, the best Plaid mode is the free Trial plan if you qualify.
 
-- Plaid's public docs do **not** publish a full production price list.
-- Plaid does publish a free **Trial** plan for new US/Canada teams with up to **10 Production Items**.
-- Plaid bills `Transactions` as a monthly subscription per **Item**, not per individual bank account.
+Why:
 
-Practical hobbyist reading:
-
-- `5` linked bank logins / Items on Trial: `$0/month`
-- `10` linked bank logins / Items on Trial: `$0/month`
-- beyond that: paid pricing exists, but you have to view it in the Plaid Dashboard during Production access setup
-
-Concrete contracted example:
-
-- for one US Plaid account contract created on **October 29, 2025**, `Transactions` was priced at **`$0.30 per connected account / month`**
-- using that specific contracted rate:
-  - `5` connected accounts: about `$1.50/month`
-  - `10` connected accounts: about `$3.00/month`
-
-Important scope note:
-
-- that `$0.30` figure is a user-observed contracted rate for a **US account** on that contract date, not a general public guarantee for all Plaid accounts or regions
+- Plaid Trial uses real production data
+- it includes Transactions
+- it is specifically described by Plaid as appropriate for hobbyist use
+- it avoids guessing at pay-as-you-go pricing before you actually need more than 10 Items
 
 Important caveat:
 
-- Plaid bills by **Item**. One Item is usually one linked institution/login, which may contain more than one bank account.
+- Plaid Trial is currently limited to new US/Canada teams created on or after April 15, 2026
+- Plaid OAuth support is still required for institutions that use OAuth
+
+## Approximate cost for a hobbyist deployment
+
+As of May 11, 2026:
+
+- Plaid Trial is free and limited to 10 Production Items
+- Plaid also offers a paid `Pay as you go` plan with no minimum spend or commitment
+- Plaid does not publish a full public price list for paid production plans in the docs; you see paid pricing in the Dashboard when applying for Production access
+
+Practical hobbyist estimate on Trial:
+
+- `5` linked institutions / Items: about `$0/month`
+- `10` linked institutions / Items: about `$0/month`
+
+Important caveat:
+
+- Plaid bills many products, including Transactions, per Item rather than per individual account
+- one Item is usually one institution login, which can contain multiple accounts
+- if you outgrow Trial, Plaid `Pay as you go` is likely the cheapest paid Plaid path for a hobbyist deployment, but the exact rates are only shown in the Production access flow
+
+## Important gotchas
+
+- Plaid Trial is not a forever-free general plan. It is an eligibility-limited offering and the current public criteria are narrower than "any hobbyist can sign up".
+- The free Trial cap is `10` Production Items total, so a small self-hosted deployment can outgrow it quickly if you connect many institutions.
+- Plaid OAuth institutions still need Link/OAuth setup done correctly; "Plaid handles OAuth" does not mean you can ignore Plaid's redirect and institution requirements.
 
 ## Where to get credentials
 
 In the Plaid Dashboard:
 
-- open the **API Keys** section
-- copy:
-  - `client_id`
-  - the `secret` for your chosen environment
+1. sign up or log in
+2. open **API Keys**
+3. copy:
+   - `client_id`
+   - the `secret` for the environment you want to use
+
+If you are using real data:
+
+1. review the Trial or paid Production flow in the Dashboard
+2. if you will connect OAuth institutions, make sure your Plaid Link redirect/OAuth setup is complete
 
 ## Best hobbyist advice
 
-- If you want real bank data, review Plaid's current **Limited Production / Trial** rules first.
-- Use full Production only if you actually need it.
+- Start with Plaid Trial if you qualify and only need up to 10 real institution logins.
+- If you outgrow Trial, check Plaid `Pay as you go` before considering higher-commitment plans.
+- Keep in mind that Plaid is better priced by institution/login count than by raw account count.
 
 ## Development and test mode
 
-For this repo's development and automated testing, the right mode is **Sandbox**.
+For this repo's repeatable development and automated testing, the right mode is Sandbox.
 
 Why:
 
-- Plaid Sandbox is free
-- it supports mock/test Items
-- this repo already has live sandbox coverage and helper flows for it
-- it is the only sane mode for repeatable automated tests
+- Sandbox is free
+- this repo already has sandbox seed flows and live sandbox coverage
+- it is the safest way to exercise Plaid webhooks, Link, and transaction sync repeatedly
 
 ## Generate development/test `.env`
 
@@ -81,13 +88,13 @@ Interactive:
 npm run dev:env:init:plaid
 ```
 
-That script will ask for:
+The script asks for:
 
 - Plaid environment: `sandbox` or `production`
 - `PLAID_TEST_CLIENT_ID`
 - `PLAID_TEST_SECRET`
 
-It writes:
+Typical sandbox output:
 
 ```dotenv
 PLAID_TEST_RUN_LIVE=1
@@ -96,32 +103,10 @@ PLAID_TEST_CLIENT_ID=...
 PLAID_TEST_SECRET=...
 ```
 
-## Manual `.env` example
-
-```dotenv
-PLAID_TEST_RUN_LIVE=1
-PLAID_TEST_ENV=sandbox
-PLAID_TEST_CLIENT_ID=your-plaid-client-id
-PLAID_TEST_SECRET=your-plaid-sandbox-secret
-```
-
-## Useful Plaid sandbox test credentials
-
-For the Plaid Link UI:
-
-- basic login:
-  - username: `user_good`
-  - password: `pass_good`
-- realistic transactions:
-  - username: `user_transactions_dynamic`
-  - password: any value
-- common MFA code:
-  - `1234`
-
 ## Start it for development
 
 ```bash
 npm run dev:live-sandbox
 ```
 
-Then go to the Plaid page in the UI and connect a sandbox institution.
+Then open the Plaid page in the UI and connect a sandbox institution.

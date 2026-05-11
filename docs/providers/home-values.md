@@ -1,63 +1,79 @@
 # Home Values
 
-## Best low-cost mode
+## Official docs or sources
 
-This provider is the cheapest one in the repo because it does **not** need a paid aggregation account.
+There is no third-party developer dashboard or paid API plan behind this provider.
 
-It works by:
+This repo currently supports public property pages from:
 
-- taking property URLs from supported public sites
-- fetching the current estimate
-- writing a synthetic valuation transaction into Actual
+- Redfin
+- Movoto
+- Homes.com
+- Trulia
 
-There is no separate provider dashboard to sign into.
+## Best hobbyist mode for real data
 
-## Current source model
+Home Values is already the low-cost hobbyist mode.
 
-This repo currently supports these Home Values sources:
+Why:
 
-- `Redfin`
-- `Movoto`
-- `Homes.com`
-- `Trulia`
+- there is no paid aggregation subscription
+- there are no bank credentials to manage
+- it is useful for off-budget net-worth tracking when you only need periodic property valuations
 
-Fetch methods are configured per site in the app settings:
+## Approximate cost for a hobbyist deployment
 
-- `curl`
-- `wget`
-- `node fetch`
-- `disabled`
+As of May 11, 2026:
 
-Current defaults in this repo:
+- external provider cost: `$0`
 
-- Redfin: `curl`
-- Movoto: `curl`
-- Homes.com: `wget`
-- Trulia: `wget`
+There is no third-party pay-as-you-go or flat provider subscription here.
+
+Practical estimate:
+
+- `5` tracked properties: about `$0/month`
+- `10` tracked properties: about `$0/month`
+
+Important caveat:
+
+- this excludes your own hosting costs
+- source sites can change their markup or block certain fetch methods, so operational reliability is not the same thing as API-backed bank aggregation
+
+## Important gotchas
+
+- Home Values is scrape- and page-structure-dependent, not API-contract-dependent.
+- A source can break even when nothing in this repo changed, simply because the upstream site changed markup or anti-bot behavior.
+- Frequent refreshes across many properties are more likely to trigger bot blocking or other rate-limiting behavior from source sites.
+- Treat it as low-cost net-worth tracking, not as a bank-grade connectivity surface.
+
+## Where to get credentials
+
+No third-party credentials are required.
+
+You configure Home Values entirely from this app's UI:
+
+- property URLs
+- chosen source
+- fetch method per source in Provider Settings
 
 ## Best hobbyist advice
 
-Use Home Values when you want:
-
-- simple net-worth tracking
-- no paid bank-aggregation subscription
-- no extra provider account setup
+- Use Home Values when you want low-friction property tracking without paying for another provider.
+- Prefer it for off-budget asset tracking, not for transaction ingestion.
 
 ## Development and test mode
 
-Home Values does not need provider credentials for development.
+Home Values does not need provider credentials for development or tests.
 
 ## Generate development/test `.env`
 
-There are no provider-specific `.env` keys required for Home Values.
-
-You can still run:
+Interactive:
 
 ```bash
 npm run dev:env:init:home-values
 ```
 
-That command simply ensures your base `.env` exists and reminds you that Home Values is configured from the UI.
+That command only helps initialize the base `.env`; there are no required Home Values provider secrets.
 
 ## Start it for development
 
@@ -65,10 +81,4 @@ That command simply ensures your base `.env` exists and reminds you that Home Va
 npm run dev:live-sandbox
 ```
 
-Then:
-
-1. open the Home Values page
-2. add one or more properties
-3. choose the source
-4. paste the property URLs
-5. adjust per-site fetch methods in Provider Settings if a site blocks one client but allows another
+Then open the Home Values page, add properties, and choose the source URLs you want to use.

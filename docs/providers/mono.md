@@ -1,37 +1,142 @@
 # Mono
 
-## Best development/test mode
+## Official docs
 
-For this repo, the right Mono mode is **sandbox**.
+- [Mono pricing](https://mono.co/pricing)
+- [Mono environments](https://docs.mono.co/docs/environments)
+- [Mono sandbox guide](https://docs.mono.co/docs/sandbox)
+- [Mono webhook introduction](https://docs.mono.co/docs/financial-data/webhook-introduction)
+- [Mono definitions and dashboard keys](https://docs.mono.co/docs/definitions)
+- [Mono PAYG pricing](https://support.mono.co/en/articles/11938612-pay-as-you-go-payg-pricing)
+- [Mono Banka pricing](https://support.mono.co/en/articles/8899085-banka-pricing)
+
+## Best hobbyist mode for real bank data
+
+If you specifically need Mono's bank coverage, treat `sandbox` as the low-cost mode for development and evaluation.
+
+For real self-hosted personal use, the honest answer is:
+
+- Mono is available
+- Mono is useful if you need its regional coverage
+- Mono is not the cheapest consumer-style personal sync option in this repo
+
+## Approximate cost for a hobbyist deployment
+
+As of May 11, 2026:
+
+- Mono sandbox is free
+- Mono's public real-data pricing is region- and product-specific
+- Mono's public site also shows a `Basic` subscription plan at `NGN 50,000/month` for up to `100` unique monthly accounts
+- Mono also publishes a `Pay-As-You-Go` plan for Connect where you pay per API call instead of taking a subscription plan
+- Mono also publishes monitored-account pricing for some products, and the clearest public monthly example is its Nigeria Banka pricing for advanced account monitoring:
+  - Trial: free for 3 accounts
+  - PAYG: `NGN 10,000` per account per month
+
+### Flat-rate subscription example
+
+Using the public `Basic` plan on Mono's main pricing page:
+
+- `5` linked accounts: about `NGN 50,000/month`
+- `10` linked accounts: about `NGN 50,000/month`
+
+That plan is capped at `100` unique monthly accounts, so the monthly total does not change between `5` and `10` linked accounts.
+
+### Per-account monthly pricing example
+
+Using that public monitored-account example:
+
+- `5` linked accounts: about `NGN 50,000/month`
+- `10` linked accounts: about `NGN 100,000/month`
+
+### Per-call PAYG pricing example
+
+Mono's published PAYG call examples include:
+
+- Authorization: `₦80`
+- Account Details: `₦100`
+- Data Sync: `₦100`
+- Transactions: `₦150` per returned page
+
+For this repo specifically, the current Mono sync path is closer to:
+
+- `1` account-details call per sync, plus
+- `1` or more transactions-page calls per sync
+
+So a simple low-page-count estimate for this repo is:
+
+- about `₦250` per synced account per run
+  - `₦100` account details
+  - `₦150` one returned transactions page
+
+Approximate recurring PAYG cost for automatic sync, assuming `1` transactions page per run and a `30` day month:
+
+- daily updates:
+  - `1` account: about `₦7,500/month`
+  - `5` accounts: about `₦37,500/month`
+  - `10` accounts: about `₦75,000/month`
+- hourly updates:
+  - `1` account: about `₦180,000/month`
+  - `5` accounts: about `₦900,000/month`
+  - `10` accounts: about `₦1,800,000/month`
+
+One-time connect/auth estimate:
+
+- `1` account: about `₦80`
+- `5` accounts: about `₦400`
+- `10` accounts: about `₦800`
+
+Important caveats:
+
+- Mono's public website, PAYG help article, and Banka pricing article describe different product families or packaging layers, so you should not assume every public price applies to exactly the same feature set
+- for a small but always-on deployment, the `Basic` flat subscription can be cheaper than per-account monthly pricing
+- for very light or occasional usage, Mono's per-call PAYG pricing can be materially cheaper than a monthly monitored-account plan
+- compared with the `Basic` flat plan, the simple PAYG estimate above crosses `NGN 50,000/month` at around:
+  - `7` accounts on daily sync
+  - well under `1` account on hourly sync
+- for this repo's current adapter shape, hourly PAYG can become much more expensive than per-account monthly pricing very quickly
+- the PAYG estimate above assumes only `1` returned transactions page per sync; multi-page transaction pulls increase cost further
+- the repo does not currently model Mono pricing automatically, so these are planning estimates only
+- public pricing is business-oriented and can change by country and product family
+
+## Important gotchas
+
+- Mono's public pricing and product packaging are region-specific and business-oriented, so it is a poor default choice for a generic low-cost hobbyist deployment.
+- The rough monthly estimate in this doc is intentionally only a public example, not a universal Mono quote.
+- Treat sandbox as the normal self-hosted evaluation path unless you already know Mono is the regional provider you need.
+
+## Where to get credentials
+
+In the Mono Dashboard:
+
+1. open **Apps**
+2. copy:
+   - `Public key`
+   - `Secret key`
+
+For webhooks:
+
+1. open your app's **Webhooks** section
+2. add your webhook URL
+3. copy the generated webhook secret
+
+## Best hobbyist advice
+
+- Use Mono only if you specifically need Mono's regional bank coverage.
+- Use sandbox while integrating and validating the flow.
+- If you expect a small number of always-on accounts, compare the `Basic` flat plan against both per-account and per-call pricing.
+- If you only need occasional manual or infrequent pulls, compare Mono PAYG call pricing against the monthly monitored-account plans before assuming the monthly plan is your cheapest option.
+- If you want daily or especially hourly automatic sync, budget against the per-call math for this repo's current adapter, not just the headline per-account monthly price.
+- Budget carefully before using Mono for ongoing personal sync; public pricing is still much less hobbyist-friendly than Plaid Trial, Teller development, or SimpleFIN.
+
+## Development and test mode
+
+For this repo's repeatable development and live smoke tests, the right mode is `sandbox`.
 
 Why:
 
-- Mono’s current Financial Data setup uses `sandbox` and `production`
-- sandbox calls are free according to the current Mono docs
-- the Partners API exposes sandbox credentials, which makes repeatable smoke tests practical without driving the widget manually
-
-Official docs:
-
-- [Mono environments](https://docs.mono.co/docs/environments)
-- [Mono sandbox guide](https://docs.mono.co/docs/sandbox)
-- [Mono Partners API sandbox guide](https://docs.mono.co/docs/financial-data/partners-api-guide/sandbox-guide)
-- [Mono exchange token API](https://docs.mono.co/api/bank-data/authorisation/exchange-token)
-- [Mono transactions API](https://docs.mono.co/api/bank-data/transactions)
-- [Mono webhook guide](https://docs.mono.co/docs/financial-data/webhook-introduction)
-
-## Credential model in this repo
-
-For the running app:
-
-- Mono provider settings live in the UI
-- the active environment is either `sandbox` or `production`
-- each environment stores `publicKey`, `secretKey`, and `webhookSecret`
-
-For repeatable local development and live tests:
-
-- `.env` stores `MONO_TEST_*` values
-- `npm run dev:live-sandbox` can seed the Mono provider settings from those `MONO_TEST_*` values
-- `npm run test:mono-live` uses the Mono Partners API in sandbox mode to create a real test connection
+- sandbox is free
+- the repo already has a Mono sandbox live test path
+- you can exercise connect, reauth, webhooks, refresh, and sync without real user credentials
 
 ## Generate development/test `.env`
 
@@ -53,34 +158,7 @@ MONO_TEST_INSTITUTION_ID=
 MONO_TEST_ACCOUNT_ID=
 ```
 
-Notes:
-
-- `MONO_TEST_SECRET_KEY` is the only required value for the API-driven sandbox smoke test.
-- `MONO_TEST_PUBLIC_KEY` is still useful for `npm run dev:live-sandbox` and widget testing in the web UI.
-- `MONO_TEST_INSTITUTION_ID` is optional. If blank, the live test auto-discovers a compatible sandbox institution from `GET /v3/institutions?scope=financial_data`.
-
-## Run the Mono live smoke test
-
-```bash
-npm run test:mono-live
-```
-
-What it does:
-
-- creates a sandbox connect session through the current Partners API
-- retrieves sandbox credentials from Mono
-- logs in and exchanges the returned code through the adapter
-- refreshes the resulting connection
-- syncs one linked Mono account
-
-The test is gated and skipped unless:
-
-```dotenv
-MONO_TEST_RUN_LIVE=1
-MONO_TEST_SECRET_KEY=...
-```
-
-## Start it in the local live sandbox app
+## Start it for development
 
 ```bash
 npm run dev:live-sandbox
