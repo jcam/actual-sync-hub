@@ -26,7 +26,6 @@ npm run dev:env:init:plaid
 npm run dev:env:init:stripe
 npm run dev:env:init:teller
 npm run dev:env:init:simplefin
-npm run dev:env:init:saltedge
 npm run dev:env:init:home-values
 ```
 
@@ -57,5 +56,4 @@ For a real self-hosted deployment, expect this split:
 - [Stripe](./stripe.md)
 - [Teller](./teller.md)
 - [SimpleFIN](./simplefin.md)
-- [Salt Edge](./salt-edge.md)
 - [Home Values](./home-values.md)

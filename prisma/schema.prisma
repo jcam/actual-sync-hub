@@ -12,7 +12,6 @@ enum Provider {
   STRIPE
   TELLER
   SIMPLEFIN
-  SALT_EDGE
   HOME_VALUES
 }
 

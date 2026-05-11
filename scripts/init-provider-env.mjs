@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import dotenv from "dotenv";
 
-const providerChoices = ["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "SALT_EDGE", "HOME_VALUES"];
+const providerChoices = ["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "HOME_VALUES"];
 
 function parseArgs(argv) {
   const args = {};
@@ -272,32 +272,6 @@ async function buildProviderUpdates(provider, rl, args) {
         }
       };
     }
-    case "SALT_EDGE": {
-      const environment =
-        args.env || (await askChoice(rl, "Salt Edge environment", ["sandbox", "test", "production"], "sandbox"));
-      const appId = args["app-id"] || (await ask(rl, "SALT_EDGE_TEST_APP_ID", { required: true }));
-      const secret = args.secret || (await ask(rl, "SALT_EDGE_TEST_SECRET", { required: true }));
-      const customerId = args["customer-id"] || (await ask(rl, "SALT_EDGE_TEST_CUSTOMER_ID (optional)", { defaultValue: "" }));
-      const connectionId =
-        args["connection-id"] || (await ask(rl, "SALT_EDGE_TEST_CONNECTION_ID (optional)", { defaultValue: "" }));
-      const connectionSecret =
-        args["connection-secret"] ||
-        (await ask(rl, "SALT_EDGE_TEST_CONNECTION_SECRET (optional)", { defaultValue: "" }));
-      const accountId = args["account-id"] || (await ask(rl, "SALT_EDGE_TEST_ACCOUNT_ID (optional)", { defaultValue: "" }));
-      return {
-        title: "Salt Edge development / test credentials",
-        updates: {
-          SALT_EDGE_TEST_RUN_LIVE: "1",
-          SALT_EDGE_TEST_ENVIRONMENT: environment,
-          SALT_EDGE_TEST_APP_ID: appId,
-          SALT_EDGE_TEST_SECRET: secret,
-          SALT_EDGE_TEST_CUSTOMER_ID: customerId,
-          SALT_EDGE_TEST_CONNECTION_ID: connectionId,
-          SALT_EDGE_TEST_CONNECTION_SECRET: connectionSecret,
-          SALT_EDGE_TEST_ACCOUNT_ID: accountId
-        }
-      };
-    }
     case "HOME_VALUES":
       return {
         title: "Home Values provider note",
@@ -351,10 +325,6 @@ async function main() {
     if (provider === "TELLER" && updates.TELLER_TEST_ENV !== "sandbox") {
       console.log("  4. Make sure the certificate and key file paths are readable from this machine.");
     }
-    if (provider === "SALT_EDGE") {
-      console.log("  4. If you only entered app credentials, you can still create a connect session from the UI.");
-    }
-
     if (parsed.ADMIN_PASSWORD === "change-me" || parsed.SESSION_SECRET === "replace-with-long-random-secret-at-least-32") {
       console.log("");
       console.log("Warning: your base app secrets still look like defaults. Update ADMIN_PASSWORD and SESSION_SECRET if needed.");

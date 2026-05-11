@@ -39,12 +39,6 @@ export type ConnectionReauthSessionDto =
       config: TellerReauthConfigDto;
     }
   | {
-      provider: "SALT_EDGE";
-      connectionId: string;
-      mode: "saltedge_connect";
-      connectUrl: string;
-    }
-  | {
       provider: "STRIPE";
       connectionId: string;
       mode: "stripe_relink";
@@ -58,12 +52,6 @@ export type ConnectionReauthSessionDto =
       mode: "manual";
       message: string;
     };
-
-export type SaltEdgeConnectSessionDto = {
-  connectUrl: string;
-  expiresAt: string;
-  customerId: string;
-};
 
 export type ConnectionAccountDto = {
   id: string;

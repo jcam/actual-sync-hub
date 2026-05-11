@@ -9,7 +9,6 @@ import { createActualService } from "../services/actual-service.js";
 import { createHomeValuesService } from "../services/home-values-service.js";
 import { plaidService } from "../services/plaid-service.js";
 import { createProviderSettingsService } from "../services/provider-settings-service.js";
-import { saltEdgeService } from "../services/saltedge-service.js";
 import { simplefinService } from "../services/simplefin-service.js";
 import { createStripeService } from "../services/stripe-service.js";
 import { tellerService } from "../services/teller-service.js";
@@ -128,7 +127,6 @@ describe.skipIf(!liveEnabled)("stripe full live integration", () => {
       actualService,
       providerSettingsService,
       plaidService,
-      saltEdgeService,
       simplefinService,
       stripeService,
       tellerService,
@@ -159,7 +157,6 @@ describe.skipIf(!liveEnabled)("stripe full live integration", () => {
         homeValuesService,
         plaidService,
         providerSettingsService,
-        saltEdgeService,
         simplefinService,
         stripeService,
         tellerService,

@@ -10,7 +10,6 @@ import { PlaidConnectionsPage } from "./routes/PlaidConnectionsPage";
 import { ReviewPage } from "./routes/ReviewPage";
 import { HomeValuesConnectionsPage } from "./routes/HomeValuesConnectionsPage";
 import { SimpleFinConnectionsPage } from "./routes/SimpleFinConnectionsPage";
-import { SaltEdgeConnectionsPage } from "./routes/SaltEdgeConnectionsPage";
 import { StripeConnectionsPage } from "./routes/StripeConnectionsPage";
 import { TellerConnectionsPage } from "./routes/TellerConnectionsPage";
 
@@ -47,9 +46,6 @@ function Layout({
           <NavLink to="/simplefin-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             SimpleFIN Connections
           </NavLink>
-          <NavLink to="/saltedge-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            Salt Edge Connections
-          </NavLink>
           <NavLink to="/home-values-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             Home Values
           </NavLink>
@@ -74,7 +70,6 @@ function Layout({
           <Route path="/stripe-connections" element={<StripeConnectionsPage />} />
           <Route path="/teller-connections" element={<TellerConnectionsPage />} />
           <Route path="/simplefin-connections" element={<SimpleFinConnectionsPage />} />
-          <Route path="/saltedge-connections" element={<SaltEdgeConnectionsPage />} />
           <Route path="/home-values-connections" element={<HomeValuesConnectionsPage />} />
           <Route path="*" element={<Navigate to="/accounts" replace />} />
         </Routes>

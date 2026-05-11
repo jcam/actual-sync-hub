@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { type Provider, type ProviderSettingsByProviderDto, type SaltEdgeEnvironment } from "@actual-sync/shared";
+import { type Provider, type ProviderSettingsByProviderDto } from "@actual-sync/shared";
 import { api } from "../api";
 import { getDisplayErrorMessage } from "../lib/errors";
 
@@ -65,15 +65,6 @@ type SimpleFinSettingsDraft = {
   automaticSyncConcurrency: string;
 };
 
-type SaltEdgeSettingsDraft = {
-  environment: SaltEdgeEnvironment;
-  appId: string;
-  secret: string;
-  consentDays: string;
-  transactionsFetchDays: string;
-  automaticSyncConcurrency: string;
-};
-
 type HomeValuesSettingsDraft = {
   automaticSyncConcurrency: string;
   redfinFetchMethod: "node_fetch" | "curl" | "wget" | "disabled";
@@ -87,7 +78,6 @@ type ProviderSettingsDraft =
   | StripeSettingsDraft
   | TellerSettingsDraft
   | SimpleFinSettingsDraft
-  | SaltEdgeSettingsDraft
   | HomeValuesSettingsDraft;
 
 function parseWholeNumber(value: string) {
@@ -208,20 +198,6 @@ function validateDraft(provider: Provider, draft: ProviderSettingsDraft) {
       const homeValuesDraft = draft as HomeValuesSettingsDraft;
       return requireIntegerInRange("Automatic sync concurrency", homeValuesDraft.automaticSyncConcurrency, 1, 20);
     }
-    case "SALT_EDGE": {
-      const saltEdgeDraft = draft as SaltEdgeSettingsDraft;
-      if (!saltEdgeDraft.appId.trim()) {
-        return "App ID is required.";
-      }
-      if (!saltEdgeDraft.secret.trim()) {
-        return "Secret is required.";
-      }
-      return (
-        requireIntegerInRange("Consent period", saltEdgeDraft.consentDays, 1, 365) ??
-        requireIntegerInRange("Initial transaction window", saltEdgeDraft.transactionsFetchDays, 1, 365) ??
-        requireIntegerInRange("Automatic sync concurrency", saltEdgeDraft.automaticSyncConcurrency, 1, 20)
-      );
-    }
   }
 }
 
@@ -302,17 +278,6 @@ function toDraft<T extends Provider>(
         homesFetchMethod: homeValuesSettings.homesFetchMethod,
         truliaFetchMethod: homeValuesSettings.truliaFetchMethod
       } satisfies HomeValuesSettingsDraft;
-    }
-    case "SALT_EDGE": {
-      const saltEdgeSettings = settings as ProviderSettingsByProviderDto<"SALT_EDGE">;
-      return {
-        environment: saltEdgeSettings.environment ?? "test",
-        appId: saltEdgeSettings.appId ?? "",
-        secret: saltEdgeSettings.secret ?? "",
-        consentDays: String(saltEdgeSettings.consentDays),
-        transactionsFetchDays: String(saltEdgeSettings.transactionsFetchDays),
-        automaticSyncConcurrency: String(saltEdgeSettings.automaticSyncConcurrency)
-      } satisfies SaltEdgeSettingsDraft;
     }
   }
 }
@@ -425,17 +390,6 @@ function toPayload<T extends Provider>(
         truliaFetchMethod: homeValuesDraft.truliaFetchMethod
       } as ProviderSettingsByProviderDto<T>;
     }
-    case "SALT_EDGE": {
-      const saltEdgeDraft = draft as SaltEdgeSettingsDraft;
-      return {
-        environment: saltEdgeDraft.environment,
-        appId: saltEdgeDraft.appId.trim(),
-        secret: saltEdgeDraft.secret,
-        consentDays: Number(saltEdgeDraft.consentDays),
-        transactionsFetchDays: Number(saltEdgeDraft.transactionsFetchDays),
-        automaticSyncConcurrency: Number(saltEdgeDraft.automaticSyncConcurrency)
-      } as ProviderSettingsByProviderDto<T>;
-    }
   }
 }
 
@@ -470,19 +424,7 @@ export function ProviderSettingsPanel<T extends Provider>({
       const payload = toPayload(provider, draft);
       const saved = await api.updateProviderSettings(provider, payload);
       setDraft(toDraft(provider, saved));
-      if (
-        provider === "SALT_EDGE" &&
-        "environment" in payload &&
-        "environment" in saved &&
-        payload.environment !== saved.environment
-      ) {
-        setMessage(null);
-        setError(
-          `Salt Edge does not support ${payload.environment} for the current client state. The setting was switched to ${saved.environment}.`
-        );
-      } else {
-        setMessage(`${label} settings saved.`);
-      }
+      setMessage(`${label} settings saved.`);
       await onSaved?.();
     } catch (saveError) {
       setError(
@@ -499,7 +441,6 @@ export function ProviderSettingsPanel<T extends Provider>({
   const stripeDraft = provider === "STRIPE" ? (draft as StripeSettingsDraft) : null;
   const tellerDraft = provider === "TELLER" ? (draft as TellerSettingsDraft) : null;
   const simpleFinDraft = provider === "SIMPLEFIN" ? (draft as SimpleFinSettingsDraft) : null;
-  const saltEdgeDraft = provider === "SALT_EDGE" ? (draft as SaltEdgeSettingsDraft) : null;
   const homeValuesDraft = provider === "HOME_VALUES" ? (draft as HomeValuesSettingsDraft) : null;
 
   return (
@@ -1089,100 +1030,6 @@ export function ProviderSettingsPanel<T extends Provider>({
                     automaticSyncConcurrency: next
                   }));
                 }}
-              />
-            </label>
-          </>
-        ) : null}
-
-        {saltEdgeDraft ? (
-          <>
-            <label>
-              <span>Environment</span>
-              <select
-                value={saltEdgeDraft.environment}
-                onChange={event =>
-                  setDraft(current => ({
-                    ...(current as SaltEdgeSettingsDraft),
-                    environment: event.target.value as SaltEdgeEnvironment
-                  }))
-                }
-              >
-                <option value="sandbox">sandbox</option>
-                <option value="test">test</option>
-                <option value="production">production</option>
-              </select>
-            </label>
-            <label>
-              <span>App ID</span>
-              <input
-                type="text"
-                value={saltEdgeDraft.appId}
-                onChange={event =>
-                  setDraft(current => ({
-                    ...(current as SaltEdgeSettingsDraft),
-                    appId: event.target.value
-                  }))
-                }
-                placeholder="Salt Edge App ID"
-              />
-            </label>
-            <label>
-              <span>Secret</span>
-              <input
-                type="password"
-                value={saltEdgeDraft.secret}
-                onChange={event =>
-                  setDraft(current => ({
-                    ...(current as SaltEdgeSettingsDraft),
-                    secret: event.target.value
-                  }))
-                }
-                placeholder="Salt Edge secret"
-              />
-            </label>
-            <label>
-              <span>Consent period (days)</span>
-              <input
-                type="number"
-                min={1}
-                max={365}
-                value={saltEdgeDraft.consentDays}
-                onChange={event =>
-                  setDraft(current => ({
-                    ...(current as SaltEdgeSettingsDraft),
-                    consentDays: event.target.value
-                  }))
-                }
-              />
-            </label>
-            <label>
-              <span>Initial transaction window (days)</span>
-              <input
-                type="number"
-                min={1}
-                max={365}
-                value={saltEdgeDraft.transactionsFetchDays}
-                onChange={event =>
-                  setDraft(current => ({
-                    ...(current as SaltEdgeSettingsDraft),
-                    transactionsFetchDays: event.target.value
-                  }))
-                }
-              />
-            </label>
-            <label>
-              <span>Automatic sync concurrency</span>
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={saltEdgeDraft.automaticSyncConcurrency}
-                onChange={event =>
-                  setDraft(current => ({
-                    ...(current as SaltEdgeSettingsDraft),
-                    automaticSyncConcurrency: event.target.value
-                  }))
-                }
               />
             </label>
           </>

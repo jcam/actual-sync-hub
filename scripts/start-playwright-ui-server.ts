@@ -85,11 +85,6 @@ async function getRuntimeInfo() {
       mode: settings.SIMPLEFIN.mode,
       requiresSetupToken: true
     },
-    saltEdge: {
-      enabled: false,
-      environment: settings.SALT_EDGE.environment,
-      includeSandboxes: settings.SALT_EDGE.environment === "sandbox"
-    },
     actual: {
       serverUrl: "http://127.0.0.1:5999",
       budgetSyncIdConfigured: true,
@@ -272,35 +267,6 @@ const app = await createServer({
         throw new Error("Not implemented for Playwright UI server");
       },
       async reuseCachedConnection() {
-        throw new Error("Not implemented for Playwright UI server");
-      },
-      async refreshConnection() {
-        return;
-      },
-      async getConnectionAccounts() {
-        return [];
-      },
-      async syncAccountLink() {
-        throw new Error("Not implemented for Playwright UI server");
-      },
-      async disconnectConnection() {
-        return;
-      },
-      async createReauthSession() {
-        return undefined;
-      }
-    } as never,
-    saltEdgeService: {
-      async webhooksConfigured() {
-        return false;
-      },
-      async verifyWebhookSignature() {
-        return false;
-      },
-      async createConnectSession() {
-        throw new Error("Not implemented for Playwright UI server");
-      },
-      async finalizeConnection() {
         throw new Error("Not implemented for Playwright UI server");
       },
       async refreshConnection() {

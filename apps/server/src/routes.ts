@@ -19,7 +19,7 @@ const connectionIdParamsSchema = z.object({
 });
 
 const providerParamsSchema = z.object({
-  provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "SALT_EDGE", "HOME_VALUES"])
+  provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "HOME_VALUES"])
 });
 
 const homeValueConnectionBodySchema = z.object({
@@ -392,37 +392,6 @@ export async function registerRoutes(
     return context.appService.importExistingSimpleFinLinks(body.connectionId);
   });
 
-  app.post("/api/connections/saltedge/connect-session", async (request, reply) => {
-    if (!assertAuthenticated(request, reply)) {
-      return;
-    }
-
-    const body = z
-      .object({
-        label: z.string().min(1).optional()
-      })
-      .parse(request.body ?? {});
-
-    return context.appService.createSaltEdgeConnectSession(request.session.user!.id, body.label);
-  });
-
-  app.post("/api/connections/saltedge/finalize", async (request, reply) => {
-    if (!assertAuthenticated(request, reply)) {
-      return;
-    }
-
-    const body = z
-      .object({
-        connectionId: z.string().min(1),
-        customerId: z.string().min(1).optional(),
-        connectionSecret: z.string().min(1).optional(),
-        label: z.string().min(1).optional()
-      })
-      .parse(request.body ?? {});
-
-    return context.appService.finalizeSaltEdgeConnection(body);
-  });
-
   app.post("/api/connections/home-values", async (request, reply) => {
     if (!assertAuthenticated(request, reply)) {
       return;
@@ -592,7 +561,7 @@ export async function registerRoutes(
       .object({
         actualAccountName: z.string().min(1),
         assetType: z.literal("BANK"),
-        provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "SALT_EDGE", "HOME_VALUES"]).nullable().optional(),
+        provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "HOME_VALUES"]).nullable().optional(),
         connectionId: z.string().nullable().optional(),
         connectionAccountId: z.string().nullable().optional(),
         syncFrequency: z.enum(["MANUAL", "HOURLY", "DAILY", "WEEKLY"]),

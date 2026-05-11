@@ -132,14 +132,6 @@ describe("TellerConnectionsPage", () => {
           },
           transactionsInitialDays: 45,
           automaticSyncConcurrency: 1
-        },
-        SALT_EDGE: {
-          environment: "test",
-          appId: "",
-          secret: "",
-          consentDays: 90,
-          transactionsFetchDays: 90,
-          automaticSyncConcurrency: 2
         }
       },
       plaid: {
@@ -156,11 +148,6 @@ describe("TellerConnectionsPage", () => {
         enabled: true,
         mode: "sandbox",
         requiresSetupToken: true
-      },
-      saltEdge: {
-        enabled: false,
-        environment: "test",
-        includeSandboxes: true
       },
       actual: {
         serverUrl: "http://127.0.0.1:5006",

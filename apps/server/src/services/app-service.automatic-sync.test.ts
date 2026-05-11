@@ -164,14 +164,6 @@ describe.sequential("app service automatic sync", () => {
             transactionsInitialDays: 90,
             automaticSyncConcurrency: 1
           },
-          SALT_EDGE: {
-            environment: "test",
-            appId: "",
-            secret: "",
-            consentDays: 90,
-            transactionsFetchDays: 90,
-            automaticSyncConcurrency: 2
-          },
           HOME_VALUES: {
             automaticSyncConcurrency: 1
           }
@@ -654,14 +646,6 @@ describe.sequential("app service automatic sync", () => {
             prefetch: ["balances", "transactions"],
             transactionsInitialDays: 90,
             automaticSyncConcurrency: 1
-          },
-          SALT_EDGE: {
-            environment: "test",
-            appId: "",
-            secret: "",
-            consentDays: 90,
-            transactionsFetchDays: 90,
-            automaticSyncConcurrency: 2
           },
           HOME_VALUES: {
             automaticSyncConcurrency: 1

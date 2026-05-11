@@ -22,7 +22,6 @@ type MockRuntime = {
     STRIPE: Record<string, unknown>;
     TELLER: Record<string, unknown>;
     SIMPLEFIN: Record<string, unknown>;
-    SALT_EDGE: Record<string, unknown>;
     HOME_VALUES?: {
       automaticSyncConcurrency: number;
       redfinFetchMethod: "node_fetch" | "curl" | "wget" | "disabled";
@@ -51,11 +50,6 @@ type MockRuntime = {
     enabled: boolean;
     mode: "sandbox" | "development" | "production";
     requiresSetupToken: boolean;
-  };
-  saltEdge: {
-    enabled: boolean;
-    environment: "sandbox" | "test" | "production";
-    includeSandboxes: boolean;
   };
   actual: {
     serverUrl: string;
@@ -182,7 +176,6 @@ function createRuntime(): MockRuntime {
       STRIPE: {},
       TELLER: {},
       SIMPLEFIN: {},
-      SALT_EDGE: {},
       HOME_VALUES: {
         automaticSyncConcurrency: 2,
         redfinFetchMethod: "node_fetch",
@@ -211,11 +204,6 @@ function createRuntime(): MockRuntime {
       enabled: false,
       mode: "sandbox",
       requiresSetupToken: true
-    },
-    saltEdge: {
-      enabled: false,
-      environment: "sandbox",
-      includeSandboxes: true
     },
     actual: {
       serverUrl: "http://localhost:5006",

@@ -9,7 +9,6 @@ import type {
   ProviderConnectResult,
   ProviderSettingsByProviderDto,
   RuntimeInfoDto,
-  SaltEdgeConnectSessionDto,
   SessionDto,
   SyncRunDto,
   TellerConnectConfigDto,
@@ -135,23 +134,6 @@ export const api = {
         body: JSON.stringify({ connectionId })
       }
     );
-  },
-  createSaltEdgeConnectSession(label?: string) {
-    return request<SaltEdgeConnectSessionDto>("/api/connections/saltedge/connect-session", {
-      method: "POST",
-      body: JSON.stringify(label ? { label } : {})
-    });
-  },
-  finalizeSaltEdgeConnection(payload: {
-    connectionId: string;
-    customerId?: string;
-    connectionSecret?: string;
-    label?: string;
-  }) {
-    return request<ProviderConnectResult>("/api/connections/saltedge/finalize", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
   },
   createHomeValueConnection(payload: UpsertHomeValueConnectionPayload) {
     return request<ProviderConnectResult>("/api/connections/home-values", {

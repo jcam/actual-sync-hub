@@ -37,11 +37,6 @@ export type RuntimeInfoDto = {
     mode: "sandbox" | "development" | "production";
     requiresSetupToken: boolean;
   };
-  saltEdge: {
-    enabled: boolean;
-    environment: "sandbox" | "test" | "production";
-    includeSandboxes: boolean;
-  };
   actual: {
     serverUrl: string;
     budgetSyncIdConfigured: boolean;

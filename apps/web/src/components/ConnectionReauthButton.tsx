@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ConnectionReauthSessionDto, Provider } from "@actual-sync/shared";
 import { usePlaidLink } from "react-plaid-link";
 import { api } from "../api";
 import { getDisplayErrorMessage } from "../lib/errors";
-import { closeSaltEdgeWindow, navigateSaltEdgeWindow, openSaltEdgeWindow } from "../lib/saltedge-window";
 import { loadStripeFinancialConnections } from "../lib/stripe-financial-connections";
 import { loadTellerConnect } from "../lib/teller-connect";
 
@@ -41,16 +40,11 @@ export function ConnectionReauthButton({
   onCompleted?: () => Promise<void>;
   label?: string;
 }) {
-  const saltEdgeWindowRef = useRef<Window | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [plaidSession, setPlaidSession] = useState<Extract<
     ConnectionReauthSessionDto,
     { mode: "plaid_update" }
-  > | null>(null);
-  const [saltEdgeSession, setSaltEdgeSession] = useState<Extract<
-    ConnectionReauthSessionDto,
-    { mode: "saltedge_connect" }
   > | null>(null);
 
   const plaid = usePlaidLink({
@@ -87,109 +81,6 @@ export function ConnectionReauthButton({
       plaid.open();
     }
   }, [plaid.ready, plaid, plaidSession]);
-
-  useEffect(() => {
-    if (!saltEdgeSession) {
-      return;
-    }
-
-    const listener = (event: MessageEvent) => {
-      if (!event.origin.includes("saltedge.com")) {
-        return;
-      }
-
-      let payload: {
-        data?: {
-          stage?: string;
-          connection_id?: string;
-          secret?: string;
-          error_class?: string;
-          error_message?: string;
-        };
-      };
-
-      if (typeof event.data === "string") {
-        try {
-          payload = JSON.parse(event.data) as typeof payload;
-        } catch {
-          return;
-        }
-      } else if (typeof event.data === "object" && event.data) {
-        payload = event.data as typeof payload;
-      } else {
-        return;
-      }
-
-      const stage = payload.data?.stage;
-      if (!stage || stage === "fetching") {
-        return;
-      }
-
-      if (stage === "error") {
-        closeSaltEdgeWindow(saltEdgeWindowRef.current);
-        saltEdgeWindowRef.current = null;
-        setError(payload.data?.error_message || payload.data?.error_class || "Salt Edge reauthentication failed.");
-        setSaltEdgeSession(null);
-        setBusy(false);
-        return;
-      }
-
-      if (stage !== "success" || !payload.data?.connection_id) {
-        return;
-      }
-
-      const completedConnectionId = payload.data.connection_id;
-
-      void (async () => {
-        try {
-          await api.finalizeSaltEdgeConnection({
-            connectionId: completedConnectionId,
-            connectionSecret: payload.data?.secret || undefined
-          });
-          await onCompleted?.();
-        } catch (refreshError) {
-          setError(getErrorMessage(refreshError));
-        } finally {
-          closeSaltEdgeWindow(saltEdgeWindowRef.current);
-          saltEdgeWindowRef.current = null;
-          setSaltEdgeSession(null);
-          setBusy(false);
-        }
-      })();
-    };
-
-    window.addEventListener("message", listener);
-    return () => window.removeEventListener("message", listener);
-  }, [onCompleted, saltEdgeSession]);
-
-  useEffect(() => {
-    if (!saltEdgeSession) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      if (!saltEdgeWindowRef.current) {
-        return;
-      }
-
-      if (!saltEdgeWindowRef.current.closed) {
-        return;
-      }
-
-      saltEdgeWindowRef.current = null;
-      setSaltEdgeSession(null);
-      setBusy(false);
-    }, 500);
-
-    return () => window.clearInterval(interval);
-  }, [saltEdgeSession]);
-
-  useEffect(() => {
-    return () => {
-      closeSaltEdgeWindow(saltEdgeWindowRef.current);
-      saltEdgeWindowRef.current = null;
-    };
-  }, []);
 
   if (provider === "SIMPLEFIN" || provider === "HOME_VALUES") {
     return null;
@@ -234,18 +125,6 @@ export function ConnectionReauthButton({
               return;
             }
 
-            if (session.mode === "saltedge_connect") {
-              const popup = openSaltEdgeWindow();
-              if (!popup) {
-                throw new Error("Salt Edge reconnect needs a popup or new tab. Allow popups and try again.");
-              }
-
-              saltEdgeWindowRef.current = popup;
-              setSaltEdgeSession(session);
-              navigateSaltEdgeWindow(popup, session.connectUrl);
-              return;
-            }
-
             if (session.mode === "stripe_relink") {
               const stripe = await loadStripeFinancialConnections(session.publishableKey);
               const result = await stripe.collectFinancialConnectionsAccounts({
@@ -281,24 +160,6 @@ export function ConnectionReauthButton({
       >
         {busy ? "Waiting on provider..." : label}
       </button>
-      {saltEdgeSession ? (
-        <>
-          <p className="muted">Salt Edge reauthentication is open in a separate window. Finish the provider flow there.</p>
-          <div className="button-row">
-            <button
-              className="ghost-button"
-              onClick={() => {
-                closeSaltEdgeWindow(saltEdgeWindowRef.current);
-                saltEdgeWindowRef.current = null;
-                setSaltEdgeSession(null);
-                setBusy(false);
-              }}
-            >
-              Close Salt Edge window
-            </button>
-          </div>
-        </>
-      ) : null}
       {error ? <p className="error-text">{error}</p> : null}
     </>
   );

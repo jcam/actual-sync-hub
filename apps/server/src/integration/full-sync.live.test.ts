@@ -8,7 +8,6 @@ import { createActualService } from "../services/actual-service.js";
 import { createHomeValuesService } from "../services/home-values-service.js";
 import { createPlaidService } from "../services/plaid-service.js";
 import { createProviderSettingsService } from "../services/provider-settings-service.js";
-import { saltEdgeService } from "../services/saltedge-service.js";
 import { simplefinService } from "../services/simplefin-service.js";
 import { createTellerService } from "../services/teller-service.js";
 import { seedActualSandboxBudget } from "../dev/actual-fixture.js";
@@ -127,7 +126,6 @@ describe.skipIf(!liveEnabled)("full live sync integration", () => {
         homeValuesService,
         plaidService,
         providerSettingsService,
-        saltEdgeService,
         simplefinService,
         tellerService,
         appService,
