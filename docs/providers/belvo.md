@@ -2,13 +2,11 @@
 
 ## Current repo stance
 
-This repo's Belvo integration currently uses the official Belvo Node SDK on the server and a manual link-import flow in the UI.
+This repo's Belvo integration currently uses:
 
-That means:
-
-- create or manage the Belvo link through Belvo first
-- paste the resulting `link.id` into the Belvo Connections page
-- let `actual-sync-hub` use the SDK to refresh accounts and retrieve transactions
+- the official Belvo Node SDK on the server for link detail, account refresh, transaction retrieval, and link deletion
+- Belvo's current web widget flow in the app for new-link creation
+- Belvo's widget update mode for reconnecting links that require new credentials or MFA
 
 ## Current Belvo versions checked for this repo
 
@@ -30,6 +28,8 @@ Official docs:
 - [Retrieve accounts for a link](https://developers.belvo.com/apis/belvoopenapispec/accounts/retrieveaccounts)
 - [Retrieve transactions for a link](https://developers.belvo.com/apis/belvoopenapispec/transactions/retrievetransactions)
 - [Widget access token](https://developers.belvo.com/apis/belvoopenapispec/widget-access-token)
+- [Connect widget for web](https://developers.belvo.com/developer_resources/web-widget-for-web)
+- [Connect widget update mode](https://developers.belvo.com/developer_resources/web-connect-widget-update-mode)
 - [belvo-js GitHub repo](https://github.com/belvo-finance/belvo-js)
 - [belvo npm package](https://www.npmjs.com/package/belvo)
 
@@ -108,7 +108,7 @@ Optional:
 
 What it does:
 
-1. imports the existing sandbox `link.id` through the Belvo adapter
+1. hydrates an existing sandbox `link.id` through the Belvo adapter
 2. refreshes the imported connection
 3. creates an Actual account link against one Belvo account
 4. runs `syncAccountLink`
@@ -121,14 +121,15 @@ Notes:
 ## Current app flow
 
 1. Save Belvo credentials in the app settings.
-2. Create or identify a Belvo `link.id`.
-3. Open the Belvo Connections page in this app.
-4. Import that `link.id`.
-5. Map Belvo accounts to Actual accounts from the Accounts page.
+2. Open the Belvo Connections page in this app.
+3. Launch Belvo Connect from inside Sync Hub.
+4. After the widget succeeds, let the server save the returned `link.id`.
+5. Refresh the connection if Belvo is still asynchronously loading account data.
+6. Map Belvo accounts to Actual accounts from the Accounts page.
 
 ## What is not implemented yet
 
-- an in-app Belvo Hosted Widget flow
-- OTP or MFA resume flows for Belvo `428 Token Required` sessions
+- Belvo webhooks for automatically hydrating newly available asynchronous resources after widget success
+- direct OTP resume for Belvo's POST retrieve-session flow outside widget update mode
 
-If a Belvo link needs a challenge or repair, the current app surfaces that as a manual reconnect path.
+Belvo's current docs note that widget-created links can load account and transaction resources asynchronously, so a freshly connected link may need a later refresh before accounts appear in Sync Hub.

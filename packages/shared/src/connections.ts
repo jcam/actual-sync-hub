@@ -33,6 +33,10 @@ export type MonoReauthConfigDto = {
   environment: "sandbox" | "production";
 };
 
+export type BelvoWidgetSessionDto = {
+  accessToken: string;
+};
+
 export type ConnectionReauthSessionDto =
   | {
       provider: "PLAID";
@@ -53,6 +57,12 @@ export type ConnectionReauthSessionDto =
       config: MonoReauthConfigDto;
     }
   | {
+      provider: "BELVO";
+      connectionId: string;
+      mode: "belvo_widget";
+      session: BelvoWidgetSessionDto;
+    }
+  | {
       provider: "STRIPE";
       connectionId: string;
       mode: "stripe_relink";
@@ -61,7 +71,7 @@ export type ConnectionReauthSessionDto =
       publishableKey: string;
     }
   | {
-      provider: "SIMPLEFIN" | "STRIPE" | "BELVO";
+      provider: "SIMPLEFIN" | "STRIPE";
       connectionId: string;
       mode: "manual";
       message: string;

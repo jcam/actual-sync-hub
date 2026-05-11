@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ConnectionDto, ProviderSettingsByProviderDto, RuntimeInfoDto } from "@actual-sync/shared";
 import { api } from "../api";
+import { BelvoLinkPanel } from "../components/BelvoLinkPanel";
 import { ConnectionReauthButton } from "../components/ConnectionReauthButton";
 import { ProviderReadinessPanel } from "../components/ProviderReadinessPanel";
 import { ProviderSettingsPanel } from "../components/ProviderSettingsPanel";
@@ -26,11 +27,7 @@ export function BelvoConnectionsPage() {
   const [connections, setConnections] = useState<ConnectionDto[]>([]);
   const [runtime, setRuntime] = useState<RuntimeInfoDto | null>(null);
   const [loading, setLoading] = useState(true);
-  const [linkId, setLinkId] = useState("");
-  const [label, setLabel] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const [workingConnectionId, setWorkingConnectionId] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
@@ -64,8 +61,8 @@ export function BelvoConnectionsPage() {
     enabled: false,
     ready: false,
     environment: "sandbox",
-    issues: ["Enter a Belvo secret ID and secret password to enable Belvo link imports."],
-    notes: ["Import an existing Belvo link ID after it has already been created through Belvo."]
+    issues: ["Enter a Belvo secret ID and secret password to enable Belvo Connect."],
+    notes: ["Launch Belvo Connect from this page, then refresh or reconnect links in-app as needed."]
   };
 
   return (
@@ -77,76 +74,19 @@ export function BelvoConnectionsPage() {
         settings={runtime?.settings.BELVO ?? defaultBelvoSettings}
         onSaved={load}
       />
-
-      <section className="panel">
-        <p className="eyebrow">Import Belvo link</p>
-        <div className="status-copy">
-          <p className="muted">
-            Paste an existing Belvo <code>link.id</code> to import its accounts into Actual Sync Hub. This page uses
-            the server-side Belvo SDK for account refreshes and transaction syncs.
-          </p>
-        </div>
-        <div className="grid account-settings-grid">
-          <label>
-            <span>Belvo link ID</span>
-            <input
-              type="text"
-              value={linkId}
-              onChange={event => setLinkId(event.target.value)}
-              placeholder="c81a1dea-6dd6-4999-8b9f-541ee8197058"
-            />
-          </label>
-          <label>
-            <span>Label (optional)</span>
-            <input
-              type="text"
-              value={label}
-              onChange={event => setLabel(event.target.value)}
-              placeholder="Primary Belvo banking link"
-            />
-          </label>
-        </div>
-        <div className="button-row">
-          <button
-            className="primary-button"
-            disabled={submitting || !linkId.trim() || !runtime?.belvo?.enabled}
-            onClick={async () => {
-              setSubmitting(true);
-              setMessage(null);
-              setError(null);
-
-              try {
-                await api.connectBelvoLink(linkId.trim(), label.trim() || undefined);
-                setLinkId("");
-                setLabel("");
-                setMessage("Belvo link imported.");
-                await load();
-              } catch (submitError) {
-                setError(
-                  getDisplayErrorMessage(submitError, "Failed to import the Belvo link.", {
-                    serverUnavailableMessage: "Could not reach the API server while importing the Belvo link."
-                  })
-                );
-              } finally {
-                setSubmitting(false);
-              }
-            }}
-          >
-            {submitting ? "Importing..." : "Import Belvo link"}
-          </button>
-          <button className="ghost-button" disabled={submitting} onClick={() => void load()}>
-            Refresh page data
-          </button>
-        </div>
-        {message ? <p className="success-text">{message}</p> : null}
-        {error ? <p className="error-text">{error}</p> : null}
-      </section>
+      <BelvoLinkPanel enabled={Boolean(runtime?.belvo?.enabled)} onConnected={load} />
 
       <section className="panel">
         <p className="eyebrow">Belvo provider accounts</p>
+        {runtime ? (
+          <p className="muted">
+            {runtime.instanceLabel} · Belvo {runtime.belvo?.environment ?? "sandbox"}
+          </p>
+        ) : null}
         {loading ? <p>Loading Belvo connections…</p> : null}
+        {!loading && error ? <p className="error-text">{error}</p> : null}
         {!loading && belvoConnections.length === 0 ? (
-          <p className="muted">No Belvo links have been imported yet.</p>
+          <p className="muted">No Belvo connections have been added.</p>
         ) : null}
         <div className="connection-grid">
           {belvoConnections.map(connection => (
@@ -178,7 +118,6 @@ export function BelvoConnectionsPage() {
                   disabled={workingConnectionId === connection.id}
                   onClick={async () => {
                     setWorkingConnectionId(connection.id);
-                    setMessage(null);
                     setError(null);
                     try {
                       await api.refreshConnection(connection.id);
@@ -202,11 +141,9 @@ export function BelvoConnectionsPage() {
                   disabled={workingConnectionId === connection.id}
                   onClick={async () => {
                     setWorkingConnectionId(connection.id);
-                    setMessage(null);
                     setError(null);
                     try {
                       await api.disconnectConnection(connection.id);
-                      setMessage("Belvo link disconnected.");
                       await load();
                     } catch (disconnectError) {
                       setError(

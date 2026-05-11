@@ -1,6 +1,7 @@
 import type {
   ActualAccountsResponseDto,
   ActualBankSyncLinkDto,
+  BelvoWidgetSessionDto,
   CommitMigrationPayload,
   ConnectionReauthSessionDto,
   ConnectionDto,
@@ -127,8 +128,13 @@ export const api = {
       })
     });
   },
-  connectBelvoLink(linkId: string, label?: string) {
-    return request<ProviderConnectResult>("/api/connections/belvo/connect", {
+  createBelvoConnectSession() {
+    return request<BelvoWidgetSessionDto>("/api/connections/belvo/session", {
+      method: "POST"
+    });
+  },
+  finalizeBelvoConnection(linkId: string, label?: string) {
+    return request<ProviderConnectResult>("/api/connections/belvo/finalize", {
       method: "POST",
       body: JSON.stringify({
         linkId,

@@ -713,7 +713,10 @@ describe("server auth and connection routes", () => {
     expect(importExistingSimpleFinLinks).toHaveBeenCalledWith("connection-simplefin-1");
   });
 
-  it("connects a Belvo link for the authenticated user", async () => {
+  it("creates and finalizes a Belvo link for the authenticated user", async () => {
+    const createConnectSession = vi.fn().mockResolvedValue({
+      accessToken: "belvo-widget-token"
+    });
     const connectLink = vi.fn().mockResolvedValue({
       connectionId: "connection-belvo-1"
     });
@@ -731,15 +734,28 @@ describe("server auth and connection routes", () => {
             })
           },
           belvoService: {
+            createConnectSession,
             connectLink
           }
         })
       })
     );
 
+    const sessionResponse = await app.inject({
+      method: "POST",
+      url: "/api/connections/belvo/session",
+      cookies: await loginAsAdmin(app)
+    });
+
+    expect(sessionResponse.statusCode).toBe(200);
+    expect(sessionResponse.json()).toEqual({
+      accessToken: "belvo-widget-token"
+    });
+    expect(createConnectSession).toHaveBeenCalledOnce();
+
     const response = await app.inject({
       method: "POST",
-      url: "/api/connections/belvo/connect",
+      url: "/api/connections/belvo/finalize",
       payload: {
         linkId: "belvo-link-123",
         label: "Primary Belvo"
@@ -791,6 +807,7 @@ describe("server auth and connection routes", () => {
   });
 
   it("rejects uncovered protected routes without a session", async () => {
+    const createConnectSession = vi.fn();
     const connectLink = vi.fn();
     const importExistingSimpleFinLinks = vi.fn();
     const createHomeValueConnection = vi.fn();
@@ -805,6 +822,7 @@ describe("server auth and connection routes", () => {
         enableStatic: false,
         context: makeContext({
           belvoService: {
+            createConnectSession,
             connectLink
           },
           plaidService: {
@@ -823,7 +841,11 @@ describe("server auth and connection routes", () => {
     const responses = await Promise.all([
       app.inject({
         method: "POST",
-        url: "/api/connections/belvo/connect",
+        url: "/api/connections/belvo/session"
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/connections/belvo/finalize",
         payload: {
           linkId: "belvo-link-unauth"
         }
@@ -865,6 +887,7 @@ describe("server auth and connection routes", () => {
       expect(response.json()).toEqual({ error: "Unauthorized" });
     }
 
+    expect(createConnectSession).not.toHaveBeenCalled();
     expect(connectLink).not.toHaveBeenCalled();
     expect(importExistingSimpleFinLinks).not.toHaveBeenCalled();
     expect(createHomeValueConnection).not.toHaveBeenCalled();

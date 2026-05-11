@@ -7,6 +7,7 @@ const belvoMocks = vi.hoisted(() => ({
   linksDelete: vi.fn(),
   accountsRetrieve: vi.fn(),
   transactionsRetrieve: vi.fn(),
+  fetch: vi.fn(),
   constructorCalls: [] as Array<{
     secretId: string;
     secretPassword: string;
@@ -95,34 +96,78 @@ function createPrismaMock() {
 describe("createBelvoService", () => {
   beforeEach(() => {
     vi.useRealTimers();
+    vi.stubGlobal("fetch", belvoMocks.fetch);
     belvoMocks.connect.mockReset();
     belvoMocks.linksDetail.mockReset();
     belvoMocks.linksDelete.mockReset();
     belvoMocks.accountsRetrieve.mockReset();
     belvoMocks.transactionsRetrieve.mockReset();
+    belvoMocks.fetch.mockReset();
     belvoMocks.constructorCalls.length = 0;
   });
 
-  it("reports manual reauth sessions and advertises Belvo as manually configured", async () => {
+  it("creates Belvo widget sessions for both connect and reauth flows", async () => {
+    const prisma = createPrismaMock();
+    prisma.connection.findUniqueOrThrow.mockResolvedValue({
+      id: "conn_belvo_widget",
+      provider: "BELVO",
+      providerItemId: "belvo-link-existing"
+    });
+    belvoMocks.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          access: "belvo-connect-token"
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          access: "belvo-reauth-token"
+        })
+      });
+
     const service = createBelvoService({
-      prisma: createPrismaMock() as never,
+      prisma: prisma as never,
       providerSettings: createProviderSettingsMock() as never
     });
 
     expect(service.provider).toBe("BELVO");
     expect(service.isConfigured()).toBe(false);
+    await expect(service.createConnectSession()).resolves.toEqual({
+      accessToken: "belvo-connect-token"
+    });
     await expect(service.createReauthSession!({
-      connectionId: "conn_belvo_manual",
-      userId: "user_belvo_manual"
+      connectionId: "conn_belvo_widget",
+      userId: "user_belvo_widget"
     })).resolves.toEqual({
       provider: "BELVO",
-      connectionId: "conn_belvo_manual",
-      mode: "manual",
-      message: "Belvo reconnection currently requires re-linking or completing the provider challenge outside this app."
+      connectionId: "conn_belvo_widget",
+      mode: "belvo_widget",
+      session: {
+        accessToken: "belvo-reauth-token"
+      }
+    });
+    expect(belvoMocks.fetch).toHaveBeenNthCalledWith(1, "https://sandbox.belvo.com/api/token/", expect.objectContaining({
+      method: "POST"
+    }));
+    expect(JSON.parse(belvoMocks.fetch.mock.calls[0]![1]!.body as string)).toEqual({
+      id: "secret-id",
+      password: "secret-password",
+      scopes: "read_institutions,write_links",
+      credentials_storage: "store",
+      stale_in: "365d",
+      fetch_resources: ["ACCOUNTS", "TRANSACTIONS", "OWNERS"]
+    });
+    expect(JSON.parse(belvoMocks.fetch.mock.calls[1]![1]!.body as string)).toEqual({
+      id: "secret-id",
+      password: "secret-password",
+      link_id: "belvo-link-existing",
+      scopes: "read_institutions,write_links,read_links"
     });
   });
 
-  it("imports an existing Belvo link and stores its accounts", async () => {
+  it("finalizes a Belvo widget link and stores its accounts", async () => {
     const prisma = createPrismaMock();
     const providerSettings = createProviderSettingsMock();
     prisma.connection.upsert.mockResolvedValue({
@@ -319,10 +364,46 @@ describe("createBelvoService", () => {
       }) as never
     });
 
+    await expect(service.createConnectSession()).rejects.toThrow("Belvo is not configured");
     await expect(service.connectLink({
       linkId: "link-missing-creds"
     })).rejects.toThrow("Belvo is not configured");
     expect(belvoMocks.constructorCalls).toEqual([]);
+  });
+
+  it("returns a warning when Belvo connects the link before account data finishes loading", async () => {
+    const prisma = createPrismaMock();
+    prisma.connection.upsert.mockResolvedValue({
+      id: "conn_belvo_pending_1"
+    });
+    belvoMocks.linksDetail.mockResolvedValue({
+      id: "link-pending-1",
+      institution: "erebor-bank",
+      external_id: "Pending Belvo Link",
+      status: "valid",
+      access_mode: "recurrent"
+    });
+    belvoMocks.accountsRetrieve.mockRejectedValue({
+      statusCode: 202,
+      detail: [
+        {
+          message: "Historical data is still in progress"
+        }
+      ]
+    });
+
+    const service = createBelvoService({
+      prisma: prisma as never,
+      providerSettings: createProviderSettingsMock() as never
+    });
+
+    await expect(service.connectLink({
+      linkId: "link-pending-1"
+    })).resolves.toEqual({
+      connectionId: "conn_belvo_pending_1",
+      warning: "Belvo connected the link, but account data is still loading. Refresh the connection in a moment."
+    });
+    expect(prisma.connectionAccount.createMany).not.toHaveBeenCalled();
   });
 
   it("maps Belvo transaction direction into signed Actual amounts", async () => {
@@ -544,7 +625,7 @@ describe("createBelvoService", () => {
     }));
   });
 
-  it("classifies Belvo token-required challenges as manual reconnect errors", async () => {
+  it("classifies Belvo token-required challenges as interactive reauth errors", async () => {
     const prisma = createPrismaMock();
     const providerSettings = createProviderSettingsMock();
     prisma.connection.findUniqueOrThrow.mockResolvedValue({
@@ -573,7 +654,7 @@ describe("createBelvoService", () => {
     });
 
     await expect(service.refreshConnection("conn_belvo_1")).rejects.toMatchObject({
-      healthAction: "MANUAL_RECONNECT",
+      healthAction: "REAUTH_BANK",
       healthScope: "BANK_AUTH",
       healthState: "REAUTH_REQUIRED"
     });

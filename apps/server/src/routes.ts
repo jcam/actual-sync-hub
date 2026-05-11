@@ -96,7 +96,7 @@ const simplefinConnectBodySchema = z.object({
   label: z.string().min(1).optional()
 });
 
-const belvoConnectBodySchema = z.object({
+const belvoFinalizeBodySchema = z.object({
   linkId: z.string().min(1),
   label: z.string().min(1).optional()
 });
@@ -477,12 +477,20 @@ export async function registerRoutes(
     return await context.simplefinService.connectSetupToken(stripUndefined(body));
   });
 
-  app.post("/api/connections/belvo/connect", async (request, reply) => {
+  app.post("/api/connections/belvo/session", async (request, reply) => {
     if (!assertAuthenticated(request, reply)) {
       return;
     }
 
-    const body = parseRequestBody(belvoConnectBodySchema, request);
+    return await context.belvoService.createConnectSession();
+  });
+
+  app.post("/api/connections/belvo/finalize", async (request, reply) => {
+    if (!assertAuthenticated(request, reply)) {
+      return;
+    }
+
+    const body = parseRequestBody(belvoFinalizeBodySchema, request);
 
     return await context.belvoService.connectLink(stripUndefined(body));
   });

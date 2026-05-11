@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { ConnectionReauthSessionDto, Provider } from "@actual-sync/shared";
 import { usePlaidLink } from "react-plaid-link";
 import { api } from "../api";
+import { openBelvoWidget } from "../lib/belvo-widget";
 import { getDisplayErrorMessage } from "../lib/errors";
 import { loadMonoConnect } from "../lib/mono-connect";
 import { loadStripeFinancialConnections } from "../lib/stripe-financial-connections";
@@ -159,6 +160,27 @@ export function ConnectionReauthButton({
               });
               mono.reauthorise(session.config.accountId);
               mono.open();
+              return;
+            }
+
+            if (session.mode === "belvo_widget") {
+              await openBelvoWidget(session.session, {
+                callback: () => {
+                  void (async () => {
+                    try {
+                      await api.refreshConnection(connectionId);
+                      await onCompleted?.();
+                    } catch (refreshError) {
+                      setError(getErrorMessage(refreshError));
+                    } finally {
+                      setBusy(false);
+                    }
+                  })();
+                },
+                onExit: () => {
+                  setBusy(false);
+                }
+              });
               return;
             }
 

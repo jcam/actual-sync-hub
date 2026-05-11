@@ -3,7 +3,7 @@ import BelvoClient, {
   type BelvoLink,
   type BelvoTransaction
 } from "belvo";
-import type { ConnectionReauthSessionDto, ProviderConnectResult } from "@actual-sync/shared";
+import type { BelvoWidgetSessionDto, ConnectionReauthSessionDto, ProviderConnectResult } from "@actual-sync/shared";
 import { getActiveBelvoEnvironmentSettings } from "@actual-sync/shared";
 import { prisma } from "../db.js";
 import { encryptString } from "../lib/crypto.js";
@@ -45,8 +45,14 @@ type BelvoRequestError = {
 };
 
 export type BelvoService = {
+  createConnectSession(): Promise<BelvoWidgetSessionDto>;
   connectLink(payload: BelvoConnectPayload): Promise<ProviderConnectResult>;
 } & ProviderAdapter;
+
+type BelvoWidgetAccessTokenResponse = {
+  access?: string;
+  access_token?: string;
+};
 
 function toIsoDate(value: Date) {
   return value.toISOString().slice(0, 10);
@@ -99,6 +105,18 @@ async function connectBelvoClient(config: BelvoConfig) {
   const client = getBelvoClient(config);
   await client.connect();
   return client;
+}
+
+function getBelvoCredentials(config: BelvoConfig) {
+  const activeConfig = getActiveBelvoEnvironmentSettings(config);
+  if (!activeConfig.secretId.trim() || !activeConfig.secretPassword) {
+    throw new Error("Belvo is not configured");
+  }
+
+  return {
+    secretId: activeConfig.secretId.trim(),
+    secretPassword: activeConfig.secretPassword
+  };
 }
 
 function getErrorStatus(error: unknown) {
@@ -180,7 +198,7 @@ function classifyBelvoError(error: unknown) {
       code: "TOKEN_REQUIRED",
       healthState: "REAUTH_REQUIRED",
       healthScope: "BANK_AUTH",
-      healthAction: "MANUAL_RECONNECT"
+      healthAction: "REAUTH_BANK"
     });
   }
 
@@ -189,7 +207,7 @@ function classifyBelvoError(error: unknown) {
       code: "LINK_NOT_FOUND",
       healthState: "REAUTH_REQUIRED",
       healthScope: "CONNECTION_AUTH",
-      healthAction: "MANUAL_RECONNECT"
+      healthAction: "REAUTH_BANK"
     });
   }
 
@@ -311,12 +329,29 @@ async function upsertBelvoConnection({
   config: BelvoConfig;
   payload: BelvoConnectPayload;
 }) {
-  const [link, accounts] = await Promise.all([
-    client.links.detail(payload.linkId),
-    client.accounts.retrieve(payload.linkId, {
+  const link = await client.links.detail(payload.linkId);
+  let accounts: BelvoAccount[] = [];
+  let warning: string | undefined;
+
+  try {
+    accounts = await client.accounts.retrieve(payload.linkId, {
       saveData: false
-    })
-  ]);
+    });
+  } catch (error) {
+    const status = getErrorStatus(error);
+    const normalizedMessage = getErrorMessage(error).toLowerCase();
+    const dataStillLoading =
+      status === 202 ||
+      normalizedMessage.includes("in progress") ||
+      normalizedMessage.includes("not ready") ||
+      normalizedMessage.includes("processing");
+
+    if (!dataStillLoading) {
+      throw error;
+    }
+
+    warning = "Belvo connected the link, but account data is still loading. Refresh the connection in a moment.";
+  }
 
   const institutionName = getAccountInstitutionName(link, accounts);
   const label = buildConnectionLabel({
@@ -384,7 +419,66 @@ async function upsertBelvoConnection({
     });
   }
 
-  return connection.id;
+  return stripUndefined({
+    connectionId: connection.id,
+    warning
+  }) satisfies ProviderConnectResult;
+}
+
+async function createBelvoWidgetSession(
+  config: BelvoConfig,
+  {
+    linkId
+  }: {
+    linkId?: string;
+  } = {}
+): Promise<BelvoWidgetSessionDto> {
+  const { secretId, secretPassword } = getBelvoCredentials(config);
+  const response = await fetch(`${getBelvoBaseUrl(config.environment)}/api/token/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json"
+    },
+    body: JSON.stringify(
+      linkId
+        ? {
+            id: secretId,
+            password: secretPassword,
+            link_id: linkId,
+            scopes: "read_institutions,write_links,read_links"
+          }
+        : {
+            id: secretId,
+            password: secretPassword,
+            scopes: "read_institutions,write_links",
+            credentials_storage: "store",
+            stale_in: "365d",
+            fetch_resources: ["ACCOUNTS", "TRANSACTIONS", "OWNERS"]
+          }
+    )
+  });
+  const payload = (await response.json().catch(() => ({}))) as BelvoWidgetAccessTokenResponse & {
+    detail?: unknown;
+    message?: string;
+  };
+
+  if (!response.ok) {
+    throw classifyBelvoError({
+      statusCode: response.status,
+      detail: payload.detail,
+      message: payload.message
+    });
+  }
+
+  const accessToken = payload.access || payload.access_token;
+  if (!accessToken) {
+    throw new Error("Belvo did not return a widget access token");
+  }
+
+  return {
+    accessToken
+  };
 }
 
 export function createBelvoService({
@@ -427,31 +521,45 @@ export function createBelvoService({
     isConfigured() {
       return false;
     },
+    async createConnectSession() {
+      const effectiveConfig = await getEffectiveConfig();
+      return createBelvoWidgetSession(effectiveConfig);
+    },
     async createReauthSession({
       connectionId
     }: {
       connectionId: string;
       userId: string;
     }): Promise<ConnectionReauthSessionDto> {
+      const effectiveConfig = await getEffectiveConfig();
+      const connection = await database.connection.findUniqueOrThrow({
+        where: {
+          id: connectionId
+        }
+      });
+
+      if (connection.provider !== "BELVO" || !connection.providerItemId) {
+        throw new Error("Connection is not a Belvo link");
+      }
+
       return {
         provider: "BELVO",
         connectionId,
-        mode: "manual",
-        message: "Belvo reconnection currently requires re-linking or completing the provider challenge outside this app."
+        mode: "belvo_widget",
+        session: await createBelvoWidgetSession(effectiveConfig, {
+          linkId: connection.providerItemId
+        })
       };
     },
     async connectLink(payload: BelvoConnectPayload) {
       const effectiveConfig = await getEffectiveConfig();
       const client = await connectBelvoClient(effectiveConfig);
-      const connectionId = await upsertBelvoConnection({
+      return await upsertBelvoConnection({
         database,
         client,
         config: effectiveConfig,
         payload
       });
-      return {
-        connectionId
-      };
     },
     async disconnectConnection(connectionId: string) {
       const effectiveConfig = await getEffectiveConfig();

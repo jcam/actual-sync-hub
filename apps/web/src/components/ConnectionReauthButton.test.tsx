@@ -32,6 +32,10 @@ const tellerMocks = vi.hoisted(() => ({
   loadTellerConnect: vi.fn()
 }));
 
+const belvoMocks = vi.hoisted(() => ({
+  openBelvoWidget: vi.fn()
+}));
+
 const stripeMocks = vi.hoisted(() => ({
   loadStripeFinancialConnections: vi.fn()
 }));
@@ -46,6 +50,10 @@ vi.mock("react-plaid-link", () => ({
 
 vi.mock("../lib/teller-connect", () => ({
   loadTellerConnect: tellerMocks.loadTellerConnect
+}));
+
+vi.mock("../lib/belvo-widget", () => ({
+  openBelvoWidget: belvoMocks.openBelvoWidget
 }));
 
 vi.mock("../lib/stripe-financial-connections", () => ({
@@ -152,6 +160,47 @@ describe("ConnectionReauthButton", () => {
     await user.click(screen.getByRole("button", { name: /reconnect/i }));
 
     await waitFor(() => {
+      expect(apiMocks.refreshConnection).toHaveBeenCalledWith("conn-1");
+      expect(onCompleted).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("launches Belvo widget reauth and refreshes on success", async () => {
+    apiMocks.createConnectionReauthSession.mockResolvedValue({
+      provider: "BELVO",
+      connectionId: "conn-1",
+      mode: "belvo_widget",
+      session: {
+        accessToken: "belvo-access-token"
+      }
+    });
+    apiMocks.refreshConnection.mockResolvedValue({ ok: true });
+    const onCompleted = vi.fn().mockResolvedValue(undefined);
+
+    belvoMocks.openBelvoWidget.mockImplementation(async (_session, config) => {
+      await config.callback("link-1", "Erebor");
+    });
+
+    render(
+      <ConnectionReauthButton
+        connectionId="conn-1"
+        provider="BELVO"
+        onCompleted={onCompleted}
+      />
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /reconnect/i }));
+
+    await waitFor(() => {
+      expect(belvoMocks.openBelvoWidget).toHaveBeenCalledWith(
+        {
+          accessToken: "belvo-access-token"
+        },
+        expect.objectContaining({
+          callback: expect.any(Function)
+        })
+      );
       expect(apiMocks.refreshConnection).toHaveBeenCalledWith("conn-1");
       expect(onCompleted).toHaveBeenCalledOnce();
     });

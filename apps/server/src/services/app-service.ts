@@ -515,9 +515,9 @@ export function createAppService({
         enabled: belvoEnabled,
         ready: belvoEnabled,
         environment: belvoSettings.environment,
-        issues: belvoEnabled ? [] : ["Enter a Belvo secret ID and secret password to enable Belvo link imports."],
+        issues: belvoEnabled ? [] : ["Enter a Belvo secret ID and secret password to enable Belvo Connect."],
         notes: [
-          "Belvo currently uses a manual import flow: connect the existing Belvo link ID, then sync accounts and transactions through the server-side SDK."
+          "Belvo uses the current Connect widget for new links and widget-based update mode for reauthentication, while account refreshes and syncs run through the server-side SDK."
         ]
       },
       {
@@ -2351,15 +2351,6 @@ export function createAppService({
         };
       }
 
-      if (connection.provider === "BELVO") {
-        return {
-          provider: "BELVO",
-          connectionId,
-          mode: "manual",
-          message: "Belvo reconnection currently requires re-linking or completing the provider challenge from the Belvo Connections page."
-        };
-      }
-
       throw new Error("Reauthentication is not supported for this provider");
     },
 
@@ -2402,9 +2393,10 @@ export function createAppService({
       const healthAction =
         connection.provider === "SIMPLEFIN" ||
         connection.provider === "STRIPE" ||
-        connection.provider === "MONO" ||
-        connection.provider === "BELVO"
+        connection.provider === "MONO"
           ? "MANUAL_RECONNECT"
+          : connection.provider === "BELVO"
+            ? "REAUTH_BANK"
           : "REAUTH_CONNECTION";
       const providerLabel =
         connection.provider === "TELLER"

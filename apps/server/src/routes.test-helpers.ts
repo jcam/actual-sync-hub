@@ -397,6 +397,7 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
     belvoService: {
       provider: "BELVO" as const,
       isConfigured: vi.fn().mockReturnValue(false),
+      createConnectSession: vi.fn(),
       connectLink: vi.fn(),
       createReauthSession: vi.fn(),
       disconnectConnection: vi.fn(),
