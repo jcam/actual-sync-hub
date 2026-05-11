@@ -85,12 +85,17 @@ const homeValuesSettingsSchema = z.object({
   truliaFetchMethod: z.enum(["node_fetch", "curl", "wget", "disabled"]).default("wget")
 });
 
+const vehicleValuesSettingsSchema = z.object({
+  automaticSyncConcurrency: z.coerce.number().int().min(1).max(20)
+});
+
 export const providerSchemas = {
   PLAID: plaidSettingsSchema,
   STRIPE: stripeSettingsSchema,
   TELLER: tellerSettingsSchema,
   SIMPLEFIN: simpleFinSettingsSchema,
-  HOME_VALUES: homeValuesSettingsSchema
+  HOME_VALUES: homeValuesSettingsSchema,
+  VEHICLE_VALUES: vehicleValuesSettingsSchema
 } as const;
 
 function defaultProviderSettings(): ProviderSettingsDto {
@@ -168,6 +173,9 @@ function defaultProviderSettings(): ProviderSettingsDto {
       movotoFetchMethod: "curl",
       homesFetchMethod: "wget",
       truliaFetchMethod: "wget"
+    },
+    VEHICLE_VALUES: {
+      automaticSyncConcurrency: 1
     }
   };
 }
@@ -225,7 +233,9 @@ export function createProviderSettingsService({
         STRIPE: reconcileStripeEnvironment(parseProviderSettings("STRIPE", byProvider.get("STRIPE")) ?? defaults.STRIPE),
         TELLER: parseProviderSettings("TELLER", byProvider.get("TELLER")) ?? defaults.TELLER,
         SIMPLEFIN: parseProviderSettings("SIMPLEFIN", byProvider.get("SIMPLEFIN")) ?? defaults.SIMPLEFIN,
-        HOME_VALUES: parseProviderSettings("HOME_VALUES", byProvider.get("HOME_VALUES")) ?? defaults.HOME_VALUES
+        HOME_VALUES: parseProviderSettings("HOME_VALUES", byProvider.get("HOME_VALUES")) ?? defaults.HOME_VALUES,
+        VEHICLE_VALUES:
+          parseProviderSettings("VEHICLE_VALUES", byProvider.get("VEHICLE_VALUES")) ?? defaults.VEHICLE_VALUES
       });
     },
 

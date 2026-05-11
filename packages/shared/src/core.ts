@@ -1,4 +1,4 @@
-export type Provider = "PLAID" | "STRIPE" | "TELLER" | "SIMPLEFIN" | "HOME_VALUES";
+export type Provider = "PLAID" | "STRIPE" | "TELLER" | "SIMPLEFIN" | "HOME_VALUES" | "VEHICLE_VALUES";
 export type ActualBankSyncSource = "simpleFin" | "goCardless" | "pluggyai" | "external";
 export type ActualBankSyncStatus =
   | "ok"

@@ -82,7 +82,7 @@ export function ConnectionReauthButton({
     }
   }, [plaid.ready, plaid, plaidSession]);
 
-  if (provider === "SIMPLEFIN" || provider === "HOME_VALUES") {
+  if (provider === "SIMPLEFIN" || provider === "HOME_VALUES" || provider === "VEHICLE_VALUES") {
     return null;
   }
 

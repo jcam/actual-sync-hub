@@ -28,7 +28,7 @@ const connectionIdParamsSchema = z.object({
 });
 
 const providerParamsSchema = z.object({
-  provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "HOME_VALUES"])
+  provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "HOME_VALUES", "VEHICLE_VALUES"])
 });
 
 const homeValueConnectionBodySchema = z.object({
@@ -43,6 +43,23 @@ const homeValueConnectionBodySchema = z.object({
   homesUrl: z.string().min(1).nullable().optional(),
   truliaEstimate: z.number().positive().nullable().optional(),
   truliaUrl: z.string().min(1).nullable().optional()
+});
+
+const vehicleValueConnectionBodySchema = z.object({
+  label: z.string().min(1).nullable().optional(),
+  vin: z.string().min(1).nullable().optional(),
+  year: z.number().int().min(1886).nullable().optional(),
+  make: z.string().min(1),
+  model: z.string().min(1),
+  trim: z.string().min(1).nullable().optional(),
+  mileage: z.number().min(0),
+  zipCode: z.string().min(1),
+  condition: z.enum(["EXCELLENT", "GOOD", "FAIR", "POOR"]),
+  source: z.enum(["KBB", "EDMUNDS", "CARMAX", "HAGERTY", "AVERAGE"]),
+  kbbValue: z.number().min(0).nullable().optional(),
+  edmundsValue: z.number().min(0).nullable().optional(),
+  carmaxValue: z.number().min(0).nullable().optional(),
+  hagertyValue: z.number().min(0).nullable().optional()
 });
 
 const loginBodySchema = z.object({
@@ -96,7 +113,7 @@ const accountLinkBodySchema = z.object({
   assetType: z.enum(["BANK", "LOAN", "INVESTMENT", "PROPERTY", "OTHER_ASSET", "OTHER_LIABILITY"]),
   writeMode: z.enum(["TRANSACTIONS", "SNAPSHOT_DELTA", "TRANSACTIONS_AND_SNAPSHOT_DELTA"]).optional(),
   snapshotHistory: z.boolean().optional(),
-  provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "HOME_VALUES"]).nullable().optional(),
+  provider: z.enum(["PLAID", "STRIPE", "TELLER", "SIMPLEFIN", "HOME_VALUES", "VEHICLE_VALUES"]).nullable().optional(),
   connectionId: z.string().nullable().optional(),
   connectionAccountId: z.string().nullable().optional(),
   syncFrequency: z.enum(["MANUAL", "HOURLY", "DAILY", "WEEKLY"]),
@@ -439,6 +456,25 @@ export async function registerRoutes(
     const params = parseRequestParams(connectionIdParamsSchema, request);
     const body = parseRequestBody(homeValueConnectionBodySchema, request, { fallbackToEmptyObject: true });
     return context.appService.updateHomeValueConnection(params.id, stripUndefined(body));
+  });
+
+  app.post("/api/connections/vehicle-values", async (request, reply) => {
+    if (!assertAuthenticated(request, reply)) {
+      return;
+    }
+
+    const body = parseRequestBody(vehicleValueConnectionBodySchema, request, { fallbackToEmptyObject: true });
+    return context.appService.createVehicleValueConnection(stripUndefined(body));
+  });
+
+  app.put("/api/connections/:id/vehicle-values", async (request, reply) => {
+    if (!assertAuthenticated(request, reply)) {
+      return;
+    }
+
+    const params = parseRequestParams(connectionIdParamsSchema, request);
+    const body = parseRequestBody(vehicleValueConnectionBodySchema, request, { fallbackToEmptyObject: true });
+    return context.appService.updateVehicleValueConnection(params.id, stripUndefined(body));
   });
 
   app.get("/api/connections/teller/connect-config", async (request, reply) => {

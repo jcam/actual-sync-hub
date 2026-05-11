@@ -13,6 +13,7 @@ import type {
   RuntimeInfoDto,
   SyncRunDto,
   UpsertHomeValueConnectionPayload,
+  UpsertVehicleValueConnectionPayload,
   UpdateAccountLinkPayload,
   WriteMode
 } from "@actual-sync/shared";
@@ -66,6 +67,8 @@ import type { ProviderAdapter, ProviderSyncOutcome, ProviderSyncResult, Provider
 import { clearSyncHealth, isBlockingSyncHealth, isRateLimitedSyncError, toSyncHealth } from "./sync-health.js";
 import { homeValuesService } from "./home-values-service.js";
 import type { HomeValuesService } from "./home-values-service.js";
+import { vehicleValuesService } from "./vehicle-values-service.js";
+import type { VehicleValuesService } from "./vehicle-values-service.js";
 import type Stripe from "stripe";
 
 type DatabaseClient = typeof prisma;
@@ -208,6 +211,14 @@ function groupLinksByActualAccountId<T extends { actualAccountId: string }>(link
   return linksByActualId;
 }
 
+function isValuationProvider(provider: Provider | null | undefined): provider is "HOME_VALUES" | "VEHICLE_VALUES" {
+  return provider === "HOME_VALUES" || provider === "VEHICLE_VALUES";
+}
+
+function getValuationAssetType(provider: "HOME_VALUES" | "VEHICLE_VALUES") {
+  return provider === "HOME_VALUES" ? "PROPERTY" : "OTHER_ASSET";
+}
+
 export type AppService = {
   getRuntimeInfo(): Promise<RuntimeInfoDto>;
   listConnections(): Promise<ConnectionDto[]>;
@@ -222,6 +233,8 @@ export type AppService = {
   createConnectionReauthSession(connectionId: string, userId: string): Promise<ConnectionReauthSessionDto>;
   createHomeValueConnection(payload: UpsertHomeValueConnectionPayload): Promise<{ connectionId: string }>;
   updateHomeValueConnection(connectionId: string, payload: UpsertHomeValueConnectionPayload): Promise<{ connectionId: string }>;
+  createVehicleValueConnection(payload: UpsertVehicleValueConnectionPayload): Promise<{ connectionId: string }>;
+  updateVehicleValueConnection(connectionId: string, payload: UpsertVehicleValueConnectionPayload): Promise<{ connectionId: string }>;
   disconnectConnection(connectionId: string): Promise<void>;
   refreshConnection(connectionId: string): Promise<void>;
   refreshAllConnections(): Promise<void>;
@@ -243,6 +256,7 @@ export function createAppService({
   prisma: database = prisma,
   actualService: actual = actualService,
   homeValuesService: homeValues = homeValuesService,
+  vehicleValuesService: vehicleValues = vehicleValuesService,
   plaidService: plaid = plaidService,
   providerSettingsService: settings = createProviderSettingsService({ prisma: database }),
   simplefinService: simplefin = simplefinService,
@@ -261,6 +275,7 @@ export function createAppService({
   prisma?: DatabaseClient;
   actualService?: ActualService;
   homeValuesService?: HomeValuesService;
+  vehicleValuesService?: VehicleValuesService;
   plaidService?: PlaidService;
   providerSettingsService?: ProviderSettingsService;
   simplefinService?: SimpleFinService;
@@ -281,7 +296,8 @@ export function createAppService({
     PLAID: plaid,
     SIMPLEFIN: simplefin,
     STRIPE: stripe,
-    TELLER: teller
+    TELLER: teller,
+    VEHICLE_VALUES: vehicleValues
   } satisfies Record<Provider, ProviderAdapter>;
   const providerBackgroundSyncGates = new Map<Provider, ProviderBackgroundSyncGate>();
   const activePlaidWebhookSyncs = new Map<string, { pending: boolean }>();
@@ -371,7 +387,7 @@ export function createAppService({
   const isProviderConfigured = async (provider: Provider) => {
     const providerSettings = await getEffectiveProviderSettings();
 
-    if (provider === "HOME_VALUES") {
+    if (isValuationProvider(provider)) {
       return true;
     }
 
@@ -429,6 +445,17 @@ export function createAppService({
         issues: [],
         notes: [
           "Use property URLs from Redfin, Movoto, Homes.com, or Trulia to keep an off-budget asset account current with weekly spaced refreshes."
+        ]
+      },
+      {
+        provider: "VEHICLE_VALUES",
+        label: "Vehicle Values",
+        enabled: true,
+        ready: true,
+        environment: null,
+        issues: [],
+        notes: [
+          "Store manual valuation snapshots for vehicles and sync them into Actual as off-budget other-asset balances."
         ]
       },
       {
@@ -539,7 +566,8 @@ export function createAppService({
       PLAID: providerSettings.PLAID.automaticSyncConcurrency,
       STRIPE: providerSettings.STRIPE.automaticSyncConcurrency,
       TELLER: providerSettings.TELLER.automaticSyncConcurrency,
-      SIMPLEFIN: providerSettings.SIMPLEFIN.automaticSyncConcurrency
+      SIMPLEFIN: providerSettings.SIMPLEFIN.automaticSyncConcurrency,
+      VEHICLE_VALUES: providerSettings.VEHICLE_VALUES?.automaticSyncConcurrency ?? 1
     };
     const limit = dynamicAutomaticSyncConcurrency[provider];
     const existingGate = providerBackgroundSyncGates.get(provider);
@@ -626,10 +654,12 @@ export function createAppService({
     });
   };
 
-  const getNextHomeValueWeeklySlot = async (excludeLinkId?: string | null) => {
+  const getNextValuationWeeklySlot = async (excludeLinkId?: string | null) => {
     const weeklyLinks = await database.accountLink.findMany({
       where: {
-        provider: "HOME_VALUES",
+        provider: {
+          in: ["HOME_VALUES", "VEHICLE_VALUES"]
+        },
         syncFrequency: "WEEKLY",
         isEnabled: true,
         status: {
@@ -688,7 +718,7 @@ export function createAppService({
       syncDayOfWeek: number | null;
     } | null
   ): Promise<UpdateAccountLinkPayload> => {
-    if (payload.provider !== "HOME_VALUES") {
+    if (!isValuationProvider(payload.provider)) {
       return payload;
     }
 
@@ -702,7 +732,7 @@ export function createAppService({
     }
 
     if (
-      currentLink?.provider === "HOME_VALUES" &&
+      isValuationProvider(currentLink?.provider) &&
       currentLink.syncFrequency === "WEEKLY" &&
       typeof currentLink.syncHour === "number" &&
       typeof currentLink.syncDayOfWeek === "number"
@@ -715,7 +745,7 @@ export function createAppService({
       };
     }
 
-    const slot = await getNextHomeValueWeeklySlot(currentLink?.id ?? null);
+    const slot = await getNextValuationWeeklySlot(currentLink?.id ?? null);
     return {
       ...payload,
       syncFrequency: "WEEKLY",
@@ -738,13 +768,13 @@ export function createAppService({
     } | null
   ): Promise<UpdateAccountLinkPayload & { writeMode: WriteMode; snapshotHistory: boolean }> => {
     const scheduledPayload = await normalizeHomeValueLinkSchedule(payload, currentLink);
-    const homeValuesSelected = scheduledPayload.provider === "HOME_VALUES";
+    const valuationProvider = isValuationProvider(scheduledPayload.provider) ? scheduledPayload.provider : null;
 
     return {
       ...scheduledPayload,
-      assetType: homeValuesSelected ? "PROPERTY" : scheduledPayload.assetType,
+      assetType: valuationProvider ? getValuationAssetType(valuationProvider) : scheduledPayload.assetType,
       writeMode:
-        homeValuesSelected
+        valuationProvider
           ? "SNAPSHOT_DELTA"
           : scheduledPayload.writeMode ?? currentLink?.writeMode ?? "TRANSACTIONS",
       snapshotHistory: scheduledPayload.snapshotHistory ?? currentLink?.snapshotHistory ?? true
@@ -1920,6 +1950,12 @@ export function createAppService({
             metadata.homeValues
               ? (metadata.homeValues as Exclude<ConnectionDto["homeValues"], undefined>)
               : null,
+          vehicleValues:
+            connection.provider === "VEHICLE_VALUES" &&
+            typeof metadata.vehicleValues === "object" &&
+            metadata.vehicleValues
+              ? (metadata.vehicleValues as Exclude<ConnectionDto["vehicleValues"], undefined>)
+              : null,
           accounts: connection.accounts.map(account => {
             const simplefinRaw =
               connection.provider === "SIMPLEFIN" ? parseSimpleFinAccountRawJson(account.rawJson) : null;
@@ -1953,6 +1989,14 @@ export function createAppService({
 
     async updateHomeValueConnection(connectionId, payload) {
       return homeValues.updateConnection(connectionId, payload);
+    },
+
+    async createVehicleValueConnection(payload) {
+      return vehicleValues.createConnection(payload);
+    },
+
+    async updateVehicleValueConnection(connectionId, payload) {
+      return vehicleValues.updateConnection(connectionId, payload);
     },
 
     async listActualAccounts(): Promise<ActualAccountsResponseDto> {
@@ -2203,7 +2247,7 @@ export function createAppService({
         }
       });
 
-      if (connection.provider === "HOME_VALUES") {
+      if (isValuationProvider(connection.provider)) {
         await database.$transaction(async tx => {
           await tx.accountLink.deleteMany({
             where: {

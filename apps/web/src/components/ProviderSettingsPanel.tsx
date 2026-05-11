@@ -73,12 +73,17 @@ type HomeValuesSettingsDraft = {
   truliaFetchMethod: "node_fetch" | "curl" | "wget" | "disabled";
 };
 
+type VehicleValuesSettingsDraft = {
+  automaticSyncConcurrency: string;
+};
+
 type ProviderSettingsDraft =
   | PlaidSettingsDraft
   | StripeSettingsDraft
   | TellerSettingsDraft
   | SimpleFinSettingsDraft
-  | HomeValuesSettingsDraft;
+  | HomeValuesSettingsDraft
+  | VehicleValuesSettingsDraft;
 
 function parseWholeNumber(value: string) {
   if (!/^-?\d+$/.test(value.trim())) {
@@ -198,6 +203,10 @@ function validateDraft(provider: Provider, draft: ProviderSettingsDraft) {
       const homeValuesDraft = draft as HomeValuesSettingsDraft;
       return requireIntegerInRange("Automatic sync concurrency", homeValuesDraft.automaticSyncConcurrency, 1, 20);
     }
+    case "VEHICLE_VALUES": {
+      const vehicleValuesDraft = draft as VehicleValuesSettingsDraft;
+      return requireIntegerInRange("Automatic sync concurrency", vehicleValuesDraft.automaticSyncConcurrency, 1, 20);
+    }
   }
 }
 
@@ -278,6 +287,12 @@ function toDraft<T extends Provider>(
         homesFetchMethod: homeValuesSettings.homesFetchMethod,
         truliaFetchMethod: homeValuesSettings.truliaFetchMethod
       } satisfies HomeValuesSettingsDraft;
+    }
+    case "VEHICLE_VALUES": {
+      const vehicleValuesSettings = settings as ProviderSettingsByProviderDto<"VEHICLE_VALUES">;
+      return {
+        automaticSyncConcurrency: String(vehicleValuesSettings.automaticSyncConcurrency)
+      } satisfies VehicleValuesSettingsDraft;
     }
   }
 }
@@ -390,6 +405,12 @@ function toPayload<T extends Provider>(
         truliaFetchMethod: homeValuesDraft.truliaFetchMethod
       } as ProviderSettingsByProviderDto<T>;
     }
+    case "VEHICLE_VALUES": {
+      const vehicleValuesDraft = draft as VehicleValuesSettingsDraft;
+      return {
+        automaticSyncConcurrency: Number(vehicleValuesDraft.automaticSyncConcurrency)
+      } as ProviderSettingsByProviderDto<T>;
+    }
   }
 }
 
@@ -442,6 +463,7 @@ export function ProviderSettingsPanel<T extends Provider>({
   const tellerDraft = provider === "TELLER" ? (draft as TellerSettingsDraft) : null;
   const simpleFinDraft = provider === "SIMPLEFIN" ? (draft as SimpleFinSettingsDraft) : null;
   const homeValuesDraft = provider === "HOME_VALUES" ? (draft as HomeValuesSettingsDraft) : null;
+  const vehicleValuesDraft = provider === "VEHICLE_VALUES" ? (draft as VehicleValuesSettingsDraft) : null;
 
   return (
     <section className="panel provider-settings-panel">
@@ -1121,6 +1143,25 @@ export function ProviderSettingsPanel<T extends Provider>({
               />
             </label>
           </>
+        ) : null}
+
+        {vehicleValuesDraft ? (
+          <label>
+            <span>Automatic sync concurrency</span>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={vehicleValuesDraft.automaticSyncConcurrency}
+              onChange={event => {
+                const next = event.target.value;
+                setDraft(current => ({
+                  ...(current as VehicleValuesSettingsDraft),
+                  automaticSyncConcurrency: next
+                }));
+              }}
+            />
+          </label>
         ) : null}
       </div>
 

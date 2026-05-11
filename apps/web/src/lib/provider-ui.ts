@@ -16,6 +16,8 @@ export function getProviderConnectionsPath(provider: Provider | null | undefined
       return "/simplefin-connections";
     case "HOME_VALUES":
       return "/home-values-connections";
+    case "VEHICLE_VALUES":
+      return "/vehicle-values-connections";
     default:
       return "/accounts";
   }
@@ -37,6 +39,8 @@ export function getProviderConnectionsLabel(provider: Provider | null | undefine
       return "SimpleFIN Connections";
     case "HOME_VALUES":
       return "Home Values";
+    case "VEHICLE_VALUES":
+      return "Vehicle Values";
     default:
       return "Connections";
   }
@@ -118,7 +122,7 @@ export function getSyncHealthActionLabel(health: SyncHealthDto) {
 }
 
 export function supportsInlineReauth(health: SyncHealthDto, provider: Provider | null | undefined) {
-  if (!provider || provider === "SIMPLEFIN" || provider === "HOME_VALUES") {
+  if (!provider || provider === "SIMPLEFIN" || provider === "HOME_VALUES" || provider === "VEHICLE_VALUES") {
     return false;
   }
 

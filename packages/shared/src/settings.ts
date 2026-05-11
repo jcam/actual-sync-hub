@@ -2,6 +2,10 @@ import type { Provider } from "./core.js";
 
 export type HomeValuesFetchMethod = "node_fetch" | "curl" | "wget" | "disabled";
 
+export type VehicleValuesProviderSettingsDto = {
+  automaticSyncConcurrency: number;
+};
+
 export type PlaidProviderSettingsDto = {
   environment: "sandbox" | "production";
   sandbox: {
@@ -98,17 +102,20 @@ export type ProviderSettingsDto = {
   TELLER: TellerProviderSettingsDto;
   SIMPLEFIN: SimpleFinProviderSettingsDto;
   HOME_VALUES?: HomeValuesProviderSettingsDto;
+  VEHICLE_VALUES?: VehicleValuesProviderSettingsDto;
 };
 
 export type ProviderSettingsByProviderDto<T extends Provider = Provider> = T extends "PLAID"
   ? PlaidProviderSettingsDto
   : T extends "STRIPE"
     ? StripeProviderSettingsDto
-  : T extends "TELLER"
-    ? TellerProviderSettingsDto
+    : T extends "TELLER"
+      ? TellerProviderSettingsDto
     : T extends "SIMPLEFIN"
       ? SimpleFinProviderSettingsDto
-      : HomeValuesProviderSettingsDto;
+      : T extends "HOME_VALUES"
+        ? HomeValuesProviderSettingsDto
+        : VehicleValuesProviderSettingsDto;
 
 export function getActivePlaidEnvironmentSettings(settings: PlaidProviderSettingsDto) {
   return settings[settings.environment];

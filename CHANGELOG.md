@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+- A first-pass Vehicle Values provider with dedicated connections/settings UI, manual Kelley Blue Book/Edmunds/CarMax/Hagerty valuation entry, and snapshot-delta sync into Actual as off-budget `OTHER_ASSET` accounts.
+
+### Changed
+- Generalized the valuation-provider account-link behavior so snapshot-only providers can force weekly/manual valuation scheduling and provider-specific default asset types instead of hard-coding that logic only for Home Values.
+
 ## [0.27.0] - 2026-05-11
 
 ### Changed

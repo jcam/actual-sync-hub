@@ -12,6 +12,7 @@ import { HomeValuesConnectionsPage } from "./routes/HomeValuesConnectionsPage";
 import { SimpleFinConnectionsPage } from "./routes/SimpleFinConnectionsPage";
 import { StripeConnectionsPage } from "./routes/StripeConnectionsPage";
 import { TellerConnectionsPage } from "./routes/TellerConnectionsPage";
+import { VehicleValuesConnectionsPage } from "./routes/VehicleValuesConnectionsPage";
 
 function Layout({
   session,
@@ -49,6 +50,12 @@ function Layout({
           <NavLink to="/home-values-connections" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             Home Values
           </NavLink>
+          <NavLink
+            to="/vehicle-values-connections"
+            className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+          >
+            Vehicle Values
+          </NavLink>
         </nav>
         <div className="session-card">
           <div>
@@ -71,6 +78,7 @@ function Layout({
           <Route path="/teller-connections" element={<TellerConnectionsPage />} />
           <Route path="/simplefin-connections" element={<SimpleFinConnectionsPage />} />
           <Route path="/home-values-connections" element={<HomeValuesConnectionsPage />} />
+          <Route path="/vehicle-values-connections" element={<VehicleValuesConnectionsPage />} />
           <Route path="*" element={<Navigate to="/accounts" replace />} />
         </Routes>
       </main>

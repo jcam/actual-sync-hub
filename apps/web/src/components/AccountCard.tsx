@@ -13,6 +13,10 @@ import { getDisplayErrorMessage } from "../lib/errors";
 import { getAutomaticSyncPauseSummary } from "../lib/provider-ui";
 import { SyncHealthPanel } from "./SyncHealthPanel";
 
+function isValuationProvider(provider: UpdateAccountLinkPayload["provider"]): provider is "HOME_VALUES" | "VEHICLE_VALUES" {
+  return provider === "HOME_VALUES" || provider === "VEHICLE_VALUES";
+}
+
 const scheduleOptions: SyncFrequency[] = ["MANUAL", "HOURLY", "DAILY", "WEEKLY"];
 const assetTypeOptions: Array<{ value: AssetType; label: string }> = [
   { value: "BANK", label: "Bank" },
@@ -70,18 +74,19 @@ export function AccountCard({
   const selectedConnection = options.find(option => option.connectionId === form.connectionId);
   const activeConnectionOption = options.find(option => option.connectionId === account.link.connectionId);
   const selectedProvider = form.connectionId ? selectedConnection?.provider ?? form.provider ?? null : null;
-  const homeValuesScheduled = selectedProvider === "HOME_VALUES";
+  const valuationProvider = isValuationProvider(selectedProvider) ? selectedProvider : null;
   const importTransactionsEnabled = account.actualExternalSyncPrefs?.importTransactions ?? true;
   const writeModeOverriddenByActual = !importTransactionsEnabled;
-  const displayedAssetType = homeValuesScheduled ? "PROPERTY" : form.assetType;
-  const effectiveWriteMode = homeValuesScheduled || writeModeOverriddenByActual ? "SNAPSHOT_DELTA" : form.writeMode;
-  const writeModeSelectorDisabled = homeValuesScheduled || writeModeOverriddenByActual;
-  const assetTypeSelectorDisabled = homeValuesScheduled;
+  const displayedAssetType =
+    valuationProvider === "HOME_VALUES" ? "PROPERTY" : valuationProvider === "VEHICLE_VALUES" ? "OTHER_ASSET" : form.assetType;
+  const effectiveWriteMode = valuationProvider || writeModeOverriddenByActual ? "SNAPSHOT_DELTA" : form.writeMode;
+  const writeModeSelectorDisabled = Boolean(valuationProvider) || writeModeOverriddenByActual;
+  const assetTypeSelectorDisabled = Boolean(valuationProvider);
   const snapshotHistoryDisabled = effectiveWriteMode === "TRANSACTIONS";
-  const availableScheduleOptions = homeValuesScheduled ? (["MANUAL", "WEEKLY"] as const) : scheduleOptions;
+  const availableScheduleOptions = valuationProvider ? (["MANUAL", "WEEKLY"] as const) : scheduleOptions;
   const automaticSyncPauseSummary =
     form.isEnabled && form.syncFrequency !== "MANUAL" ? getAutomaticSyncPauseSummary(account.link) : null;
-  const categoryMappingRelevant = (form.provider ?? account.link.provider) !== "HOME_VALUES";
+  const categoryMappingRelevant = !isValuationProvider(form.provider ?? account.link.provider);
   const blockingConnectionState =
     activeConnectionOption?.connectionStatus !== "ACTIVE" ||
     activeConnectionOption?.connectionHealth?.state === "REAUTH_REQUIRED" ||
@@ -99,15 +104,20 @@ export function AccountCard({
     !blockingConnectionState;
   const buildPayload = (): UpdateAccountLinkPayload => ({
     actualAccountName: account.link.actualAccountName,
-    assetType: homeValuesScheduled ? "PROPERTY" : form.assetType,
-    writeMode: homeValuesScheduled ? "SNAPSHOT_DELTA" : form.writeMode,
+    assetType:
+      valuationProvider === "HOME_VALUES"
+        ? "PROPERTY"
+        : valuationProvider === "VEHICLE_VALUES"
+          ? "OTHER_ASSET"
+          : form.assetType,
+    writeMode: valuationProvider ? "SNAPSHOT_DELTA" : form.writeMode,
     snapshotHistory: form.snapshotHistory,
     provider: selectedProvider,
     connectionId: form.connectionId ?? null,
     connectionAccountId: form.connectionAccountId ?? null,
-    syncFrequency: homeValuesScheduled && form.syncFrequency !== "MANUAL" ? "WEEKLY" : form.syncFrequency,
-    syncHour: homeValuesScheduled ? null : form.syncHour ?? null,
-    syncDayOfWeek: homeValuesScheduled ? null : form.syncDayOfWeek ?? null,
+    syncFrequency: valuationProvider && form.syncFrequency !== "MANUAL" ? "WEEKLY" : form.syncFrequency,
+    syncHour: valuationProvider ? null : form.syncHour ?? null,
+    syncDayOfWeek: valuationProvider ? null : form.syncDayOfWeek ?? null,
     isEnabled: form.isEnabled,
     categoryMappings: account.link.categoryMappings
   });
@@ -124,13 +134,13 @@ export function AccountCard({
       return "Select a provider account for the chosen connection.";
     }
 
-    if (!homeValuesScheduled && (form.syncFrequency === "DAILY" || form.syncFrequency === "WEEKLY")) {
+    if (!valuationProvider && (form.syncFrequency === "DAILY" || form.syncFrequency === "WEEKLY")) {
       if (!Number.isInteger(form.syncHour) || form.syncHour == null || form.syncHour < 0 || form.syncHour > 23) {
         return "Hour must be between 0 and 23.";
       }
     }
 
-    if (!homeValuesScheduled && form.syncFrequency === "WEEKLY") {
+    if (!valuationProvider && form.syncFrequency === "WEEKLY") {
       if (
         !Number.isInteger(form.syncDayOfWeek) ||
         form.syncDayOfWeek == null ||
@@ -268,7 +278,7 @@ export function AccountCard({
           </select>
         </label>
 
-        {!homeValuesScheduled && (form.syncFrequency === "DAILY" || form.syncFrequency === "WEEKLY") ? (
+        {!valuationProvider && (form.syncFrequency === "DAILY" || form.syncFrequency === "WEEKLY") ? (
           <label>
             <span>Hour</span>
             <input
@@ -281,7 +291,7 @@ export function AccountCard({
           </label>
         ) : null}
 
-        {!homeValuesScheduled && form.syncFrequency === "WEEKLY" ? (
+        {!valuationProvider && form.syncFrequency === "WEEKLY" ? (
           <label>
             <span>Day of week</span>
             <select
@@ -299,10 +309,10 @@ export function AccountCard({
           </label>
         ) : null}
 
-        {homeValuesScheduled && form.syncFrequency === "WEEKLY" ? (
+        {valuationProvider && form.syncFrequency === "WEEKLY" ? (
           <div>
             <span>Schedule slot</span>
-            <p className="muted">Weekly updates are assigned automatically to spread property fetches out.</p>
+            <p className="muted">Weekly updates are assigned automatically to spread valuation refreshes out.</p>
           </div>
         ) : null}
 

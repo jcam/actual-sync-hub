@@ -1455,7 +1455,7 @@ describe("server auth and connection routes", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({
-      error: "Provider must be one of PLAID, STRIPE, TELLER, SIMPLEFIN, HOME_VALUES."
+      error: "Provider must be one of PLAID, STRIPE, TELLER, SIMPLEFIN, HOME_VALUES, VEHICLE_VALUES."
     });
     expect(get).not.toHaveBeenCalled();
   });

@@ -111,6 +111,9 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
             movotoFetchMethod: "curl",
             homesFetchMethod: "wget",
             truliaFetchMethod: "wget"
+          },
+          VEHICLE_VALUES: {
+            automaticSyncConcurrency: 1
           }
         },
         plaid: {
@@ -147,6 +150,8 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
       createConnectionReauthSession: vi.fn(),
       createHomeValueConnection: vi.fn(),
       updateHomeValueConnection: vi.fn(),
+      createVehicleValueConnection: vi.fn(),
+      updateVehicleValueConnection: vi.fn(),
       disconnectConnection: vi.fn(),
       refreshConnection: vi.fn(),
       refreshAllConnections: vi.fn(),
@@ -239,6 +244,9 @@ export function makeContext(overrides: Record<string, unknown> = {}) {
           movotoFetchMethod: "curl",
           homesFetchMethod: "wget",
           truliaFetchMethod: "wget"
+        },
+        VEHICLE_VALUES: {
+          automaticSyncConcurrency: 1
         }
       }),
       get: vi.fn(),

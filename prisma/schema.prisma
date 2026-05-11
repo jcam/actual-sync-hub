@@ -13,6 +13,7 @@ enum Provider {
   TELLER
   SIMPLEFIN
   HOME_VALUES
+  VEHICLE_VALUES
 }
 
 enum ConnectionStatus {

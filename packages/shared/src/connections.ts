@@ -2,6 +2,8 @@ import type { ConnectionStatus, Provider } from "./core.js";
 import type { SyncHealthDto } from "./health.js";
 
 export type HomeValueSource = "REDFIN" | "MOVOTO" | "HOMES_COM" | "TRULIA" | "AVERAGE";
+export type VehicleValueSource = "KBB" | "EDMUNDS" | "CARMAX" | "HAGERTY" | "AVERAGE";
+export type VehicleCondition = "EXCELLENT" | "GOOD" | "FAIR" | "POOR";
 
 export type HomeValueEstimateStateDto = {
   url?: string | null;
@@ -89,6 +91,30 @@ export type HomeValueConnectionDetailsDto = {
   lastCalculatedAt?: string | null;
 };
 
+export type VehicleValueConnectionDetailsDto = {
+  vin?: string | null;
+  year?: number | null;
+  make: string;
+  model: string;
+  trim?: string | null;
+  mileage: number;
+  zipCode: string;
+  condition: VehicleCondition;
+  source: VehicleValueSource;
+  kbbValue?: number | null;
+  edmundsValue?: number | null;
+  carmaxValue?: number | null;
+  hagertyValue?: number | null;
+  sources?: {
+    kbb?: HomeValueEstimateStateDto | null;
+    edmunds?: HomeValueEstimateStateDto | null;
+    carmax?: HomeValueEstimateStateDto | null;
+    hagerty?: HomeValueEstimateStateDto | null;
+  } | null;
+  calculatedValue?: number | null;
+  lastCalculatedAt?: string | null;
+};
+
 export type ConnectionDto = {
   id: string;
   provider: Provider;
@@ -101,6 +127,7 @@ export type ConnectionDto = {
   lastRefreshedAt?: string | null;
   health?: SyncHealthDto | null;
   homeValues?: HomeValueConnectionDetailsDto | null;
+  vehicleValues?: VehicleValueConnectionDetailsDto | null;
   accounts: ConnectionAccountDto[];
 }
 
@@ -121,4 +148,21 @@ export type UpsertHomeValueConnectionPayload = {
   homesUrl?: string | null;
   truliaEstimate?: number | null;
   truliaUrl?: string | null;
+};
+
+export type UpsertVehicleValueConnectionPayload = {
+  label?: string | null;
+  vin?: string | null;
+  year?: number | null;
+  make: string;
+  model: string;
+  trim?: string | null;
+  mileage: number;
+  zipCode: string;
+  condition: VehicleCondition;
+  source: VehicleValueSource;
+  kbbValue?: number | null;
+  edmundsValue?: number | null;
+  carmaxValue?: number | null;
+  hagertyValue?: number | null;
 };

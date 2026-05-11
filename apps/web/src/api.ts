@@ -13,6 +13,7 @@ import type {
   SyncRunDto,
   TellerConnectConfigDto,
   UpsertHomeValueConnectionPayload,
+  UpsertVehicleValueConnectionPayload,
   UpdateAccountLinkPayload
 } from "@actual-sync/shared";
 import { ApiError } from "./lib/errors";
@@ -143,6 +144,18 @@ export const api = {
   },
   updateHomeValueConnection(id: string, payload: UpsertHomeValueConnectionPayload) {
     return request<ProviderConnectResult>(`/api/connections/${id}/home-values`, {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    });
+  },
+  createVehicleValueConnection(payload: UpsertVehicleValueConnectionPayload) {
+    return request<ProviderConnectResult>("/api/connections/vehicle-values", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  },
+  updateVehicleValueConnection(id: string, payload: UpsertVehicleValueConnectionPayload) {
+    return request<ProviderConnectResult>(`/api/connections/${id}/vehicle-values`, {
       method: "PUT",
       body: JSON.stringify(payload)
     });

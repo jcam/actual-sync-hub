@@ -18,6 +18,8 @@ import { stripeService } from './services/stripe-service.js';
 import type { StripeService } from './services/stripe-service.js';
 import { tellerService } from './services/teller-service.js';
 import type { TellerService } from './services/teller-service.js';
+import { createVehicleValuesService } from './services/vehicle-values-service.js';
+import type { VehicleValuesService } from './services/vehicle-values-service.js';
 
 export type SchedulerSignal = {
   requestWakeup(delayMs?: number): void;
@@ -29,6 +31,7 @@ export type AppContext = {
   authService: AuthService;
   appService: AppService;
   homeValuesService: HomeValuesService;
+  vehicleValuesService?: VehicleValuesService;
   plaidService: PlaidService;
   providerSettingsService: ProviderSettingsService;
   simplefinService: SimpleFinService;
@@ -42,6 +45,7 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
   const database = overrides.prisma ?? prisma;
   const settings = overrides.providerSettingsService ?? createProviderSettingsService({ prisma: database });
   const homeValues = overrides.homeValuesService ?? createHomeValuesService({ prisma: database, providerSettings: settings });
+  const vehicleValues = overrides.vehicleValuesService ?? createVehicleValuesService({ prisma: database });
   const plaid = overrides.plaidService ?? plaidService;
   const simplefin = overrides.simplefinService ?? simplefinService;
   const stripe = overrides.stripeService ?? stripeService;
@@ -51,6 +55,7 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
     prisma: database,
     actualService: overrides.actualService ?? actualService,
     homeValuesService: homeValues,
+    vehicleValuesService: vehicleValues,
     plaidService: plaid,
     providerSettingsService: settings,
     simplefinService: simplefin,
@@ -66,6 +71,7 @@ export function createAppContext(overrides: Partial<AppContext> = {}): AppContex
         prisma: database,
         actualService: overrides.actualService ?? actualService,
         homeValuesService: homeValues,
+        vehicleValuesService: vehicleValues,
         plaidService: plaid,
         providerSettingsService: settings,
         simplefinService: simplefin,

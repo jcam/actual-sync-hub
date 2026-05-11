@@ -186,6 +186,64 @@ describe.sequential("app service", () => {
     });
   });
 
+  it("forces Vehicle Values links onto other-asset snapshot sync", async () => {
+    const { prisma, cleanup } = await createTestDatabase();
+    cleanups.push(cleanup);
+
+    const connection = await prisma.connection.create({
+      data: {
+        provider: "VEHICLE_VALUES",
+        label: "Vehicles",
+        providerItemId: "vehicle-values-1",
+        accessTokenCiphertext: "cipher"
+      }
+    });
+
+    const account = await prisma.connectionAccount.create({
+      data: {
+        connectionId: connection.id,
+        externalAccountId: "vehicle-1",
+        name: "SUV",
+        type: "vehicle"
+      }
+    });
+
+    const service = createAppService({
+      prisma,
+      actualService: {
+        listAccounts: vi.fn(),
+        listCategories: vi.fn().mockResolvedValue([]),
+        listTransactionsByDateRange: vi.fn().mockResolvedValue([]),
+        importTransactions: vi.fn(),
+        reconcileTransactions: vi.fn()
+      } as never
+    });
+
+    await service.upsertAccountLink("actual-vehicle-1", {
+      actualAccountName: "SUV",
+      assetType: "BANK",
+      writeMode: "TRANSACTIONS",
+      provider: "VEHICLE_VALUES",
+      connectionId: connection.id,
+      connectionAccountId: account.id,
+      syncFrequency: "DAILY",
+      isEnabled: true,
+      categoryMappings: []
+    });
+
+    const link = await prisma.accountLink.findFirstOrThrow({
+      where: {
+        actualAccountId: "actual-vehicle-1"
+      }
+    });
+
+    expect(link).toMatchObject({
+      assetType: "OTHER_ASSET",
+      writeMode: "SNAPSHOT_DELTA",
+      syncFrequency: "WEEKLY"
+    });
+  });
+
   it("surfaces existing Actual bank-sync links alongside current local link state", async () => {
     const { prisma, cleanup } = await createTestDatabase();
     cleanups.push(cleanup);
